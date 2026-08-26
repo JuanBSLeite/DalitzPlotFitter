@@ -88,6 +88,8 @@ c_antiparticle = coefficient.value(Flavor.ANTIPARTICLE)
 
 The core package does not depend on the TensorFlow-based `phasespace` package. Instead, `ThreeBodyPhaseSpace` generates weighted points directly in Dalitz coordinates using JAX and reconstructs a deterministic mother-rest-frame four-momentum configuration in the `(E, px, py, pz)` convention expected by AmpForm/TensorWaves.
 
+The raw reconstruction is followed by a fixed global spatial rotation. This leaves every invariant mass and relative decay angle unchanged, but avoids placing a two-body subsystem exactly on a coordinate axis. That prevents artificial helicity-coordinate singularities in AmpForm for perfectly valid Dalitz points. This convention is physically harmless for the current unpolarized scalar-mother use case.
+
 ```python
 import jax
 from dalitzplotfitter import ThreeBodyPhaseSpace
@@ -107,9 +109,25 @@ phase_space = ThreeBodyPhaseSpace.from_reaction(reaction)
 
 The same phase-space sample should be reused throughout a fit, making Monte Carlo normalization deterministic.
 
-## D+ -> pi+ pi+ pi- reference model
+## D+ -> pi- pi+ pi+ reference model
 
-The first integration benchmark is the symmetrized `D+ -> pi+ pi+ pi-` amplitude. QRules keeps indistinguishable quantum-state transitions and AmpForm restores the kinematically distinct `pi+ pi-` pairings inside the amplitude. `KinematicTransformer` registers the corresponding topology permutations so all required invariant masses and helicity angles are generated automatically.
+The reference benchmark uses the explicit final-state ordering
+
+```text
+1 = pi-
+2 = pi+_1
+3 = pi+_2
+```
+
+so that
+
+```text
+s12 = m2(pi- pi+_1)
+s13 = m2(pi- pi+_2)
+s23 = m2(pi+_1 pi+_2)
+```
+
+The two positive pions are identical. QRules keeps indistinguishable quantum-state transitions and AmpForm restores the kinematically distinct `pi- pi+` pairings inside the amplitude. `KinematicTransformer` registers the corresponding topology permutations so all required invariant masses and helicity angles are generated automatically.
 
 The minimal rho-only benchmark is:
 
@@ -135,7 +153,7 @@ The multi-component example explicitly compares coherent and incoherent normaliz
 
 ## Toy-MC closure validation
 
-`tests/test_fit_closure.py` is the first full fitter closure test. It performs the complete validation chain:
+`tests/test_fit_closure.py` is the first full fitter closure test. It uses the same `pi- pi+ pi+` ordering and performs the complete validation chain:
 
 ```text
 known truth parameters
@@ -206,4 +224,4 @@ enable_x64()
 
 The package now contains CP-aware coefficient sets, fit-aware coefficient parameters, coherent external amplitude coefficients, cache-aware amplitude evaluation, native JAX three-body Dalitz kinematics and four-momentum reconstruction, QRules/AmpForm model building, TensorWaves/JAX compilation and symmetrized kinematic transformation, fixed-sample Monte Carlo normalization, toy generation, efficiency/background interfaces, likelihood scaffolding, a Minuit/JAX bridge, fit/interference fractions and CP observables.
 
-The current validation milestone is the full `D+ -> pi+ pi+ pi-` toy-MC coefficient closure test. The next closure milestone is floating one or more dynamical parameters such as resonance mass or width while verifying selective cache invalidation and parameter recovery.
+The current validation milestone is the full `D+ -> pi- pi+ pi+` toy-MC coefficient closure test. The next closure milestone is floating one or more dynamical parameters such as resonance mass or width while verifying selective cache invalidation and parameter recovery.
