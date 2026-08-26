@@ -11,6 +11,7 @@ The project deliberately uses one numerical backend: **JAX**. JAX is an internal
 - compile numerical amplitudes to JAX through TensorWaves;
 - keep complex fit coefficients owned by DalitzPlotFitter rather than by AmpForm;
 - allow both coefficient parameters and dynamical line-shape parameters to float in fits;
+- keep Blatt-Weisskopf meson radii fixed by default and float them only on explicit request;
 - cache fixed component amplitudes on data and normalization samples;
 - use cached normalization matrices for coefficient-only fits;
 - perform deterministic Monte Carlo normalization on a fixed three-body phase-space sample generated natively with JAX;
@@ -38,6 +39,8 @@ This separation is essential for CP-violating simultaneous fits because the same
 ## Fit parameters and caching
 
 Fit parameters are first-class objects. They can represent coefficient parameters such as magnitudes and phases, or dynamical parameters such as resonance masses and widths.
+
+Blatt-Weisskopf meson radii are **fixed by default**. AmpForm introduces the symbolic radius `d_res` with default value `1` in its form-factor and energy-dependent-width builders. DalitzPlotFitter keeps that value fixed unless the user explicitly creates a floating meson-radius parameter. A fixed radius therefore never invalidates the line-shape cache during minimization. If explicitly floated, it is treated as a dynamical parameter owned by the corresponding amplitude and invalidates only that component.
 
 For a coefficient-only fit, the component amplitudes
 
