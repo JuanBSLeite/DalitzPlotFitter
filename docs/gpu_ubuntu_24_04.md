@@ -1,90 +1,83 @@
-# NVIDIA GPU testing on Ubuntu 24.04.4 LTS
+# NVIDIA GPU testing on Ubuntu 24.04.4 LTS / WSL2
 
 This guide defines the reference GPU test environment for DalitzPlotFitter:
 
 ```text
-Operating system: Ubuntu 24.04.4 LTS
+Host:             Windows + WSL2
+Guest OS:         Ubuntu 24.04.4 LTS
 Python:           3.12.3
 Backend:          JAX
 Accelerator:      NVIDIA GPU via CUDA
+Reference GPU:    GeForce RTX 3050 Ti Laptop GPU (4 GB, compute capability 8.6)
 ```
 
 DalitzPlotFitter has no separate GPU code path. The numerical backend is JAX, so the same fitter code automatically runs on an NVIDIA GPU when a CUDA-enabled JAX installation detects one.
 
-## 1. Verify the operating system and Python version
+## Important WSL2 rule
 
-Check Ubuntu:
+When using WSL2, install the NVIDIA display driver on the **Windows host only**. Do **not** install a Linux NVIDIA display driver inside the Ubuntu WSL distribution. WSL exposes the Windows NVIDIA driver to Linux applications.
+
+The CUDA Toolkit itself is also not required when using the CUDA libraries distributed through the JAX pip installation.
+
+Official references:
+
+- JAX installation: https://docs.jax.dev/en/latest/installation.html
+- JAX GPU memory allocation: https://docs.jax.dev/en/latest/gpu_memory_allocation.html
+- NVIDIA CUDA on WSL: https://docs.nvidia.com/cuda/wsl-user-guide/index.html
+- Microsoft WSL configuration: https://learn.microsoft.com/windows/wsl/wsl-config
+
+## 1. Verify WSL2, Ubuntu and Python
+
+From Windows PowerShell:
+
+```powershell
+wsl --status
+wsl --version
+```
+
+From the Ubuntu WSL shell:
 
 ```bash
 lsb_release -a
-```
-
-The reference system should report Ubuntu 24.04.4 LTS.
-
-Check Python:
-
-```bash
 python3.12 --version
 ```
 
-The reference version used for this test is:
+The reference environment is:
 
 ```text
+Ubuntu 24.04.4 LTS
 Python 3.12.3
 ```
 
-You can enforce this check before creating the environment:
+For an exact Python check:
 
 ```bash
 python3.12 -c 'import sys; assert sys.version_info[:3] == (3, 12, 3), sys.version; print(sys.version)'
 ```
 
-If that assertion fails, the machine is not using the exact reference Python version described in this guide.
+## 2. Verify NVIDIA GPU access from WSL
 
-## 2. Verify that Ubuntu sees the NVIDIA GPU
-
-```bash
-lspci | grep -i nvidia
-```
-
-If the NVIDIA driver is already installed, check it with:
+Run inside Ubuntu WSL:
 
 ```bash
 nvidia-smi
 ```
 
-If `nvidia-smi` reports the GPU name and driver version correctly, continue to the Python environment setup.
+A working WSL CUDA setup should show the NVIDIA GPU and the Windows-host driver version.
 
-## 3. Install the NVIDIA driver if necessary
+Do not run `ubuntu-drivers install` inside WSL. If the driver needs updating, update the NVIDIA Windows driver instead.
 
-Ubuntu recommends installing NVIDIA drivers through its packaged `ubuntu-drivers` utility rather than downloading a driver installer directly from NVIDIA.
+It is also useful to update WSL itself from PowerShell:
 
-```bash
-sudo apt update
-sudo apt upgrade
-sudo apt install -y ubuntu-drivers-common
-sudo ubuntu-drivers list
-sudo ubuntu-drivers install
-sudo reboot
+```powershell
+wsl --update
 ```
 
-After rebooting:
+## 3. RTX 3050 Ti compatibility
 
-```bash
-nvidia-smi
-```
+The GeForce RTX 3050 Ti Laptop GPU is an Ampere GPU with compute capability 8.6 and typically 4 GB of GDDR6 memory. It is compatible with JAX CUDA 12 and also satisfies the GPU architecture requirement for CUDA 13.
 
-Current JAX requirements on Linux are:
-
-- CUDA 13 wheels: NVIDIA driver >= 580 and GPU compute capability >= 7.5;
-- CUDA 12 wheels: NVIDIA driver >= 525 and GPU compute capability >= 5.2.
-
-For current hardware, CUDA 13 is the preferred JAX installation when the driver and GPU support it.
-
-Official references:
-
-- JAX installation: https://docs.jax.dev/en/latest/installation.html
-- Ubuntu NVIDIA driver installation: https://ubuntu.com/desktop/docs/en/latest/how-to/graphics/install-nvidia-drivers/
+For this project on WSL2, CUDA 12 is the conservative reference configuration because it provides broad driver compatibility and is sufficient for the fitter.
 
 ## 4. Create the Python 3.12.3 environment
 
@@ -96,7 +89,7 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 ```
 
-Verify that the virtual environment is using the expected interpreter:
+Verify:
 
 ```bash
 python --version
@@ -108,89 +101,204 @@ Expected:
 Python 3.12.3
 ```
 
-For an exact automated check:
-
-```bash
-python -c 'import sys; assert sys.version_info[:3] == (3, 12, 3), sys.version; print("Python:", sys.version)'
-```
-
-Then install the project:
+Install the project:
 
 ```bash
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
-## 5. Install JAX with NVIDIA CUDA support
+## 5. Install exactly one JAX CUDA plugin set
 
-The JAX project recommends using the CUDA and cuDNN libraries distributed through its pip dependencies. With this method, a complete system-wide CUDA Toolkit installation is not required.
+Do not install CUDA 12 and CUDA 13 JAX plugins in the same virtual environment.
 
-### CUDA 13 — recommended for recent GPUs
-
-Use this when the NVIDIA driver is version 580 or newer and the GPU has compute capability 7.5 or newer:
-
-```bash
-python -m pip install --upgrade "jax[cuda13]"
-```
-
-### CUDA 12 — compatibility option
-
-Use this for a supported older GPU or a Linux driver in the 525–579 range:
+For the RTX 3050 Ti / WSL2 reference configuration:
 
 ```bash
 python -m pip install --upgrade "jax[cuda12]"
 ```
 
-When using the pip-provided CUDA libraries, avoid pointing `LD_LIBRARY_PATH` at an unrelated CUDA installation because it can override the libraries selected by JAX and create version conflicts.
-
-Check whether this variable is set:
+Use CUDA 13 only when the Windows NVIDIA driver is new enough and there is a specific reason to move to it:
 
 ```bash
-echo "$LD_LIBRARY_PATH"
+python -m pip install --upgrade "jax[cuda13]"
 ```
 
-For the pip-managed CUDA route, an empty value is generally preferable unless the machine has another explicit requirement.
+## 6. Fix duplicate PJRT CUDA registration
 
-## 6. Verify that JAX is actually using the GPU
+A possible installation error is:
 
-Run:
+```text
+ALREADY_EXISTS: PJRT_Api already exists for device type cuda
+```
+
+If `jax.devices()` still prints `[CudaDevice(id=0)]`, the GPU is visible; the error usually indicates a duplicate/conflicting CUDA plugin installation.
+
+Inspect the environment:
+
+```bash
+python -m pip list | grep -Ei '^(jax|jaxlib|jax-cuda|nvidia-.*cu1[23])'
+```
+
+The cleanest development fix is to recreate the virtual environment and install only one CUDA family:
+
+```bash
+deactivate 2>/dev/null || true
+rm -rf .venv
+
+python3.12 -m venv .venv
+source .venv/bin/activate
+
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+python -m pip install --no-cache-dir --upgrade "jax[cuda12]"
+```
+
+Then verify:
+
+```bash
+python - <<'PY'
+import jax
+import jaxlib
+print("JAX:", jax.__version__)
+print("JAXLIB:", jaxlib.__version__)
+print("Backend:", jax.default_backend())
+print("Devices:", jax.devices())
+assert jax.default_backend() == "gpu"
+PY
+```
+
+## 7. RTX 3050 Ti / WSL2 memory configuration
+
+The RTX 3050 Ti Laptop GPU normally has 4 GB of VRAM. JAX preallocates a large fraction of GPU memory by default, which is unnecessarily aggressive for interactive work on this GPU.
+
+Before starting VS Code, Jupyter, or Python, use:
+
+```bash
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+```
+
+Then launch VS Code or Jupyter from the same shell so the kernel inherits the variable:
+
+```bash
+code .
+```
+
+or:
+
+```bash
+jupyter lab
+```
+
+An alternative is to keep preallocation enabled but reduce the fraction, for example:
+
+```bash
+export XLA_CLIENT_MEM_FRACTION=0.45
+```
+
+Do not rely on setting these variables after JAX has already been imported in a running notebook kernel. Restart the kernel/process after changing them.
+
+For debugging with the smallest possible GPU footprint, JAX also supports:
+
+```bash
+export XLA_PYTHON_CLIENT_ALLOCATOR=platform
+```
+
+This allocator is slower and is intended mainly for debugging memory problems.
+
+## 8. WSL pinned-memory limitation
+
+WSL2 has a documented CUDA limitation: the amount of pinned system memory available to CUDA applications is limited.
+
+A crash such as:
+
+```text
+Failed to allocate 2.00MiB of pinned host memory
+CUDA_ERROR_OUT_OF_MEMORY
+```
+
+is therefore not necessarily a 4 GB VRAM exhaustion. It can also be the WSL CUDA pinned-host-memory limit or host-memory pressure.
+
+Before retrying, stop stale WSL/Jupyter/Python processes. From Windows PowerShell, the strongest reset is:
+
+```powershell
+wsl --shutdown
+```
+
+Then reopen Ubuntu WSL, activate the environment, export the JAX memory setting, and start the notebook again:
+
+```bash
+cd ~/work/DalitzPlotFitter
+source .venv/bin/activate
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+code .
+```
+
+Check host memory inside WSL:
+
+```bash
+free -h
+```
+
+Check GPU memory:
+
+```bash
+nvidia-smi
+```
+
+If WSL is receiving too little RAM, Windows can assign more through `%UserProfile%\.wslconfig`. For example, on a machine with enough physical RAM:
+
+```ini
+[wsl2]
+memory=8GB
+swap=8GB
+```
+
+Apply changes with:
+
+```powershell
+wsl --shutdown
+```
+
+The exact WSL memory value should leave sufficient RAM available for Windows itself.
+
+## 9. Verify JAX GPU detection
 
 ```bash
 python - <<'PY'
 import sys
 import jax
+import jaxlib
 
 print("Python:", sys.version)
 print("JAX:", jax.__version__)
+print("JAXLIB:", jaxlib.__version__)
 print("Default backend:", jax.default_backend())
 print("Devices:", jax.devices())
 
 assert sys.version_info[:3] == (3, 12, 3), sys.version
-assert jax.default_backend() == "gpu", "JAX is not using the NVIDIA GPU"
+assert jax.default_backend() == "gpu"
 assert any(device.platform == "gpu" for device in jax.devices())
 PY
 ```
 
-A successful setup should contain output similar to:
+Expected output contains something similar to:
 
 ```text
-Python: 3.12.3 ...
 Default backend: gpu
 Devices: [CudaDevice(id=0)]
 ```
 
-The exact device description can vary between JAX releases and GPU models.
+## 10. Run a small JAX GPU calculation
 
-## 7. Run a small JAX GPU calculation
-
-Before running the fitter, test an actual computation:
+For the 4 GB RTX 3050 Ti, use a moderate matrix size for the smoke test:
 
 ```bash
 python - <<'PY'
 import jax
 import jax.numpy as jnp
 
-x = jnp.ones((4096, 4096))
+x = jnp.ones((2048, 2048))
 y = jax.jit(lambda a: a @ a)(x)
 y.block_until_ready()
 
@@ -200,19 +308,13 @@ print("Result:", float(y[0, 0]))
 PY
 ```
 
-The backend must be `gpu` and the result array must reside on a CUDA device.
-
-## 8. Run the DalitzPlotFitter test suite on the GPU
-
-With the same environment active:
+## 11. Run DalitzPlotFitter tests on the GPU
 
 ```bash
 python -c 'import jax; assert jax.default_backend() == "gpu"; print(jax.devices())' && pytest
 ```
 
-This first checks that a GPU is visible and only then starts the test suite.
-
-For the fitter closure test specifically:
+For the closure test specifically:
 
 ```bash
 python -c 'import jax; assert jax.default_backend() == "gpu"; print(jax.devices())' \
@@ -225,15 +327,25 @@ For the `pi- pi+ pi+` kinematic/amplitude validation:
 pytest -v tests/test_pi_minus_first_ordering.py
 ```
 
-## 9. Run the closure notebook on the GPU
+## 12. Run the closure notebook on the GPU
 
-Start Jupyter from the same virtual environment:
+Always launch the notebook process after setting the memory configuration:
 
 ```bash
+source .venv/bin/activate
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
 jupyter lab notebooks/01_dplus_fit_closure.ipynb
 ```
 
-At the beginning of the notebook, verify:
+or launch VS Code from that shell:
+
+```bash
+source .venv/bin/activate
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+code .
+```
+
+At the beginning of the notebook:
 
 ```python
 import sys
@@ -247,59 +359,23 @@ assert sys.version_info[:3] == (3, 12, 3)
 assert jax.default_backend() == "gpu"
 ```
 
-The closure notebook then runs the same `D+ -> pi- pi+ pi+` model with the GPU-backed JAX implementation.
+## 13. Monitor GPU use
 
-## 10. Monitor GPU use during a fit
-
-In a second terminal:
+From another WSL terminal:
 
 ```bash
 watch -n 1 nvidia-smi
 ```
 
-During JAX compilation and numerical evaluation, the Python process should appear in the GPU process list and GPU memory usage should increase.
+A coefficient-only fit deliberately uses cached component amplitudes and a cached normalization matrix. After the initial JAX calculations, individual likelihood evaluations are small, so GPU utilization does not need to remain close to 100% throughout the minimization.
 
-Note that a coefficient-only fit deliberately uses the cached component amplitudes and cached normalization matrix. After the initial JAX calculations, each likelihood evaluation is comparatively small, so GPU utilization does not need to remain close to 100% throughout the entire minimization.
-
-## Multi-GPU machines
-
-To expose only one GPU to JAX:
+## Minimal RTX 3050 Ti / WSL2 reference sequence
 
 ```bash
-export JAX_CUDA_VISIBLE_DEVICES=0
-```
-
-Then verify:
-
-```bash
-python -c 'import jax; print(jax.devices())'
-```
-
-## Shared GPU machines
-
-JAX normally preallocates a large fraction of GPU memory. For interactive testing on a shared machine, preallocation can be disabled before starting Python or Jupyter:
-
-```bash
-export XLA_PYTHON_CLIENT_PREALLOCATE=false
-```
-
-This can make GPU sharing easier. For dedicated performance benchmarks, the default allocator can provide better and more predictable performance.
-
-## Minimal reference test sequence
-
-For an already configured Ubuntu 24.04.4 LTS machine with NVIDIA drivers installed, the shortest reference sequence is:
-
-```bash
-cd DalitzPlotFitter
-
-python3.12 -c 'import sys; assert sys.version_info[:3] == (3, 12, 3), sys.version'
-
-python3.12 -m venv .venv
+cd ~/work/DalitzPlotFitter
 source .venv/bin/activate
 
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-python -m pip install --upgrade "jax[cuda13]"
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
 
 python - <<'PY'
 import sys
@@ -307,10 +383,11 @@ import jax
 assert sys.version_info[:3] == (3, 12, 3), sys.version
 assert jax.default_backend() == "gpu"
 print("Python:", sys.version)
-print("JAX devices:", jax.devices())
+print("Devices:", jax.devices())
 PY
 
+pytest -v tests/test_pi_minus_first_ordering.py
 pytest -v tests/test_fit_closure.py
 ```
 
-Use `jax[cuda12]` instead of `jax[cuda13]` when required by the installed NVIDIA driver or GPU generation.
+If a notebook kernel previously crashed with a CUDA pinned-host-memory error, run `wsl --shutdown` from Windows PowerShell before retrying this sequence.
