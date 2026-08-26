@@ -35,28 +35,6 @@ class FitMagPhase:
 
 
 @dataclass(frozen=True)
-class FitCartesian:
-    """CP-conserving Cartesian coefficient ``x + i y``."""
-
-    x: Parameter
-    y: Parameter
-
-    @property
-    def parameters(self) -> tuple[Parameter, Parameter]:
-        return (self.x, self.y)
-
-    def value(
-        self,
-        flavor: Flavor = Flavor.PARTICLE,
-        values: Mapping[str, object] | None = None,
-    ):
-        del flavor
-        x = self.x.resolve(values)
-        y = self.y.resolve(values)
-        return jnp.asarray(x) + 1j * jnp.asarray(y)
-
-
-@dataclass(frozen=True)
 class FitCartesianCP:
     """Cartesian CP coefficient controlled by fit parameters."""
 
