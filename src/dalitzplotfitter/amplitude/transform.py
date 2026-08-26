@@ -7,6 +7,22 @@ from dataclasses import dataclass
 from dalitzplotfitter.kinematics import PhaseSpaceSample
 
 
+def _create_kinematic_expressions(model: object):
+    """Create all kinematic expressions required by an AmpForm model.
+
+    For identical final-state particles, AmpForm symmetrizes the amplitude by
+    permuting the registered topologies. Recreate the same permutations in the
+    kinematic adapter so variables such as ``m_02`` and ``theta_0^02`` are
+    available to the numerical model.
+    """
+
+    from ampform.kinematics import HelicityAdapter
+
+    adapter = HelicityAdapter(model.reaction_info)
+    adapter.permutate_registered_topologies()
+    return adapter.create_expressions()
+
+
 @dataclass(frozen=True)
 class KinematicTransformer:
     """JAX-backed transformer for an AmpForm model's kinematic variables."""
@@ -17,8 +33,9 @@ class KinematicTransformer:
     def build(self):
         from tensorwaves.data import SympyDataTransformer
 
+        expressions = _create_kinematic_expressions(self.model)
         return SympyDataTransformer.from_sympy(
-            self.model.kinematic_variables,
+            expressions,
             backend="jax",
             use_cse=self.use_cse,
         )
