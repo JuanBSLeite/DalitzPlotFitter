@@ -8,8 +8,8 @@ from dalitzplotfitter import ThreeBodyPhaseSpace, enable_x64
 from dalitzplotfitter.amplitude import (
     AmplitudeBuilder,
     AmplitudeComponent,
-    PreparedAmplitudeCache,
     ConstantAmplitude,
+    PreparedAmplitudeCache,
     compile_amplitude_component,
     create_kinematic_transformer,
 )
@@ -45,7 +45,6 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
     rho_r = Parameter.coefficient("rho.r", 1.0, fixed=True, owner="rho")
     rho_phi = Parameter.coefficient("rho.phi", 0.0, fixed=True, owner="rho")
 
-    # Truth values used to generate the toy.
     truth = {
         "f0.r": 0.55,
         "f0.phi": 1.15,
@@ -53,6 +52,7 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
         "nr.phi": -0.85,
     }
 
+    # Randomized, reproducible starting point intentionally displaced from truth.
     rng = np.random.default_rng(314159)
     f0_r = Parameter.coefficient(
         "f0.r",
@@ -83,40 +83,29 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
         owner="NR",
     )
 
+    rho_coefficient = FitMagPhase(rho_r, rho_phi)
+    f0_coefficient = FitMagPhase(f0_r, f0_phi)
+    nr_coefficient = FitMagPhase(nr_r, nr_phi)
+
     components = (
-        AmplitudeComponent(
-            "rho",
-            rho_dynamics,
-            FitMagPhase(rho_r, rho_phi),
-        ),
-        AmplitudeComponent(
-            "f0",
-            f0_dynamics,
-            FitMagPhase(f0_r, f0_phi),
-        ),
-        AmplitudeComponent(
-            "NR",
-            ConstantAmplitude(),
-            FitMagPhase(nr_r, nr_phi),
-        ),
+        AmplitudeComponent("rho", rho_dynamics, rho_coefficient),
+        AmplitudeComponent("f0", f0_dynamics, f0_coefficient),
+        AmplitudeComponent("NR", ConstantAmplitude(), nr_coefficient),
     )
 
     phase_space = ThreeBodyPhaseSpace.from_reaction(rho_reaction)
     transformer = create_kinematic_transformer(rho_model)
 
-    # Toy generation uses an independent phase-space pool.
+    # Generation is deliberately independent of PreparedAmplitudeCache.
     def toy_intensity(data, values):
-        total = 0.0j
-        for component in components:
-            total = total + component.value(data, parameters=None, flavor=1) if False else total
-        # Explicit expression keeps generation independent of the fit cache.
         rho = rho_dynamics(data, None)
         f0 = f0_dynamics(data, None)
         nr = ConstantAmplitude()(data, None)
-        c_rho = FitMagPhase(rho_r, rho_phi).value(values=values)
-        c_f0 = FitMagPhase(f0_r, f0_phi).value(values=values)
-        c_nr = FitMagPhase(nr_r, nr_phi).value(values=values)
-        amplitude = c_rho * rho + c_f0 * f0 + c_nr * nr
+        amplitude = (
+            rho_coefficient.value(values=values) * rho
+            + f0_coefficient.value(values=values) * f0
+            + nr_coefficient.value(values=values) * nr
+        )
         return jnp.real(amplitude * jnp.conj(amplitude))
 
     generator = ToyGenerator(
@@ -124,7 +113,7 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
         transformer=transformer,
         pool_size=60_000,
     )
-    _, toy_data = generator.generate(
+    toy_sample, toy_data = generator.generate(
         jax.random.key(2026),
         size=3_000,
         intensity=toy_intensity,
@@ -146,9 +135,9 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
 
     def nll(values):
         intensity, normalization = cache.evaluate(values)
-        return -jnp.sum(jnp.log(jnp.clip(intensity, min=1e-300))) + toy_data[
-            next(iter(toy_data))
-        ].shape[0] * jnp.log(normalization)
+        return -jnp.sum(jnp.log(jnp.clip(intensity, min=1e-300))) + (
+            toy_sample.size * jnp.log(normalization)
+        )
 
     result = Minimizer(nll, parameters).fit()
 
