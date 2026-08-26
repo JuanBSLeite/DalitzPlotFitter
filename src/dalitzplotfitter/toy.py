@@ -44,23 +44,21 @@ def _concatenate_samples(samples: list[PhaseSpaceSample]) -> PhaseSpaceSample:
 class ToyGenerator:
     """Generate unweighted toy events with accept-reject sampling.
 
-    ``ThreeBodyPhaseSpace.generate`` uses a convenient proposal that is uniform
-    in ``s12`` and conditionally uniform in ``s23``. Its returned ``weights`` are
-    therefore the proposal-to-Dalitz-measure Jacobian. For a target intensity
-    ``I(x)``, accept-reject uses the score
+    ``ThreeBodyPhaseSpace.generate`` samples uniformly in the unit square that
+    is mapped onto the Dalitz plot. Its returned ``weights`` are the Jacobian of
+    that transformation. Therefore the accept-reject target relative to the
+    unit-square proposal is
 
-    ``score(x) = phase_space_weight(x) * I(x)``.
+    ``score(u) = phase_space_weight(u) * I(x(u))``.
 
-    ``pool_size`` is retained for backwards compatibility, but now denotes only
-    the pilot sample used to estimate the accept-reject envelope. Accepted events
-    are generated from fresh phase-space batches; they are not resampled from the
-    pilot and therefore do not inherit finite-pool duplicate structure.
+    Before any toy event is generated, :meth:`estimate_maximum` searches this
+    score deterministically: first on a global unit-square grid, then through
+    local refinements around several of the best grid points. The final envelope
+    is ``envelope_safety`` times that maximum. During generation, any observed
+    violation still causes a complete restart with an enlarged envelope.
 
-    Because a generic user-supplied intensity has no analytic global bound, the
-    pilot maximum is multiplied by ``envelope_safety``. If a later batch exceeds
-    the current envelope, every previously accepted event is discarded and the
-    generation restarts with the enlarged envelope. This prevents an already
-    observed envelope violation from biasing the returned sample.
+    ``pool_size`` is retained only for backwards API compatibility with older
+    examples. Envelope estimation no longer relies on a random pilot sample.
     """
 
     phase_space: ThreeBodyPhaseSpace
@@ -68,6 +66,10 @@ class ToyGenerator:
     pool_size: int = 200_000
     batch_size: int = 20_000
     envelope_safety: float = 1.2
+    envelope_grid_size: int = 160
+    envelope_refinement_size: int = 17
+    envelope_refinement_levels: int = 4
+    envelope_top_k: int = 12
     max_batches: int = 10_000
 
     def _score(
@@ -87,6 +89,88 @@ class ToyGenerator:
             raise ValueError("Toy intensity produced non-finite accept-reject weights")
         return score
 
+    def _score_unit_points(
+        self,
+        unit_points: Array,
+        intensity,
+        parameters: Mapping[str, object],
+    ) -> Array:
+        sample = self.phase_space.from_unit_square(unit_points)
+        data = self.transformer(sample.as_momentum_dict())
+        return self._score(sample, data, intensity, parameters)
+
+    def estimate_maximum(
+        self,
+        intensity,
+        parameters: Mapping[str, object],
+    ) -> tuple[float, Array]:
+        """Estimate the global accept-reject score maximum deterministically.
+
+        The search starts from a regular grid of cell centres over ``[0, 1]^2``.
+        Several best candidates are retained and independently refined. Using
+        cell centres avoids evaluating exactly on kinematic boundaries, where
+        helicity coordinates can become singular while the physical phase-space
+        measure vanishes.
+        """
+
+        if self.envelope_grid_size < 2:
+            raise ValueError("envelope_grid_size must be at least two")
+        if self.envelope_refinement_size < 3:
+            raise ValueError("envelope_refinement_size must be at least three")
+        if self.envelope_refinement_levels < 0:
+            raise ValueError("envelope_refinement_levels must be non-negative")
+        if self.envelope_top_k <= 0:
+            raise ValueError("envelope_top_k must be positive")
+
+        grid_size = self.envelope_grid_size
+        centres = (jnp.arange(grid_size, dtype=float) + 0.5) / grid_size
+        u1, u2 = jnp.meshgrid(centres, centres, indexing="ij")
+        points = jnp.stack([u1.ravel(), u2.ravel()], axis=1)
+        scores = self._score_unit_points(points, intensity, parameters)
+
+        top_k = min(self.envelope_top_k, int(points.shape[0]))
+        top_indices = jnp.argsort(scores)[-top_k:]
+        best_points = points[top_indices]
+        best_scores = scores[top_indices]
+
+        # Half-width of the global-grid cell around each retained candidate.
+        radius = 0.5 / grid_size
+        refinement_size = self.envelope_refinement_size
+        for _ in range(self.envelope_refinement_levels):
+            offsets_1d = jnp.linspace(-radius, radius, refinement_size)
+            du1, du2 = jnp.meshgrid(offsets_1d, offsets_1d, indexing="ij")
+            offsets = jnp.stack([du1.ravel(), du2.ravel()], axis=1)
+            local_points = best_points[:, None, :] + offsets[None, :, :]
+
+            # Stay strictly inside the unit square to avoid boundary coordinate
+            # singularities. The excluded strip shrinks far below the final
+            # refinement resolution and carries vanishing phase-space measure.
+            eps = jnp.finfo(local_points.dtype).eps * 16
+            local_points = jnp.clip(local_points, eps, 1.0 - eps)
+            local_points = local_points.reshape((-1, 2))
+            local_scores = self._score_unit_points(
+                local_points,
+                intensity,
+                parameters,
+            )
+
+            combined_points = jnp.concatenate([best_points, local_points], axis=0)
+            combined_scores = jnp.concatenate([best_scores, local_scores], axis=0)
+            top_indices = jnp.argsort(combined_scores)[-top_k:]
+            best_points = combined_points[top_indices]
+            best_scores = combined_scores[top_indices]
+
+            # Adjacent refinement points are separated by this amount. Search
+            # only that smaller neighbourhood on the next level.
+            radius = 2.0 * radius / (refinement_size - 1)
+
+        maximum_index = int(jnp.argmax(best_scores))
+        maximum = float(best_scores[maximum_index])
+        maximum_point = best_points[maximum_index]
+        if not jnp.isfinite(maximum) or maximum <= 0.0:
+            raise ValueError("Toy intensity has non-positive or non-finite integral")
+        return maximum, maximum_point
+
     def generate(
         self,
         key: Array,
@@ -105,14 +189,9 @@ class ToyGenerator:
         if self.max_batches <= 0:
             raise ValueError("max_batches must be positive")
 
-        key_pilot, key_stream = jax.random.split(key)
-        pilot = self.phase_space.generate(key_pilot, self.pool_size)
-        pilot_data = self.transformer(pilot.as_momentum_dict())
-        pilot_score = self._score(pilot, pilot_data, intensity, parameters)
-        pilot_max = float(jnp.max(pilot_score))
-        if not jnp.isfinite(pilot_max) or pilot_max <= 0.0:
-            raise ValueError("Toy intensity has non-positive or non-finite integral")
-        envelope = self.envelope_safety * pilot_max
+        maximum, _ = self.estimate_maximum(intensity, parameters)
+        envelope = self.envelope_safety * maximum
+        key_stream = key
 
         accepted_samples: list[PhaseSpaceSample] = []
         accepted_data: dict[str, list[Array]] = {}
@@ -129,9 +208,9 @@ class ToyGenerator:
             batch_max = float(jnp.max(score))
 
             if batch_max > envelope:
-                # The sampled envelope was too small. Enlarge it and restart so
-                # previously accepted events are not kept with the wrong
-                # acceptance probability.
+                # The deterministic search missed a larger value. Enlarge the
+                # envelope and restart so no previously accepted event keeps an
+                # inconsistent acceptance probability.
                 envelope = self.envelope_safety * batch_max
                 accepted_samples.clear()
                 accepted_data.clear()
