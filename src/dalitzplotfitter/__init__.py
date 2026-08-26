@@ -1,6 +1,6 @@
 """DalitzPlotFitter public API."""
 
-from .config import enable_x64
+from .amplitude import AmplitudeComponent, CoherentAmplitudeModel, ConstantAmplitude
 from .coefficients import (
     BelleCP,
     CartesianCP,
@@ -14,13 +14,17 @@ from .coefficients import (
     RealImagCP,
     RealImagGammaCP,
 )
+from .config import enable_x64
 from .kinematics import ThreeBodyPhaseSpace
 
 __all__ = [
+    "AmplitudeComponent",
     "BelleCP",
     "CartesianCP",
     "CartesianGammaCP",
     "CleoCP",
+    "CoherentAmplitudeModel",
+    "ConstantAmplitude",
     "Flavor",
     "MagPhase",
     "MagPhaseCP",
