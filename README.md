@@ -157,16 +157,25 @@ The multi-component example explicitly compares coherent and incoherent normaliz
 
 ```text
 known truth parameters
-    -> independent phase-space generation pool
-    -> unweighted toy sample
+    -> accept-reject toy generation from fresh phase-space batches
     -> randomized fit starting values
     -> independent MC normalization sample
     -> cached unbinned likelihood
     -> Minuit minimization
-    -> comparison of fitted and injected parameters
+    -> pull and absolute-sanity checks against injected parameters
 ```
 
-The reference rho coefficient is fixed to remove the arbitrary global scale and phase. The test floats the `f0` and non-resonant magnitudes and phases and compares the fitted values with the injected truth, including wrapped phase differences.
+`ToyGenerator` now uses accept-reject rather than categorical resampling from a finite pool. The native phase-space proposal is not uniform in Dalitz measure, so the proposal Jacobian returned as `PhaseSpaceSample.weights` is included in the accept-reject score,
+
+```text
+score(x) = w_PS(x) |A(x)|^2.
+```
+
+`pool_size` is used only for a pilot envelope estimate. Accepted events come from new phase-space batches and therefore do not inherit finite-pool duplicate structure. If a later batch exceeds the current pilot envelope, the generator enlarges the envelope and restarts the accepted sample so previously accepted events are not retained with an invalid acceptance probability.
+
+The reference rho coefficient is fixed to remove the arbitrary global scale and phase. The test floats the `f0` and non-resonant magnitudes and phases and compares the fitted values with the injected truth, including wrapped phase differences. Closure is evaluated primarily through pulls using HESSE uncertainties, while broad absolute limits guard against wrong local minima or pathological error estimates.
+
+For likelihood minimization, `Minimizer` uses the Minuit NLL convention `errordef=0.5` by default, and each `Parameter.step` is propagated to the corresponding Minuit initial error/step size.
 
 Toy generation and fit normalization intentionally use independent Monte Carlo samples.
 
@@ -222,6 +231,6 @@ enable_x64()
 
 ## Current status
 
-The package now contains CP-aware coefficient sets, fit-aware coefficient parameters, coherent external amplitude coefficients, cache-aware amplitude evaluation, native JAX three-body Dalitz kinematics and four-momentum reconstruction, QRules/AmpForm model building, TensorWaves/JAX compilation and symmetrized kinematic transformation, fixed-sample Monte Carlo normalization, toy generation, efficiency/background interfaces, likelihood scaffolding, a Minuit/JAX bridge, fit/interference fractions and CP observables.
+The package now contains CP-aware coefficient sets, fit-aware coefficient parameters, coherent external amplitude coefficients, cache-aware amplitude evaluation, native JAX three-body Dalitz kinematics and four-momentum reconstruction, QRules/AmpForm model building, TensorWaves/JAX compilation and symmetrized kinematic transformation, fixed-sample Monte Carlo normalization, accept-reject toy generation, efficiency/background interfaces, likelihood scaffolding, a Minuit/JAX bridge, fit/interference fractions and CP observables.
 
 The current validation milestone is the full `D+ -> pi- pi+ pi+` toy-MC coefficient closure test. The next closure milestone is floating one or more dynamical parameters such as resonance mass or width while verifying selective cache invalidation and parameter recovery.
