@@ -1,7 +1,7 @@
 """Amplitude coefficient parameterisations."""
 
 from .base import Coefficient, Flavor
-from .fit import FitCartesian, FitCartesianCP, FitMagPhase
+from .fit import FitCartesianCP, FitMagPhase
 from .sets import (
     BelleCP,
     CartesianCP,
@@ -21,7 +21,6 @@ __all__ = [
     "CartesianGammaCP",
     "CleoCP",
     "Coefficient",
-    "FitCartesian",
     "FitCartesianCP",
     "FitMagPhase",
     "Flavor",
