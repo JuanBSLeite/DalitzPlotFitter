@@ -136,6 +136,10 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
         phase_space=phase_space,
         transformer=transformer,
         pool_size=60_000,
+        # Diagnostic: make the accept-reject envelope deliberately very
+        # conservative. If closure improves, the previous pilot-derived
+        # envelope was underestimating narrow resonance peaks.
+        envelope_safety=10.0,
     )
     toy_sample, toy_data = generator.generate(
         jax.random.key(2026),
