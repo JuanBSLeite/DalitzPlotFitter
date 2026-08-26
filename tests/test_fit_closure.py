@@ -33,6 +33,30 @@ def _wrapped_delta(phi_fit: float, phi_true: float) -> float:
     return float(np.angle(np.exp(1j * (phi_fit - phi_true))))
 
 
+def _assert_closure(
+    result,
+    name: str,
+    truth: float,
+    *,
+    max_pull: float,
+    max_abs_delta: float,
+    wrapped: bool = False,
+):
+    fitted = float(result.values[name])
+    error = float(result.errors[name])
+    assert np.isfinite(error) and error > 0.0, f"invalid HESSE error for {name}: {error}"
+    delta = _wrapped_delta(fitted, truth) if wrapped else fitted - truth
+    pull = delta / error
+    assert abs(delta) < max_abs_delta, (
+        f"{name} failed absolute closure sanity check: fit={fitted}, truth={truth}, "
+        f"delta={delta}, error={error}, pull={pull}"
+    )
+    assert abs(pull) < max_pull, (
+        f"{name} failed pull closure: fit={fitted}, truth={truth}, delta={delta}, "
+        f"error={error}, pull={pull}"
+    )
+
+
 def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
     """Generate -> randomize start -> fit -> compare to injected truth."""
 
@@ -142,7 +166,37 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
     result = Minimizer(nll, parameters).fit()
 
     assert result.valid
-    assert abs(result.values["f0.r"] - truth["f0.r"]) < 0.12
-    assert abs(_wrapped_delta(result.values["f0.phi"], truth["f0.phi"])) < 0.22
-    assert abs(result.values["nr.r"] - truth["nr.r"]) < 0.10
-    assert abs(_wrapped_delta(result.values["nr.phi"], truth["nr.phi"])) < 0.28
+    # Closure is a statistical statement. Check pulls using HESSE uncertainties
+    # (with Minuit errordef=0.5 for an NLL), while retaining broad absolute
+    # sanity limits so a wrong local minimum cannot pass merely because of a
+    # pathological uncertainty estimate.
+    _assert_closure(
+        result,
+        "f0.r",
+        truth["f0.r"],
+        max_pull=3.5,
+        max_abs_delta=0.30,
+    )
+    _assert_closure(
+        result,
+        "f0.phi",
+        truth["f0.phi"],
+        max_pull=3.5,
+        max_abs_delta=0.60,
+        wrapped=True,
+    )
+    _assert_closure(
+        result,
+        "nr.r",
+        truth["nr.r"],
+        max_pull=3.5,
+        max_abs_delta=0.20,
+    )
+    _assert_closure(
+        result,
+        "nr.phi",
+        truth["nr.phi"],
+        max_pull=3.5,
+        max_abs_delta=0.60,
+        wrapped=True,
+    )
