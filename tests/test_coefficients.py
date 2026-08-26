@@ -2,10 +2,12 @@ import jax.numpy as jnp
 
 from dalitzplotfitter.coefficients import (
     CartesianCP,
+    FitCartesian,
     Flavor,
     MagPhase,
     RealImag,
 )
+from dalitzplotfitter.fit import Parameter
 
 
 def test_cp_conserving_sets_ignore_flavor():
@@ -14,6 +16,18 @@ def test_cp_conserving_sets_ignore_flavor():
             coefficient.value(Flavor.PARTICLE),
             coefficient.value(Flavor.ANTIPARTICLE),
         )
+
+
+def test_fit_cartesian_is_x_plus_iy_and_ignores_flavor():
+    x = Parameter.coefficient("x", 0.3)
+    y = Parameter.coefficient("y", -0.4)
+    coefficient = FitCartesian(x, y)
+    values = {"x": 0.7, "y": -0.2}
+    assert jnp.allclose(coefficient.value(values=values), 0.7 - 0.2j)
+    assert jnp.allclose(
+        coefficient.value(Flavor.PARTICLE, values),
+        coefficient.value(Flavor.ANTIPARTICLE, values),
+    )
 
 
 def test_cartesian_cp_sign_convention():
