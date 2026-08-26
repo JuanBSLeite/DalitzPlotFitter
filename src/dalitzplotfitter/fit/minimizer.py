@@ -12,11 +12,26 @@ from .parameters import Parameter
 
 
 class Minimizer:
-    """Minimize a mapping-based JAX objective with iminuit."""
+    """Minimize a mapping-based JAX objective with iminuit.
 
-    def __init__(self, objective: Callable, parameters: Sequence[Parameter]):
+    The default ``errordef=0.5`` is the Minuit convention for a negative
+    log-likelihood. It makes HESSE uncertainties correspond to Delta(NLL)=0.5.
+    Use a different value only when minimizing an objective with another
+    statistical convention.
+    """
+
+    def __init__(
+        self,
+        objective: Callable,
+        parameters: Sequence[Parameter],
+        *,
+        errordef: float = 0.5,
+    ):
+        if errordef <= 0:
+            raise ValueError("errordef must be positive")
         self.objective = objective
         self.parameters = tuple(parameters)
+        self.errordef = float(errordef)
 
     def fit(self):
         from iminuit import Minuit
@@ -25,6 +40,9 @@ class Minimizer:
         fixed = {parameter.name: parameter.value for parameter in self.parameters if parameter.fixed}
         names = tuple(parameter.name for parameter in free)
         start = tuple(parameter.value for parameter in free)
+
+        if not free:
+            raise ValueError("At least one free parameter is required")
 
         def vector_objective(vector):
             mapping = dict(fixed)
@@ -42,9 +60,16 @@ class Minimizer:
             return np.asarray(gradient, dtype=float)
 
         minuit = Minuit(fcn, *start, name=names, grad=grad)
+        minuit.errordef = self.errordef
         for parameter in free:
             if parameter.bounds is not None:
                 minuit.limits[parameter.name] = parameter.bounds
+            if parameter.step is not None:
+                if parameter.step <= 0:
+                    raise ValueError(
+                        f"Parameter step must be positive for {parameter.name!r}"
+                    )
+                minuit.errors[parameter.name] = parameter.step
         minuit.migrad()
         minuit.hesse()
         return minuit
