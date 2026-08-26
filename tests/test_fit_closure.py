@@ -144,8 +144,10 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
         parameters=truth,
     )
 
-    # Independent normalization sample: never reuse the generation pool.
-    normalization_sample = phase_space.generate(jax.random.key(2027), 60_000)
+    # Independent normalization sample: never reuse generation candidates.
+    # Use a substantially larger sample here to test whether the closure bias
+    # was caused by Monte Carlo noise in the normalization integral.
+    normalization_sample = phase_space.generate(jax.random.key(2027), 300_000)
     normalization_data = transformer(normalization_sample.as_momentum_dict())
 
     parameters = (rho_r, rho_phi, f0_r, f0_phi, nr_r, nr_phi)
@@ -155,6 +157,21 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
         normalization_data=normalization_data,
         normalization_weights=normalization_sample.weights,
         parameters=parameters,
+    )
+
+    # Regression guard: matrix normalization must exactly reproduce the direct
+    # Monte Carlo sum on the same sample for the injected coefficient vector.
+    truth_coefficients = cache.coefficient_vector(truth)
+    direct_amplitude = cache.normalization_components @ truth_coefficients
+    direct_normalization = jnp.mean(
+        normalization_sample.weights * jnp.abs(direct_amplitude) ** 2
+    )
+    matrix_normalization = cache.normalization(truth)
+    assert jnp.allclose(
+        matrix_normalization,
+        direct_normalization,
+        rtol=1e-11,
+        atol=1e-12,
     )
 
     def nll(values):
