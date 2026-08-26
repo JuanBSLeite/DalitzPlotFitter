@@ -9,6 +9,7 @@ The project deliberately uses one numerical backend: **JAX**. JAX is an internal
 - construct decay chains and validate quantum numbers with QRules;
 - formulate symbolic amplitudes with AmpForm;
 - compile numerical amplitudes to JAX through TensorWaves;
+- keep complex fit coefficients owned by DalitzPlotFitter rather than by AmpForm;
 - perform deterministic Monte Carlo normalization on a fixed three-body phase-space sample generated natively with JAX;
 - optionally include efficiency in the signal PDF;
 - model background with analytic/JAX callables or Dalitz histograms;
@@ -17,6 +18,18 @@ The project deliberately uses one numerical backend: **JAX**. JAX is an internal
 - calculate fit fractions, interference fractions and CP-asymmetry observables;
 - use iminuit while JAX evaluates the NLL and gradients;
 - provide HEP-style diagnostics and Dalitz plots with mplhep.
+
+## Coherent amplitude convention
+
+DalitzPlotFitter uses AmpForm to construct the dynamical functions but owns the complex coefficients itself:
+
+```text
+A(x) = sum_i c_i F_i(x)
+```
+
+For an AmpForm resonance component, `compile_amplitude_component()` removes the AmpForm-generated helicity coupling `C_...` by setting it to unity. The resulting function is therefore only `F_i(x)`. A DalitzPlotFitter `AmplitudeComponent` then applies a coefficient object such as `MagPhase`, `CartesianCP`, or another Laura++ parameterisation.
+
+This separation is essential for CP-violating simultaneous fits because the same dynamical component can be multiplied by different particle and antiparticle coefficients without modifying AmpForm.
 
 ## CP-violating coefficients
 
@@ -55,29 +68,31 @@ phase_space = ThreeBodyPhaseSpace.from_reaction(reaction)
 
 The same phase-space sample should be reused throughout a fit, making Monte Carlo normalization deterministic.
 
-## First physical model: D+ -> pi+ pi+ pi-
+## D+ -> pi+ pi+ pi- reference model
 
-The first integration benchmark is the symmetrized `D+ -> pi+ pi+ pi-` amplitude through `rho(770)0`. It matches the channel used in the AmpForm symmetrization documentation: QRules keeps one indistinguishable quantum-state transition and AmpForm restores the two kinematically distinct `pi+ pi-` pairings inside the amplitude.
+The first integration benchmark is the symmetrized `D+ -> pi+ pi+ pi-` amplitude. QRules keeps indistinguishable quantum-state transitions and AmpForm restores the kinematically distinct `pi+ pi-` pairings inside the amplitude. `KinematicTransformer` registers the corresponding topology permutations so all required invariant masses and helicity angles are generated automatically.
 
-Run it with:
+The minimal rho-only benchmark is:
 
 ```bash
 python examples/01_dplus_rho.py
 ```
 
-The example performs the complete chain
+The first coherent multi-component benchmark is:
 
-```text
-QRules reaction
-    -> AmpForm symbolic model
-    -> TensorWaves/JAX compiled intensity
-    -> native JAX three-body phase space
-    -> AmpForm kinematic transformation
-    -> intensity evaluation
-    -> fixed-sample Monte Carlo normalization
+```bash
+python examples/02_dplus_rho_f0_nr.py
 ```
 
-`CompiledModel` exposes the numerical model as a pure `model(data, parameters)` function instead of relying on hidden mutable parameter updates. This is the interface that will be used by JAX autodiff and the likelihood fitter.
+and uses
+
+```text
+A = c_rho F_rho(770) + c_f0 F_f0(980) + c_NR
+```
+
+with `rho(770)0` fixed as the global magnitude/phase reference. The `f(0)(980)` component currently uses the default relativistic Breit-Wigner infrastructure as an integration benchmark. A Flatte parameterisation should be used as the dedicated physics option near the KK threshold and is a planned dynamics extension.
+
+The multi-component example explicitly compares coherent and incoherent normalizations to demonstrate the presence of interference.
 
 ## Numerical convention
 
@@ -121,4 +136,6 @@ enable_x64()
 
 ## Current status
 
-The package now contains CP-aware coefficient sets, native JAX three-body Dalitz kinematics and four-momentum reconstruction, QRules/AmpForm model building, TensorWaves/JAX compilation and kinematic transformation, fixed-sample Monte Carlo normalization, efficiency/background interfaces, likelihood scaffolding, a Minuit/JAX bridge, fit/interference fractions and CP observables. The next physics milestone is extending the D+ reference model beyond the rho-only benchmark to multiple resonances and a non-resonant amplitude, then fitting generated pseudo-data.
+The package now contains CP-aware coefficient sets, coherent external amplitude coefficients, native JAX three-body Dalitz kinematics and four-momentum reconstruction, QRules/AmpForm model building, TensorWaves/JAX compilation and symmetrized kinematic transformation, fixed-sample Monte Carlo normalization, efficiency/background interfaces, likelihood scaffolding, a Minuit/JAX bridge, fit/interference fractions and CP observables.
+
+The next physics milestone is turning the `rho + f0 + NR` reference model into a parameter-explicit fit model, generating pseudo-data, and recovering the injected magnitudes and phases with an unbinned likelihood.
