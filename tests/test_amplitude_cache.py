@@ -89,3 +89,58 @@ def test_only_component_with_floating_dynamics_is_reevaluated():
     assert f1.calls == 4
     # The static component remains fully cached.
     assert f2.calls == 2
+
+
+def test_component_normalization_sets_matrix_diagonal_to_one():
+    f1 = CountingAmplitude([1.0 + 0.0j, 2.0 + 0.0j])
+    f2 = CountingAmplitude([0.5 + 0.2j, -0.3 + 0.1j])
+    c1 = _fit_coefficient("a", 1.0, 0.0, fixed=True)
+    c2 = _fit_coefficient("b", 0.5, 0.2)
+    components = (
+        AmplitudeComponent("a", f1, c1),
+        AmplitudeComponent("b", f2, c2),
+    )
+    norm_data = {"x": jnp.arange(32.0)}
+
+    cache = PreparedAmplitudeCache.prepare(
+        components,
+        data={"x": jnp.arange(8.0)},
+        normalization_data=norm_data,
+        normalization_weights=jnp.ones(32),
+        parameters=(*c1.parameters, *c2.parameters),
+        normalize_components=True,
+    )
+
+    diagonal = jnp.real(jnp.diag(cache.normalization_matrix_fixed))
+    assert jnp.allclose(diagonal, jnp.ones(2), rtol=1e-12, atol=1e-12)
+
+
+def test_floating_component_is_renormalized_after_dynamic_change():
+    f1 = CountingAmplitude([1.0 + 0.0j, 2.0 + 0.0j])
+    f2 = CountingAmplitude([0.2 + 0.1j, 0.4 - 0.2j])
+    c1 = _fit_coefficient("a", 1.0, 0.0, fixed=True)
+    c2 = _fit_coefficient("b", 0.5, 0.3)
+    dynamic = Parameter.dynamics(
+        "a.scale",
+        1.0,
+        backend_name="scale",
+        owner="a",
+    )
+    components = (
+        AmplitudeComponent("a", f1, c1),
+        AmplitudeComponent("b", f2, c2),
+    )
+
+    cache = PreparedAmplitudeCache.prepare(
+        components,
+        data={"x": jnp.arange(8.0)},
+        normalization_data={"x": jnp.arange(32.0)},
+        normalization_weights=jnp.ones(32),
+        parameters=(*c1.parameters, *c2.parameters, dynamic),
+        normalize_components=True,
+    )
+
+    _, norm_components = cache._evaluate_components({"a.scale": 4.0})
+    matrix = cache._matrix_with_dynamic_blocks(norm_components)
+    diagonal = jnp.real(jnp.diag(matrix))
+    assert jnp.allclose(diagonal, jnp.ones(2), rtol=1e-12, atol=1e-12)
