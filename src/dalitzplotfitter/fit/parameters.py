@@ -86,3 +86,32 @@ class Parameter:
             owner=owner,
             backend_name=backend_name,
         )
+
+    @classmethod
+    def meson_radius(
+        cls,
+        name: str,
+        value: float,
+        *,
+        backend_name: str,
+        owner: str,
+        fixed: bool = True,
+        bounds: tuple[float | None, float | None] | None = None,
+        step: float | None = None,
+    ) -> "Parameter":
+        """Declare a Blatt-Weisskopf meson radius.
+
+        Meson radii are fixed by default. Set ``fixed=False`` explicitly only when
+        a fit is intended to vary the radius; in that case it is treated as a
+        dynamical parameter and invalidates only the owning amplitude cache.
+        """
+
+        return cls.dynamics(
+            name=name,
+            value=value,
+            backend_name=backend_name,
+            owner=owner,
+            fixed=fixed,
+            bounds=bounds,
+            step=step,
+        )
