@@ -8,6 +8,44 @@ from jax import Array
 from .dalitz import kallen, s23_limits
 
 
+def _rotate_spatial(momentum: Array) -> Array:
+    """Apply a fixed generic global rotation to a four-momentum.
+
+    The raw Dalitz reconstruction places one two-body subsystem exactly on the
+    global z axis. That is a perfectly valid physical configuration, but it can
+    make helicity-coordinate formulae numerically singular for a topology whose
+    resonance is precisely that subsystem. A fixed global rotation preserves all
+    invariant masses and relative decay angles while avoiding alignment with a
+    coordinate axis.
+
+    This deterministic convention is appropriate for the current unpolarized
+    scalar-mother use case. A future polarized/spinful production model should
+    generate the corresponding absolute orientation explicitly.
+    """
+
+    momentum = jnp.asarray(momentum)
+    spatial = momentum[..., 1:]
+
+    # Generic fixed Euler rotation Rz(gamma) @ Ry(beta) @ Rx(alpha).
+    alpha = jnp.asarray(0.37, dtype=momentum.dtype)
+    beta = jnp.asarray(0.61, dtype=momentum.dtype)
+    gamma = jnp.asarray(0.29, dtype=momentum.dtype)
+
+    ca, sa = jnp.cos(alpha), jnp.sin(alpha)
+    cb, sb = jnp.cos(beta), jnp.sin(beta)
+    cg, sg = jnp.cos(gamma), jnp.sin(gamma)
+
+    rotation = jnp.asarray(
+        [
+            [cg * cb, cg * sb * sa - sg * ca, cg * sb * ca + sg * sa],
+            [sg * cb, sg * sb * sa + cg * ca, sg * sb * ca - cg * sa],
+            [-sb, cb * sa, cb * ca],
+        ]
+    )
+    rotated = jnp.einsum("ij,...j->...i", rotation, spatial)
+    return jnp.concatenate((momentum[..., :1], rotated), axis=-1)
+
+
 def four_momenta_from_dalitz(
     s12: Array,
     s23: Array,
@@ -68,7 +106,8 @@ def four_momenta_from_dalitz(
     p1 = jnp.stack((energy1, px1_star, zeros, pz1), axis=-1)
     p2 = jnp.stack((energy2, px2_star, zeros, pz2), axis=-1)
     p3 = jnp.stack((energy3, zeros, zeros, -pair_momentum), axis=-1)
-    return p1, p2, p3
+
+    return _rotate_spatial(p1), _rotate_spatial(p2), _rotate_spatial(p3)
 
 
 def invariant_mass_squared(momentum: Array) -> Array:
