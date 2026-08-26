@@ -1,5 +1,6 @@
 """DalitzPlotFitter-owned symbolic dynamics."""
 
+from .builder import LauraRelativisticBreitWignerBuilder
 from .laura import (
     blatt_weisskopf_factor,
     breakup_momentum,
@@ -9,6 +10,7 @@ from .laura import (
 )
 
 __all__ = [
+    "LauraRelativisticBreitWignerBuilder",
     "blatt_weisskopf_factor",
     "breakup_momentum",
     "energy_dependent_width",
