@@ -34,7 +34,7 @@ c_antiparticle = coefficient.value(Flavor.ANTIPARTICLE)
 
 ## Three-body phase space
 
-The core package does not depend on the TensorFlow-based `phasespace` package. Instead, `ThreeBodyPhaseSpace` generates weighted points directly in Dalitz coordinates using JAX.
+The core package does not depend on the TensorFlow-based `phasespace` package. Instead, `ThreeBodyPhaseSpace` generates weighted points directly in Dalitz coordinates using JAX and reconstructs a deterministic mother-rest-frame four-momentum configuration in the `(E, px, py, pz)` convention expected by AmpForm/TensorWaves.
 
 ```python
 import jax
@@ -47,7 +47,37 @@ phase_space = ThreeBodyPhaseSpace(
 sample = phase_space.generate(jax.random.key(7), size=1_000_000)
 ```
 
+When a QRules reaction is available, masses can be taken directly from it:
+
+```python
+phase_space = ThreeBodyPhaseSpace.from_reaction(reaction)
+```
+
 The same phase-space sample should be reused throughout a fit, making Monte Carlo normalization deterministic.
+
+## First physical model: D+ -> pi+ pi+ pi-
+
+The first integration benchmark is the symmetrized `D+ -> pi+ pi+ pi-` amplitude through `rho(770)0`. It matches the channel used in the AmpForm symmetrization documentation: QRules keeps one indistinguishable quantum-state transition and AmpForm restores the two kinematically distinct `pi+ pi-` pairings inside the amplitude.
+
+Run it with:
+
+```bash
+python examples/01_dplus_rho.py
+```
+
+The example performs the complete chain
+
+```text
+QRules reaction
+    -> AmpForm symbolic model
+    -> TensorWaves/JAX compiled intensity
+    -> native JAX three-body phase space
+    -> AmpForm kinematic transformation
+    -> intensity evaluation
+    -> fixed-sample Monte Carlo normalization
+```
+
+`CompiledModel` exposes the numerical model as a pure `model(data, parameters)` function instead of relying on hidden mutable parameter updates. This is the interface that will be used by JAX autodiff and the likelihood fitter.
 
 ## Numerical convention
 
@@ -91,4 +121,4 @@ enable_x64()
 
 ## Current status
 
-The initial skeleton includes CP-aware coefficient sets, three-body Dalitz kinematics, native JAX phase-space generation, fixed-sample Monte Carlo normalization, efficiency/background interfaces, likelihood scaffolding, a Minuit/JAX bridge, fit/interference fractions and CP observables. Full AmpForm kinematic transformation and production amplitude examples are the next milestones.
+The package now contains CP-aware coefficient sets, native JAX three-body Dalitz kinematics and four-momentum reconstruction, QRules/AmpForm model building, TensorWaves/JAX compilation and kinematic transformation, fixed-sample Monte Carlo normalization, efficiency/background interfaces, likelihood scaffolding, a Minuit/JAX bridge, fit/interference fractions and CP observables. The next physics milestone is extending the D+ reference model beyond the rho-only benchmark to multiple resonances and a non-resonant amplitude, then fitting generated pseudo-data.
