@@ -1,8 +1,12 @@
 import jax.numpy as jnp
 
+from dalitzplotfitter import enable_x64
 from dalitzplotfitter.amplitude import AmplitudeComponent, PreparedAmplitudeCache
 from dalitzplotfitter.coefficients import FitMagPhase
 from dalitzplotfitter.fit import Parameter
+
+
+enable_x64()
 
 
 class CountingAmplitude:
