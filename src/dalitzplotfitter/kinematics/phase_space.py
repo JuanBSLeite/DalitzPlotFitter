@@ -32,12 +32,12 @@ class PhaseSpaceSample:
             data.update({"p1": self.p1, "p2": self.p2, "p3": self.p3})
         return data
 
-    def as_momentum_dict(self) -> dict[int, Array]:
-        """Return momenta using AmpForm/TensorWaves final-state IDs 0, 1, 2."""
+    def as_momentum_dict(self) -> dict[str, Array]:
+        """Return momenta with the labels expected by TensorWaves: p0, p1, p2."""
 
         if self.p1 is None or self.p2 is None or self.p3 is None:
             raise ValueError("This phase-space sample does not contain four-momenta")
-        return {0: self.p1, 1: self.p2, 2: self.p3}
+        return {"p0": self.p1, "p1": self.p2, "p2": self.p3}
 
 
 @dataclass(frozen=True)
