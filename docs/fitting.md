@@ -20,42 +20,39 @@ for a one-parameter Gaussian approximation. `dalitzplotfitter.fit.Minimizer` the
 
 `Parameter.step` is forwarded to the corresponding Minuit initial step/error setting. Bounds are forwarded to `Minuit.limits`.
 
-## Cartesian fit coefficients
+## RealImag fit coefficients
 
-For CP-conserving amplitude fits, `FitCartesian` parameterizes a complex coefficient directly as
+For CP-conserving amplitude fits, `RealImag` parameterizes a complex coefficient directly as
 
 ```text
 c = x + i y.
 ```
 
-It contains only the two fit parameters `x` and `y` and has no flavor dependence or CP-violating offsets. This is distinct from `FitCartesianCP`, which contains the additional CP parameters `dx` and `dy`.
+The same `RealImag` class accepts either plain numerical values or fit `Parameter` objects. When `Parameter` objects are supplied, their current values are resolved from the minimizer mapping. There is no separate non-CP `FitCartesian` type.
 
-The reference `D+ -> pi- pi+ pi+` closure now uses Cartesian coefficients for the `f0` and non-resonant components. The rho reference coefficient is fixed to
+This is distinct from CP-dependent coefficient parameterizations such as `CartesianCP`, which contain additional CP parameters.
+
+The reference `D+ -> pi- pi+ pi+` closure uses `RealImag` coefficients for the rho, f0 and non-resonant terms, with the reference fixed to
 
 ```text
 c_rho = 1 + 0 i.
 ```
 
-The Cartesian representation avoids the periodic phase boundary of a magnitude/phase parameterization while describing exactly the same complex amplitudes.
-
 ## Toy-MC closure tests
 
-A single finite toy sample is a statistical experiment. Closure should therefore not be judged only by a rigid absolute difference between fitted and generated values.
-
-For each fitted parameter, define the pull
+The reference closure test checks statistical compatibility directly. For every fitted real or imaginary coefficient component,
 
 ```text
-pull = (theta_fit - theta_true) / sigma_fit
+pull = (generated - fitted) / fitted_error
 ```
 
-where `sigma_fit` is the HESSE uncertainty computed with the correct NLL `errordef=0.5` convention.
+and the required condition is
 
-The reference closure test requires both:
+```text
+abs(pull) < 1.
+```
 
-1. a bounded pull, to test consistency with the fitted statistical uncertainty;
-2. a broad absolute sanity bound, to prevent a wrong local minimum or pathological uncertainty estimate from passing merely because the reported uncertainty is very large.
-
-This is intentionally different from loosening a failing absolute tolerance. The pull test uses the statistical scale predicted by the fit itself, while the absolute bound remains as an independent guardrail.
+The fitted error is the HESSE uncertainty obtained with the NLL convention `errordef=0.5`.
 
 The current high-statistics reference closure uses:
 
