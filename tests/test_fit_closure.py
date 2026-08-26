@@ -22,7 +22,7 @@ from dalitzplotfitter.toy import ToyGenerator
 def _build_resonance(resonance: str):
     reaction = ReactionBuilder(
         initial_state="D+",
-        final_state=["pi+", "pi+", "pi-"],
+        final_state=["pi-", "pi+", "pi+"],
         allowed_intermediate_particles=[resonance],
     ).build()
     model = AmplitudeBuilder(reaction).build()
