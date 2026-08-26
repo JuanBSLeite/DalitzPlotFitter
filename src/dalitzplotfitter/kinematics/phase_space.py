@@ -76,22 +76,37 @@ class ThreeBodyPhaseSpace:
         masses = tuple(float(final_state[i].mass) for i in range(3))
         return cls(float(initial_particle.mass), masses)
 
-    def generate(
+    def from_unit_square(
         self,
-        key: Array,
-        size: int,
+        unit_points: Array,
         *,
         with_momenta: bool = True,
     ) -> PhaseSpaceSample:
-        if size <= 0:
-            raise ValueError("size must be positive")
-        u = jax.random.uniform(key, shape=(size, 2), minval=0.0, maxval=1.0)
+        """Map deterministic points from ``[0, 1]^2`` onto the Dalitz plot.
+
+        The first coordinate is mapped linearly to ``s12``. The second is mapped
+        linearly between the kinematic ``s23`` limits at that ``s12``. The
+        returned ``weights`` are the Jacobian of this transformation,
+
+        ``ds12 ds23 = weights du1 du2``.
+
+        This method is also used by deterministic envelope searches for toy
+        accept-reject generation, so the random generator and the maximum search
+        share exactly the same phase-space parametrization.
+        """
+
+        unit_points = jnp.asarray(unit_points)
+        if unit_points.ndim != 2 or unit_points.shape[1] != 2:
+            raise ValueError("unit_points must have shape (N, 2)")
+
+        u1 = unit_points[:, 0]
+        u2 = unit_points[:, 1]
         low12, high12 = s12_limits(self.mother_mass, self.masses)
         width12 = high12 - low12
-        s12 = low12 + u[:, 0] * width12
+        s12 = low12 + u1 * width12
         low23, high23 = s23_limits(s12, self.mother_mass, self.masses)
         width23 = high23 - low23
-        s23 = low23 + u[:, 1] * width23
+        s23 = low23 + u2 * width23
         s13 = s13_from_s12_s23(s12, s23, self.mother_mass, self.masses)
         weights = jnp.asarray(width12) * width23
 
@@ -113,3 +128,20 @@ class ThreeBodyPhaseSpace:
             p2=p2,
             p3=p3,
         )
+
+    def generate(
+        self,
+        key: Array,
+        size: int,
+        *,
+        with_momenta: bool = True,
+    ) -> PhaseSpaceSample:
+        if size <= 0:
+            raise ValueError("size must be positive")
+        unit_points = jax.random.uniform(
+            key,
+            shape=(size, 2),
+            minval=0.0,
+            maxval=1.0,
+        )
+        return self.from_unit_square(unit_points, with_momenta=with_momenta)
