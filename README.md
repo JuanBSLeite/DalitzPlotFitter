@@ -107,6 +107,8 @@ When a QRules reaction is available, masses can be taken directly from it:
 phase_space = ThreeBodyPhaseSpace.from_reaction(reaction)
 ```
 
+`ThreeBodyPhaseSpace.from_unit_square()` exposes the same deterministic mapping used internally by the random generator. The map takes points in `[0,1]^2` to physical Dalitz coordinates and returns the exact Jacobian `ds12 ds23 = w_PS du1 du2`. This shared parametrization is used by the toy-generator envelope search.
+
 The same phase-space sample should be reused throughout a fit, making Monte Carlo normalization deterministic.
 
 ## D+ -> pi- pi+ pi+ reference model
@@ -157,6 +159,7 @@ The multi-component example explicitly compares coherent and incoherent normaliz
 
 ```text
 known truth parameters
+    -> deterministic search for the accept-reject envelope maximum
     -> accept-reject toy generation from fresh phase-space batches
     -> randomized fit starting values
     -> independent MC normalization sample
@@ -165,19 +168,21 @@ known truth parameters
     -> pull and absolute-sanity checks against injected parameters
 ```
 
-`ToyGenerator` now uses accept-reject rather than categorical resampling from a finite pool. The native phase-space proposal is not uniform in Dalitz measure, so the proposal Jacobian returned as `PhaseSpaceSample.weights` is included in the accept-reject score,
+`ToyGenerator` uses accept-reject rather than categorical resampling from a finite pool. The native phase-space proposal is uniform in the unit square used to parametrize the Dalitz plot, so the proposal-to-Dalitz Jacobian returned as `PhaseSpaceSample.weights` enters the accept-reject score,
 
 ```text
-score(x) = w_PS(x) |A(x)|^2.
+score(u) = w_PS(u) |A(x(u))|^2.
 ```
 
-`pool_size` is used only for a pilot envelope estimate. Accepted events come from new phase-space batches and therefore do not inherit finite-pool duplicate structure. If a later batch exceeds the current pilot envelope, the generator enlarges the envelope and restarts the accepted sample so previously accepted events are not retained with an invalid acceptance probability.
+The accept-reject envelope is no longer estimated from the maximum of a random pilot sample. Before generation, `ToyGenerator.estimate_maximum()` evaluates the score on a regular grid covering the full unit square, keeps several of the highest-score cells, and performs successive local refinements around those candidates. `envelope_safety` is then applied only as a safety margin above this deterministically located maximum. If a later generation batch nevertheless exceeds the envelope, the generator enlarges it and restarts the accepted sample so no event is retained with an inconsistent acceptance probability.
+
+`pool_size` remains temporarily in the `ToyGenerator` constructor for backwards compatibility with existing examples, but it no longer controls envelope estimation.
 
 The reference rho coefficient is fixed to remove the arbitrary global scale and phase. The test floats the `f0` and non-resonant magnitudes and phases and compares the fitted values with the injected truth, including wrapped phase differences. Closure is evaluated primarily through pulls using HESSE uncertainties, while broad absolute limits guard against wrong local minima or pathological error estimates.
 
 For likelihood minimization, `Minimizer` uses the Minuit NLL convention `errordef=0.5` by default, and each `Parameter.step` is propagated to the corresponding Minuit initial error/step size.
 
-Toy generation and fit normalization intentionally use independent Monte Carlo samples.
+Toy generation and fit normalization intentionally use independent Monte Carlo samples. A separate deterministic expected-NLL/Asimov regression test verifies that the likelihood normalization is stationary at the injected parameters when toy fluctuations are removed.
 
 An interactive version of the same validation is available in:
 
@@ -231,6 +236,6 @@ enable_x64()
 
 ## Current status
 
-The package now contains CP-aware coefficient sets, fit-aware coefficient parameters, coherent external amplitude coefficients, cache-aware amplitude evaluation, native JAX three-body Dalitz kinematics and four-momentum reconstruction, QRules/AmpForm model building, TensorWaves/JAX compilation and symmetrized kinematic transformation, fixed-sample Monte Carlo normalization, accept-reject toy generation, efficiency/background interfaces, likelihood scaffolding, a Minuit/JAX bridge, fit/interference fractions and CP observables.
+The package now contains CP-aware coefficient sets, fit-aware coefficient parameters, coherent external amplitude coefficients, cache-aware amplitude evaluation, native JAX three-body Dalitz kinematics and four-momentum reconstruction, QRules/AmpForm model building, TensorWaves/JAX compilation and symmetrized kinematic transformation, fixed-sample Monte Carlo normalization, deterministic-envelope accept-reject toy generation, efficiency/background interfaces, likelihood scaffolding, a Minuit/JAX bridge, fit/interference fractions and CP observables.
 
 The current validation milestone is the full `D+ -> pi- pi+ pi+` toy-MC coefficient closure test. The next closure milestone is floating one or more dynamical parameters such as resonance mass or width while verifying selective cache invalidation and parameter recovery.
