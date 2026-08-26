@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping
 
 import jax.numpy as jnp
 from jax import Array
@@ -14,6 +15,13 @@ Scalar = float | Array
 
 def _phase(angle: Scalar) -> Array:
     return jnp.exp(1j * jnp.asarray(angle))
+
+
+def _resolve(value: object, values: Mapping[str, object] | None = None):
+    resolver = getattr(value, "resolve", None)
+    if resolver is not None:
+        return resolver(values)
+    return value
 
 
 @dataclass(frozen=True)
@@ -28,12 +36,29 @@ class MagPhase:
 
 @dataclass(frozen=True)
 class RealImag:
-    x: Scalar
-    y: Scalar
+    """CP-conserving coefficient ``x + i y``.
 
-    def value(self, flavor: Flavor = Flavor.PARTICLE) -> Array:
+    ``x`` and ``y`` may be plain numerical values or fit ``Parameter`` objects.
+    When fit parameters are supplied, ``value(..., values=mapping)`` resolves
+    their current values from the minimizer mapping.
+    """
+
+    x: object
+    y: object
+
+    @property
+    def parameters(self) -> tuple[object, ...]:
+        return tuple(value for value in (self.x, self.y) if hasattr(value, "resolve"))
+
+    def value(
+        self,
+        flavor: Flavor = Flavor.PARTICLE,
+        values: Mapping[str, object] | None = None,
+    ) -> Array:
         del flavor
-        return jnp.asarray(self.x) + 1j * jnp.asarray(self.y)
+        x = _resolve(self.x, values)
+        y = _resolve(self.y, values)
+        return jnp.asarray(x) + 1j * jnp.asarray(y)
 
 
 @dataclass(frozen=True)
