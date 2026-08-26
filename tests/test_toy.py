@@ -112,13 +112,11 @@ def test_deterministic_envelope_search_finds_narrow_peak():
     # Build a deliberately narrow synthetic peak. A coarse random pilot can
     # easily miss this structure, while the hierarchical deterministic search
     # must locate it reproducibly.
-    s12_span = float(
-        phase_space.from_unit_square(
-            jnp.asarray([[1.0, 0.5], [0.0, 0.5]]),
-            with_momenta=False,
-        ).s12.ptp()
+    s12_edges = phase_space.from_unit_square(
+        jnp.asarray([[1.0, 0.5], [0.0, 0.5]]),
+        with_momenta=False,
     )
-    sigma12 = 0.0025 * s12_span
+    sigma12 = 0.0025 * float(jnp.ptp(s12_edges.s12))
     # The local s23 span depends on s12. Use the span at the target u1.
     target_edge = phase_space.from_unit_square(
         jnp.asarray([[target_u[0, 0], 0.0], [target_u[0, 0], 1.0]]),
