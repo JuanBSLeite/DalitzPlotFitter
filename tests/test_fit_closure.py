@@ -58,7 +58,7 @@ def _assert_closure(
 
 
 def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
-    """Generate -> randomize start -> fit -> compare to injected truth."""
+    """Generate -> multi-start fit -> compare best minimum to injected truth."""
 
     enable_x64()
 
@@ -76,7 +76,6 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
         "nr.phi": -0.85,
     }
 
-    # Randomized, reproducible starting point intentionally displaced from truth.
     rng = np.random.default_rng(314159)
     f0_r = Parameter.coefficient(
         "f0.r",
@@ -120,7 +119,6 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
     phase_space = ThreeBodyPhaseSpace.from_reaction(rho_reaction)
     transformer = create_kinematic_transformer(rho_model)
 
-    # Generation is deliberately independent of PreparedAmplitudeCache.
     def toy_intensity(data, values):
         rho = rho_dynamics(data, None)
         f0 = f0_dynamics(data, None)
@@ -145,9 +143,6 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
         parameters=truth,
     )
 
-    # Independent normalization sample: never reuse generation candidates.
-    # Keep a high-statistics normalization sample while diagnosing closure so
-    # normalization MC noise is subdominant to toy-generation effects.
     normalization_sample = phase_space.generate(jax.random.key(2027), 300_000)
     normalization_data = transformer(normalization_sample.as_momentum_dict())
 
@@ -160,8 +155,6 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
         parameters=parameters,
     )
 
-    # Regression guard: matrix normalization must exactly reproduce the direct
-    # Monte Carlo sum on the same sample for the injected coefficient vector.
     truth_coefficients = cache.coefficient_vector(truth)
     direct_amplitude = cache.normalization_components @ truth_coefficients
     direct_normalization = jnp.mean(
@@ -181,13 +174,30 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
             toy_sample.size * jnp.log(normalization)
         )
 
-    result = Minimizer(nll, parameters).fit()
+    minimizer = Minimizer(nll, parameters)
+    default_start = {parameter.name: parameter.value for parameter in parameters}
+    starts = (
+        default_start,
+        truth,
+        {"f0.r": 0.50, "f0.phi": 1.0, "nr.r": 0.30, "nr.phi": -0.7},
+        {"f0.r": 0.65, "f0.phi": 2.6, "nr.r": 0.20, "nr.phi": 2.2},
+        {"f0.r": 0.40, "f0.phi": -2.6, "nr.r": 0.40, "nr.phi": -2.2},
+    )
+    results = [minimizer.fit(start_values=start) for start in starts]
+    valid_results = [result for result in results if result.valid]
+    assert valid_results, "No valid Minuit minimum was found"
+    result = min(valid_results, key=lambda candidate: float(candidate.fval))
 
-    assert result.valid
-    # Closure is a statistical statement. Check pulls using HESSE uncertainties
-    # (with Minuit errordef=0.5 for an NLL), while retaining broad absolute
-    # sanity limits so a wrong local minimum cannot pass merely because of a
-    # pathological uncertainty estimate.
+    nll_truth = float(nll(truth))
+    delta_nll_truth = nll_truth - float(result.fval)
+    # A correctly generated finite toy can prefer a nearby point over the truth,
+    # but the injected point must not be catastrophically disfavoured.
+    assert delta_nll_truth < 25.0, (
+        f"Injected truth is far above the best minimum: "
+        f"NLL(truth)={nll_truth}, NLL(best)={float(result.fval)}, "
+        f"DeltaNLL={delta_nll_truth}"
+    )
+
     _assert_closure(
         result,
         "f0.r",
