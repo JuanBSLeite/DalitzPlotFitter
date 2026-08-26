@@ -168,6 +168,8 @@ known truth parameters
     -> pull and absolute-sanity checks against injected parameters
 ```
 
+The current reference closure uses **100,000 generated fit events** and an independent **1,000,000-event Monte Carlo normalization sample**. The notebook `notebooks/01_dplus_fit_closure.ipynb` uses the same statistics so visual diagnostics and CI validation probe the same regime.
+
 `ToyGenerator` uses accept-reject rather than categorical resampling from a finite pool. The native phase-space proposal is uniform in the unit square used to parametrize the Dalitz plot, so the proposal-to-Dalitz Jacobian returned as `PhaseSpaceSample.weights` enters the accept-reject score,
 
 ```text
