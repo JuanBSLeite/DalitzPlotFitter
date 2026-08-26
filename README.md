@@ -161,10 +161,10 @@ The multi-component example explicitly compares coherent and incoherent normaliz
 known truth parameters
     -> deterministic search for the accept-reject envelope maximum
     -> accept-reject toy generation from fresh phase-space batches
-    -> randomized fit starting values
+    -> several separated Minuit starting points
     -> independent MC normalization sample
     -> cached unbinned likelihood
-    -> Minuit minimization
+    -> select the valid minimum with the lowest NLL
     -> pull and absolute-sanity checks against injected parameters
 ```
 
@@ -178,7 +178,11 @@ The accept-reject envelope is no longer estimated from the maximum of a random p
 
 `pool_size` remains temporarily in the `ToyGenerator` constructor for backwards compatibility with existing examples, but it no longer controls envelope estimation.
 
-The reference rho coefficient is fixed to remove the arbitrary global scale and phase. The test floats the `f0` and non-resonant magnitudes and phases and compares the fitted values with the injected truth, including wrapped phase differences. Closure is evaluated primarily through pulls using HESSE uncertainties, while broad absolute limits guard against wrong local minima or pathological error estimates.
+The reference rho coefficient is fixed to remove the arbitrary global scale and phase. The test floats the `f0` and non-resonant magnitudes and phases and compares the fitted values with the injected truth, including wrapped phase differences. Because coherent amplitudes can contain separated local minima in phase space, closure validation does not rely on a single arbitrary Minuit start: the same cached objective is minimized from several starts, including one close to the injected point, and the valid minimum with the lowest NLL is selected. `Minimizer.fit(start_values=...)` provides these explicit starts without rebuilding the amplitude or normalization cache.
+
+The closure test also compares `NLL(truth)` with the best fitted NLL. A finite toy may prefer a nearby parameter point, but a large separation is treated as evidence that toy generation or the fitted probability model is still inconsistent.
+
+Closure is evaluated primarily through pulls using HESSE uncertainties, while broad absolute limits guard against wrong local minima or pathological error estimates.
 
 For likelihood minimization, `Minimizer` uses the Minuit NLL convention `errordef=0.5` by default, and each `Parameter.step` is propagated to the corresponding Minuit initial error/step size.
 
