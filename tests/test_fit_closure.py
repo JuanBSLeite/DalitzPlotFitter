@@ -19,6 +19,10 @@ from dalitzplotfitter.reaction import ReactionBuilder
 from dalitzplotfitter.toy import ToyGenerator
 
 
+FIT_SAMPLE_SIZE = 100_000
+NORMALIZATION_SAMPLE_SIZE = 1_000_000
+
+
 def _build_resonance(resonance: str):
     reaction = ReactionBuilder(
         initial_state="D+",
@@ -138,12 +142,15 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
     )
     toy_sample, toy_data = generator.generate(
         jax.random.key(2026),
-        size=3_000,
+        size=FIT_SAMPLE_SIZE,
         intensity=toy_intensity,
         parameters=truth,
     )
 
-    normalization_sample = phase_space.generate(jax.random.key(2027), 300_000)
+    normalization_sample = phase_space.generate(
+        jax.random.key(2027),
+        NORMALIZATION_SAMPLE_SIZE,
+    )
     normalization_data = transformer(normalization_sample.as_momentum_dict())
 
     parameters = (rho_r, rho_phi, f0_r, f0_phi, nr_r, nr_phi)
