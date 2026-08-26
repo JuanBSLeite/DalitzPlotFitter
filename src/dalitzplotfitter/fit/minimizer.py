@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 import jax
 import jax.numpy as jnp
@@ -33,16 +33,34 @@ class Minimizer:
         self.parameters = tuple(parameters)
         self.errordef = float(errordef)
 
-    def fit(self):
+    def fit(self, start_values: Mapping[str, float] | None = None):
+        """Run MIGRAD/HESSE from the configured or explicitly supplied start.
+
+        ``start_values`` may override any subset of free-parameter starting
+        values. This is useful for diagnosing or handling multiple likelihood
+        minima without rebuilding the amplitude/cache objects.
+        """
+
         from iminuit import Minuit
 
         free = tuple(parameter for parameter in self.parameters if not parameter.fixed)
         fixed = {parameter.name: parameter.value for parameter in self.parameters if parameter.fixed}
         names = tuple(parameter.name for parameter in free)
-        start = tuple(parameter.value for parameter in free)
 
         if not free:
             raise ValueError("At least one free parameter is required")
+
+        start_values = {} if start_values is None else dict(start_values)
+        known_names = {parameter.name for parameter in self.parameters}
+        unknown = set(start_values) - known_names
+        if unknown:
+            unknown_text = ", ".join(sorted(unknown))
+            raise ValueError(f"Unknown starting parameters: {unknown_text}")
+
+        start = tuple(
+            float(start_values.get(parameter.name, parameter.value))
+            for parameter in free
+        )
 
         def vector_objective(vector):
             mapping = dict(fixed)
