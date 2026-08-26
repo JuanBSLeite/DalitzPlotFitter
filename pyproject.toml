@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dalitzplotfitter"
+version = "0.1.0.dev0"
+description = "JAX-native Dalitz-plot amplitude fitter built around QRules and AmpForm"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Juan B. S. Leite" }]
+dependencies = [
+  "ampform>=0.16.0",
+  "iminuit>=2.31",
+  "jax>=0.4.35",
+  "matplotlib>=3.9",
+  "mplhep>=0.4",
+  "numpy>=2.0",
+  "qrules>=0.10.8",
+  "tensorwaves[jax]>=0.4.16",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0", "pytest-cov>=5.0"]
+dev = ["dalitzplotfitter[test]", "ruff>=0.9"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dalitzplotfitter"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
