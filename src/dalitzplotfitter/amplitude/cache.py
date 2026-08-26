@@ -24,11 +24,11 @@ def _coefficient_value(coefficient, flavor, values):
 
 @dataclass(frozen=True)
 class PreparedAmplitudeCache:
-    """Pre-evaluated component amplitudes on data and normalization samples.
+    """Pre-evaluated amplitudes for fast repeated likelihood evaluations.
 
-    Components without floating dynamics are reused verbatim for every likelihood
-    evaluation. Components with floating dynamics are recomputed only when needed.
-    Coefficient-only fits therefore never reevaluate line shapes or angular terms.
+    Coefficient-only fits reuse all line shapes on data and normalization samples,
+    plus the complete normalization matrix. If dynamics float, only affected
+    component columns and their normalization-matrix rows/columns are recomputed.
     """
 
     components: tuple[AmplitudeComponent, ...]
@@ -56,12 +56,8 @@ class PreparedAmplitudeCache:
         if not components:
             raise ValueError("At least one amplitude component is required")
 
-        data_values = []
-        norm_values = []
-        for component in components:
-            data_values.append(jnp.asarray(component.function(data, None)))
-            norm_values.append(jnp.asarray(component.function(normalization_data, None)))
-
+        data_values = [jnp.asarray(c.function(data, None)) for c in components]
+        norm_values = [jnp.asarray(c.function(normalization_data, None)) for c in components]
         data_matrix = jnp.stack(data_values, axis=1)
         norm_matrix_values = jnp.stack(norm_values, axis=1)
         fixed_matrix = normalization_matrix(
@@ -82,15 +78,16 @@ class PreparedAmplitudeCache:
         )
 
     @property
-    def component_names(self) -> tuple[str, ...]:
-        return tuple(component.name for component in self.components)
-
-    @property
     def floating_dynamics(self) -> tuple[Parameter, ...]:
         return tuple(
-            parameter
-            for parameter in self.parameters
-            if parameter.kind is ParameterKind.DYNAMICS and not parameter.fixed
+            p for p in self.parameters
+            if p.kind is ParameterKind.DYNAMICS and not p.fixed
+        )
+
+    @property
+    def floating_dynamic_owners(self) -> frozenset[str]:
+        return frozenset(
+            p.owner for p in self.floating_dynamics if p.owner is not None
         )
 
     def coefficient_vector(
@@ -100,8 +97,8 @@ class PreparedAmplitudeCache:
         flavor: Flavor = Flavor.PARTICLE,
     ) -> Array:
         return jnp.asarray([
-            _coefficient_value(component.coefficient, flavor, fit_values)
-            for component in self.components
+            _coefficient_value(c.coefficient, flavor, fit_values)
+            for c in self.components
         ])
 
     def _dynamic_parameter_mapping(
@@ -110,47 +107,71 @@ class PreparedAmplitudeCache:
         fit_values: Mapping[str, object],
     ) -> dict[str, object]:
         output = {}
-        for parameter in self.parameters:
-            if parameter.kind is not ParameterKind.DYNAMICS:
-                continue
-            if parameter.owner != component_name:
-                continue
-            backend_name = parameter.backend_name or parameter.name
-            output[backend_name] = parameter.resolve(fit_values)
+        for p in self.parameters:
+            if p.kind is ParameterKind.DYNAMICS and p.owner == component_name:
+                output[p.backend_name or p.name] = p.resolve(fit_values)
         return output
 
-    def component_matrices(
+    def _evaluate_components(
         self,
         fit_values: Mapping[str, object],
     ) -> tuple[Array, Array]:
-        """Return data/MC component matrices, reusing all unaffected columns."""
-
-        if not self.floating_dynamics:
+        owners = self.floating_dynamic_owners
+        if not owners:
             return self.data_components, self.normalization_components
 
         data_columns = []
         norm_columns = []
-        floating_owners = {parameter.owner for parameter in self.floating_dynamics}
-        for index, component in enumerate(self.components):
-            if component.name not in floating_owners:
-                data_columns.append(self.data_components[:, index])
-                norm_columns.append(self.normalization_components[:, index])
+        for i, component in enumerate(self.components):
+            if component.name not in owners:
+                data_columns.append(self.data_components[:, i])
+                norm_columns.append(self.normalization_components[:, i])
                 continue
-
-            dynamic_parameters = self._dynamic_parameter_mapping(
-                component.name,
-                fit_values,
-            )
-            data_columns.append(
-                jnp.asarray(component.function(self.data, dynamic_parameters))
-            )
+            pars = self._dynamic_parameter_mapping(component.name, fit_values)
+            data_columns.append(jnp.asarray(component.function(self.data, pars)))
             norm_columns.append(
-                jnp.asarray(
-                    component.function(self.normalization_data, dynamic_parameters)
-                )
+                jnp.asarray(component.function(self.normalization_data, pars))
             )
-
         return jnp.stack(data_columns, axis=1), jnp.stack(norm_columns, axis=1)
+
+    def _matrix_with_dynamic_blocks(self, norm_components: Array) -> Array:
+        owners = self.floating_dynamic_owners
+        if not owners:
+            return self.normalization_matrix_fixed
+
+        dynamic_indices = [
+            i for i, c in enumerate(self.components) if c.name in owners
+        ]
+        weights = self.normalization_weights
+        if self.efficiency_normalization is not None:
+            weights = weights * jnp.asarray(self.efficiency_normalization)
+        n_events = norm_components.shape[0]
+
+        matrix = self.normalization_matrix_fixed
+        for i in dynamic_indices:
+            fi = norm_components[:, i]
+            for j in range(norm_components.shape[1]):
+                fj = norm_components[:, j]
+                value = jnp.sum(weights * jnp.conj(fi) * fj) / n_events
+                matrix = matrix.at[i, j].set(value)
+                matrix = matrix.at[j, i].set(jnp.conj(value))
+        return matrix
+
+    def evaluate(
+        self,
+        fit_values: Mapping[str, object],
+        *,
+        flavor: Flavor = Flavor.PARTICLE,
+    ) -> tuple[Array, Array]:
+        """Return event intensity and normalization with one cache-aware pass."""
+
+        coefficients = self.coefficient_vector(fit_values, flavor=flavor)
+        data_components, norm_components = self._evaluate_components(fit_values)
+        amplitude = data_components @ coefficients
+        intensity = jnp.real(amplitude * jnp.conj(amplitude))
+        matrix = self._matrix_with_dynamic_blocks(norm_components)
+        normalization = matrix_normalization(coefficients, matrix)
+        return intensity, normalization
 
     def amplitude(
         self,
@@ -159,7 +180,7 @@ class PreparedAmplitudeCache:
         flavor: Flavor = Flavor.PARTICLE,
     ) -> Array:
         coefficients = self.coefficient_vector(fit_values, flavor=flavor)
-        data_components, _ = self.component_matrices(fit_values)
+        data_components, _ = self._evaluate_components(fit_values)
         return data_components @ coefficients
 
     def intensity(
@@ -178,13 +199,6 @@ class PreparedAmplitudeCache:
         flavor: Flavor = Flavor.PARTICLE,
     ) -> Array:
         coefficients = self.coefficient_vector(fit_values, flavor=flavor)
-        if not self.floating_dynamics:
-            return matrix_normalization(coefficients, self.normalization_matrix_fixed)
-
-        _, norm_components = self.component_matrices(fit_values)
-        matrix = normalization_matrix(
-            norm_components,
-            self.normalization_weights,
-            self.efficiency_normalization,
-        )
+        _, norm_components = self._evaluate_components(fit_values)
+        matrix = self._matrix_with_dynamic_blocks(norm_components)
         return matrix_normalization(coefficients, matrix)
