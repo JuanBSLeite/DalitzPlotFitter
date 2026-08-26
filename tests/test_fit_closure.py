@@ -136,10 +136,7 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
         phase_space=phase_space,
         transformer=transformer,
         pool_size=60_000,
-        # Diagnostic: make the accept-reject envelope deliberately very
-        # conservative. If closure improves, the previous pilot-derived
-        # envelope was underestimating narrow resonance peaks.
-        envelope_safety=10.0,
+        envelope_safety=1.2,
     )
     toy_sample, toy_data = generator.generate(
         jax.random.key(2026),
@@ -149,8 +146,8 @@ def test_dplus_toy_fit_recovers_injected_mag_phase_parameters():
     )
 
     # Independent normalization sample: never reuse generation candidates.
-    # Use a substantially larger sample here to test whether the closure bias
-    # was caused by Monte Carlo noise in the normalization integral.
+    # Keep a high-statistics normalization sample while diagnosing closure so
+    # normalization MC noise is subdominant to toy-generation effects.
     normalization_sample = phase_space.generate(jax.random.key(2027), 300_000)
     normalization_data = transformer(normalization_sample.as_momentum_dict())
 
