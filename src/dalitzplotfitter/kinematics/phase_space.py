@@ -39,6 +39,20 @@ class PhaseSpaceSample:
             raise ValueError("This phase-space sample does not contain four-momenta")
         return {"p0": self.p1, "p1": self.p2, "p2": self.p3}
 
+    def take(self, indices: Array) -> "PhaseSpaceSample":
+        """Select events while preserving all available phase-space fields."""
+
+        indices = jnp.asarray(indices)
+        return PhaseSpaceSample(
+            s12=self.s12[indices],
+            s13=self.s13[indices],
+            s23=self.s23[indices],
+            weights=self.weights[indices],
+            p1=None if self.p1 is None else self.p1[indices],
+            p2=None if self.p2 is None else self.p2[indices],
+            p3=None if self.p3 is None else self.p3[indices],
+        )
+
 
 @dataclass(frozen=True)
 class ThreeBodyPhaseSpace:
