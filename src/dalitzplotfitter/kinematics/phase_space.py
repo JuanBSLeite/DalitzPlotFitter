@@ -51,6 +51,17 @@ class ThreeBodyPhaseSpace:
         if self.mother_mass <= sum(self.masses):
             raise ValueError("Mother mass must be above the three-body threshold")
 
+    @classmethod
+    def from_reaction(cls, reaction: object) -> ThreeBodyPhaseSpace:
+        """Build phase space directly from a three-body QRules reaction."""
+
+        final_state = reaction.final_state
+        if set(final_state) != {0, 1, 2}:
+            raise ValueError("Expected exactly three final-state IDs: 0, 1, 2")
+        initial_particle = reaction.initial_state[-1]
+        masses = tuple(float(final_state[i].mass) for i in range(3))
+        return cls(float(initial_particle.mass), masses)
+
     def generate(
         self,
         key: Array,
