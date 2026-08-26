@@ -10,6 +10,9 @@ The project deliberately uses one numerical backend: **JAX**. JAX is an internal
 - formulate symbolic amplitudes with AmpForm;
 - compile numerical amplitudes to JAX through TensorWaves;
 - keep complex fit coefficients owned by DalitzPlotFitter rather than by AmpForm;
+- allow both coefficient parameters and dynamical line-shape parameters to float in fits;
+- cache fixed component amplitudes on data and normalization samples;
+- use cached normalization matrices for coefficient-only fits;
 - perform deterministic Monte Carlo normalization on a fixed three-body phase-space sample generated natively with JAX;
 - optionally include efficiency in the signal PDF;
 - model background with analytic/JAX callables or Dalitz histograms;
@@ -17,6 +20,7 @@ The project deliberately uses one numerical backend: **JAX**. JAX is an internal
 - support simultaneous particle/antiparticle fits with CP violation;
 - calculate fit fractions, interference fractions and CP-asymmetry observables;
 - use iminuit while JAX evaluates the NLL and gradients;
+- validate fitter changes with toy-MC closure tests;
 - provide HEP-style diagnostics and Dalitz plots with mplhep.
 
 ## Coherent amplitude convention
@@ -30,6 +34,38 @@ A(x) = sum_i c_i F_i(x)
 For an AmpForm resonance component, `compile_amplitude_component()` removes the AmpForm-generated helicity coupling `C_...` by setting it to unity. The resulting function is therefore only `F_i(x)`. A DalitzPlotFitter `AmplitudeComponent` then applies a coefficient object such as `MagPhase`, `CartesianCP`, or another Laura++ parameterisation.
 
 This separation is essential for CP-violating simultaneous fits because the same dynamical component can be multiplied by different particle and antiparticle coefficients without modifying AmpForm.
+
+## Fit parameters and caching
+
+Fit parameters are first-class objects. They can represent coefficient parameters such as magnitudes and phases, or dynamical parameters such as resonance masses and widths.
+
+For a coefficient-only fit, the component amplitudes
+
+```text
+F_i(x_n)
+```
+
+are evaluated once on the data and once on the normalization sample. Every likelihood call then requires only the coherent linear combination
+
+```text
+A_n = sum_i c_i F_i(x_n)
+```
+
+rather than reevaluating Breit-Wigner functions, angular terms or form factors.
+
+The normalization matrix
+
+```text
+M_ij = integral epsilon(x) F_i*(x) F_j(x) dPhi
+```
+
+is also cached, so the normalization for new coefficients is only
+
+```text
+I(c) = c^dagger M c.
+```
+
+If a dynamical parameter of one component floats, only that component is reevaluated. The cache updates only the affected normalization-matrix row and column; static components and static matrix blocks are reused.
 
 ## CP-violating coefficients
 
@@ -94,6 +130,27 @@ with `rho(770)0` fixed as the global magnitude/phase reference. The `f(0)(980)` 
 
 The multi-component example explicitly compares coherent and incoherent normalizations to demonstrate the presence of interference.
 
+## Toy-MC closure validation
+
+`tests/test_fit_closure.py` is the first full fitter closure test. It performs the complete validation chain:
+
+```text
+known truth parameters
+    -> independent phase-space generation pool
+    -> unweighted toy sample
+    -> randomized fit starting values
+    -> independent MC normalization sample
+    -> cached unbinned likelihood
+    -> Minuit minimization
+    -> comparison of fitted and injected parameters
+```
+
+The reference rho coefficient is fixed to remove the arbitrary global scale and phase. The test floats the `f0` and non-resonant magnitudes and phases and compares the fitted values with the injected truth, including wrapped phase differences.
+
+Toy generation and fit normalization intentionally use independent Monte Carlo samples.
+
+Closure tests are intended to be mandatory validation for new important coefficient parameterisations and dynamical line-shape implementations.
+
 ## Numerical convention
 
 The signal PDF is
@@ -136,6 +193,6 @@ enable_x64()
 
 ## Current status
 
-The package now contains CP-aware coefficient sets, coherent external amplitude coefficients, native JAX three-body Dalitz kinematics and four-momentum reconstruction, QRules/AmpForm model building, TensorWaves/JAX compilation and symmetrized kinematic transformation, fixed-sample Monte Carlo normalization, efficiency/background interfaces, likelihood scaffolding, a Minuit/JAX bridge, fit/interference fractions and CP observables.
+The package now contains CP-aware coefficient sets, fit-aware coefficient parameters, coherent external amplitude coefficients, cache-aware amplitude evaluation, native JAX three-body Dalitz kinematics and four-momentum reconstruction, QRules/AmpForm model building, TensorWaves/JAX compilation and symmetrized kinematic transformation, fixed-sample Monte Carlo normalization, toy generation, efficiency/background interfaces, likelihood scaffolding, a Minuit/JAX bridge, fit/interference fractions and CP observables.
 
-The next physics milestone is turning the `rho + f0 + NR` reference model into a parameter-explicit fit model, generating pseudo-data, and recovering the injected magnitudes and phases with an unbinned likelihood.
+The current validation milestone is the full `D+ -> pi+ pi+ pi-` toy-MC coefficient closure test. The next closure milestone is floating one or more dynamical parameters such as resonance mass or width while verifying selective cache invalidation and parameter recovery.
