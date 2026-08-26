@@ -1,6 +1,7 @@
 """Amplitude-model construction."""
 
 from .builder import AmplitudeBuilder, compile_model
+from .cache import PreparedAmplitudeCache
 from .components import (
     AmplitudeComponent,
     CoherentAmplitudeModel,
@@ -17,6 +18,7 @@ __all__ = [
     "CompiledModel",
     "ConstantAmplitude",
     "KinematicTransformer",
+    "PreparedAmplitudeCache",
     "compile_amplitude_component",
     "compile_model",
     "create_kinematic_transformer",
