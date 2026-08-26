@@ -152,6 +152,14 @@ The reference rho coefficient is fixed to remove the arbitrary global scale and 
 
 Toy generation and fit normalization intentionally use independent Monte Carlo samples.
 
+An interactive version of the same validation is available in:
+
+```text
+notebooks/01_dplus_fit_closure.ipynb
+```
+
+The notebook includes the generated toy Dalitz plot, truth/start/fit parameter comparison with fit uncertainties, one-dimensional `s12`, `s13` and `s23` projections before and after minimization, and side-by-side two-dimensional toy/model densities before and after the fit. The model projections use the independent normalization MC sample weighted by the fitted amplitude, so they visualize the same probability model used in the likelihood.
+
 Closure tests are intended to be mandatory validation for new important coefficient parameterisations and dynamical line-shape implementations.
 
 ## Numerical convention
