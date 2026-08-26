@@ -8,12 +8,15 @@ from .dalitz import (
     s13_from_s12_s23,
     s23_limits,
 )
+from .four_vectors import four_momenta_from_dalitz, invariant_mass_squared
 from .phase_space import PhaseSpaceSample, ThreeBodyPhaseSpace
 
 __all__ = [
     "PhaseSpaceSample",
     "ThreeBodyPhaseSpace",
+    "four_momenta_from_dalitz",
     "inside_dalitz",
+    "invariant_mass_squared",
     "invariant_sum",
     "kallen",
     "s12_limits",
