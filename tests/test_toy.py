@@ -12,9 +12,23 @@ def _energy_transform(momentum):
     return {"energy": momentum["p0"][:, 0]}
 
 
+def _dalitz_transform(momentum):
+    p1 = momentum["p0"]
+    p2 = momentum["p1"]
+    p3 = momentum["p2"]
+
+    def mass_squared(p):
+        return p[:, 0] ** 2 - jnp.sum(p[:, 1:] ** 2, axis=1)
+
+    return {
+        "s12": mass_squared(p1 + p2),
+        "s23": mass_squared(p2 + p3),
+    }
+
+
 def _constant_intensity(data, parameters):
     del parameters
-    return jnp.ones_like(data["energy"])
+    return jnp.ones_like(next(iter(data.values())))
 
 
 def test_accept_reject_generates_unweighted_continuous_phase_space():
@@ -83,3 +97,51 @@ def test_accept_reject_includes_phase_space_proposal_weight():
         reference.weights
     )
     assert jnp.isclose(jnp.mean(toy.s12), expected_mean, rtol=0.0, atol=0.025)
+
+
+def test_deterministic_envelope_search_finds_narrow_peak():
+    phase_space = ThreeBodyPhaseSpace(
+        mother_mass=1.86966,
+        masses=(0.13957, 0.13957, 0.13957),
+    )
+    target_u = jnp.asarray([[0.371, 0.613]])
+    target = phase_space.from_unit_square(target_u, with_momenta=False)
+    target_s12 = target.s12[0]
+    target_s23 = target.s23[0]
+
+    # Build a deliberately narrow synthetic peak. A coarse random pilot can
+    # easily miss this structure, while the hierarchical deterministic search
+    # must locate it reproducibly.
+    s12_span = float(
+        phase_space.from_unit_square(
+            jnp.asarray([[1.0, 0.5], [0.0, 0.5]]),
+            with_momenta=False,
+        ).s12.ptp()
+    )
+    sigma12 = 0.0025 * s12_span
+    # The local s23 span depends on s12. Use the span at the target u1.
+    target_edge = phase_space.from_unit_square(
+        jnp.asarray([[target_u[0, 0], 0.0], [target_u[0, 0], 1.0]]),
+        with_momenta=False,
+    )
+    sigma23 = 0.0025 * float(jnp.abs(target_edge.s23[1] - target_edge.s23[0]))
+
+    def narrow_intensity(data, parameters):
+        del parameters
+        return jnp.exp(
+            -0.5 * ((data["s12"] - target_s12) / sigma12) ** 2
+            -0.5 * ((data["s23"] - target_s23) / sigma23) ** 2
+        )
+
+    generator = ToyGenerator(
+        phase_space=phase_space,
+        transformer=_dalitz_transform,
+        envelope_grid_size=48,
+        envelope_refinement_size=17,
+        envelope_refinement_levels=5,
+        envelope_top_k=8,
+    )
+    maximum, maximum_point = generator.estimate_maximum(narrow_intensity, {})
+
+    assert maximum > 0.0
+    assert jnp.allclose(maximum_point, target_u[0], rtol=0.0, atol=0.004)
