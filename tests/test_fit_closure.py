@@ -13,7 +13,7 @@ from dalitzplotfitter.amplitude import (
     compile_amplitude_component,
     create_kinematic_transformer,
 )
-from dalitzplotfitter.coefficients import FitCartesian
+from dalitzplotfitter.coefficients import RealImag
 from dalitzplotfitter.fit import Minimizer, Parameter
 from dalitzplotfitter.reaction import ReactionBuilder
 from dalitzplotfitter.toy import ToyGenerator
@@ -33,24 +33,19 @@ def _build_resonance(resonance: str):
     return reaction, model, compile_amplitude_component(model)
 
 
-def _assert_closure(result, name, truth, *, max_pull, max_abs_delta):
+def _assert_one_sigma_compatibility(result, name: str, generated: float):
     fitted = float(result.values[name])
     error = float(result.errors[name])
     assert np.isfinite(error) and error > 0.0, f"invalid HESSE error for {name}: {error}"
-    delta = fitted - truth
-    pull = delta / error
-    assert abs(delta) < max_abs_delta, (
-        f"{name} failed absolute closure sanity check: fit={fitted}, truth={truth}, "
-        f"delta={delta}, error={error}, pull={pull}"
-    )
-    assert abs(pull) < max_pull, (
-        f"{name} failed pull closure: fit={fitted}, truth={truth}, delta={delta}, "
-        f"error={error}, pull={pull}"
+    pull = (generated - fitted) / error
+    assert abs(pull) < 1.0, (
+        f"{name} is not compatible with the generated value within 1 sigma: "
+        f"generated={generated}, fitted={fitted}, error={error}, pull={pull}"
     )
 
 
-def test_dplus_toy_fit_recovers_injected_cartesian_parameters():
-    """Generate -> multi-start Cartesian fit -> compare to injected truth."""
+def test_dplus_toy_fit_recovers_injected_real_imag_parameters():
+    """Generate -> multi-start RealImag fit -> require one-sigma closure."""
 
     enable_x64()
 
@@ -74,9 +69,9 @@ def test_dplus_toy_fit_recovers_injected_cartesian_parameters():
     nr_x = Parameter.coefficient("nr.x", float(rng.uniform(-0.6, 0.6)), bounds=(-1.0, 1.0), step=0.02, owner="NR")
     nr_y = Parameter.coefficient("nr.y", float(rng.uniform(-0.6, 0.6)), bounds=(-1.0, 1.0), step=0.02, owner="NR")
 
-    rho_coefficient = FitCartesian(rho_x, rho_y)
-    f0_coefficient = FitCartesian(f0_x, f0_y)
-    nr_coefficient = FitCartesian(nr_x, nr_y)
+    rho_coefficient = RealImag(rho_x, rho_y)
+    f0_coefficient = RealImag(f0_x, f0_y)
+    nr_coefficient = RealImag(nr_x, nr_y)
 
     components = (
         AmplitudeComponent("rho", rho_dynamics, rho_coefficient),
@@ -163,16 +158,5 @@ def test_dplus_toy_fit_recovers_injected_cartesian_parameters():
         f"DeltaNLL={delta_nll_truth}"
     )
 
-    for name, max_abs_delta in (
-        ("f0.x", 0.30),
-        ("f0.y", 0.30),
-        ("nr.x", 0.20),
-        ("nr.y", 0.20),
-    ):
-        _assert_closure(
-            result,
-            name,
-            truth[name],
-            max_pull=3.5,
-            max_abs_delta=max_abs_delta,
-        )
+    for name in ("f0.x", "f0.y", "nr.x", "nr.y"):
+        _assert_one_sigma_compatibility(result, name, truth[name])
