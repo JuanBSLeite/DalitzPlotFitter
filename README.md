@@ -13,6 +13,7 @@ phasespace weighted MC
         -> Laura++ line shape
         -> Blatt-Weisskopf factors
         -> Laura++ Covariant angular factor
+        -> Bose symmetrization when identical particles are present
         -> RealImag coefficient c = x + i y
         -> coherent amplitude A = sum_i c_i F_i
         -> weighted MC normalization
@@ -111,7 +112,7 @@ s13 = m2(pi- pi+_2)
 s23 = m2(pi+_1 pi+_2).
 ```
 
-Identical-pion symmetrization must coherently add the `(p1,p2)` and `(p1,p3)` resonance pairings with their corresponding bachelor assignments.
+Identical-pion symmetrization coherently adds the `(p1,p2)` and `(p1,p3)` resonance pairings with their corresponding bachelor assignments. `BoseSymmetrizedAmplitude` provides this operation before multiplication by the external complex coefficient.
 
 The target reference model is
 
@@ -120,6 +121,30 @@ A = c_rho F_rho + c_f0 F_f0 + c_NR
 ```
 
 with Gounaris-Sakurai planned for `rho(770)`, Flatte planned for `f0(980)`, and the Covariant angular formalism for nonzero spin.
+
+## E791 Fit 2 generation example
+
+`notebooks/01_e791_dplus_fit2_generation.ipynb` implements a generation example based on Fit 2 of
+
+```text
+E. M. Aitala et al. (E791), arXiv:hep-ex/0007028v2.
+```
+
+The notebook uses the published Fit 2 central magnitudes and phases for
+
+```text
+sigma(500) pi+
+rho0(770) pi+
+non-resonant
+f0(980) pi+
+f2(1270) pi+
+f0(1370) pi+
+rho0(1450) pi+
+```
+
+with explicit Bose symmetrization, the Laura++ Covariant angular convention, a 1,000,000-event weighted `phasespace` candidate pool, and resampling to 100,000 unweighted pseudo-data events. It includes plots of raw phase space, the weighted model Dalitz density, the resampled Dalitz plot, the symmetrized `m2(pi+pi-)` projection, individual component intensities and the net interference.
+
+For `f0(980)` the example uses the single-channel RBW alternative quoted in the E791 companion study (`m0 = 0.975 GeV`, `Gamma0 = 0.044 GeV`), which that study reports as giving essentially indistinguishable fractions and phases from its coupled-channel parametrization. This keeps the example inside the currently implemented Laura++-style RBW path until the project-owned Flatte component is added.
 
 ## Normalization and caching
 
@@ -154,10 +179,12 @@ using HESSE uncertainties with the NLL convention `errordef=0.5`.
 3. weighted `phasespace` MC — implemented;
 4. weighted pseudo-data resampling — implemented;
 5. complete covariant RBW component — implemented;
-6. explicit identical-particle symmetrization and new end-to-end closure — next;
-7. Gounaris-Sakurai for `rho(770)`;
-8. Flatte for `f0(980)`;
-9. LASS and K-matrix after the simpler models pass closure/reference tests.
+6. explicit identical-particle Bose symmetrization — implemented;
+7. E791 Fit 2 generation notebook — implemented;
+8. new end-to-end closure on the Laura++/phasespace path — next;
+9. Gounaris-Sakurai for `rho(770)`;
+10. Flatte for `f0(980)`;
+11. LASS and K-matrix after the simpler models pass closure/reference tests.
 
 ## Installation
 
