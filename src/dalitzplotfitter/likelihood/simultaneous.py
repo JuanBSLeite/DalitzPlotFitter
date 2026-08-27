@@ -17,5 +17,9 @@ class SimultaneousNLL:
 
     terms: tuple[Objective, ...]
 
+    def __post_init__(self) -> None:
+        if not self.terms:
+            raise ValueError("SimultaneousNLL requires at least one likelihood term")
+
     def __call__(self, parameters: Parameters) -> Array:
         return sum((term(parameters) for term in self.terms))
