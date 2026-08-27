@@ -1,70 +1,73 @@
 # Fitting and statistical validation
 
-DalitzPlotFitter uses `iminuit` as the minimizer while JAX evaluates the objective and its gradient.
+DalitzPlotFitter uses `iminuit` for minimization while JAX evaluates the objective and gradient.
 
-## Negative-log-likelihood convention
+## NLL convention
 
-For a negative log-likelihood (NLL), Minuit must use
+For a negative log-likelihood, Minuit uses
 
 ```text
 errordef = 0.5
 ```
 
-so that HESSE parameter uncertainties correspond to a change
+so HESSE one-parameter uncertainties correspond to `Delta NLL = 0.5`. `Minimizer` uses this convention by default. `Parameter.step` and parameter bounds are forwarded to Minuit.
+
+## RealImag coefficients
+
+The supported complex coefficient is
 
 ```text
-Delta NLL = 0.5
+c = x + i y
 ```
 
-for a one-parameter Gaussian approximation. `dalitzplotfitter.fit.Minimizer` therefore uses `errordef=0.5` by default. A different value can be supplied explicitly only when the minimized objective follows another statistical convention.
+through `RealImag`. `x` and `y` may be constants or fit `Parameter` objects. There is no parallel magnitude/phase, Cartesian, or CP coefficient API in the current code base.
 
-`Parameter.step` is forwarded to the corresponding Minuit initial step/error setting. Bounds are forwarded to `Minuit.limits`.
-
-## RealImag fit coefficients
-
-For CP-conserving amplitude fits, `RealImag` parameterizes a complex coefficient directly as
+For the `D+ -> pi- pi+ pi+` reference model, the rho coefficient is fixed to
 
 ```text
-c = x + i y.
+c_rho = 1 + 0 i
 ```
 
-The same `RealImag` class accepts either plain numerical values or fit `Parameter` objects. When `Parameter` objects are supplied, their current values are resolved from the minimizer mapping. There is no separate non-CP `FitCartesian` type.
+and the remaining real and imaginary coordinates float.
 
-This is distinct from CP-dependent coefficient parameterizations such as `CartesianCP`, which contain additional CP parameters.
+## Closure criterion
 
-The reference `D+ -> pi- pi+ pi+` closure uses `RealImag` coefficients for the rho, f0 and non-resonant terms, with the reference fixed to
+For every floating coordinate, generated and fitted values are compatible when
 
 ```text
-c_rho = 1 + 0 i.
+pull = (value_gen - value_fit) / sigma_fit
+abs(pull) < 1
 ```
 
-## Toy-MC closure tests
+where `sigma_fit` is the HESSE uncertainty from the `errordef=0.5` NLL fit.
 
-The reference closure test checks statistical compatibility directly. For every fitted real or imaginary coefficient component,
+The reference end-to-end validation target is
 
 ```text
-pull = (generated - fitted) / fitted_error
+unweighted fit pseudo-data:     100,000 events
+weighted normalization MC:    1,000,000 events
 ```
 
-and the required condition is
+Pseudo-data are produced by weighted resampling from a larger `phasespace` candidate pool using
 
 ```text
-abs(pull) < 1.
+w_target = w_PS |A(theta_gen)|^2.
 ```
 
-The fitted error is the HESSE uncertainty obtained with the NLL convention `errordef=0.5`.
+The normalization sample is fixed during minimization so the objective remains deterministic.
 
-The current high-statistics reference closure uses:
+## Cached normalization
+
+For coefficient-only fits, the complete Laura++ component amplitudes are cached on data and normalization samples. The matrix
 
 ```text
-fit sample:           100,000 events
-normalization sample: 1,000,000 events
+M_ij = (1/N_MC) sum_k w_PS,k F_i*(x_k) F_j(x_k)
 ```
 
-The minimization is evaluated from several separated starts and the valid minimum with the lowest NLL is selected. The injected truth NLL is also compared with the best fitted NLL as an additional diagnostic.
+is cached and the normalization becomes
 
-## Monte Carlo normalization
+```text
+N(c) = c^dagger M c.
+```
 
-Toy generation and fit normalization use independent phase-space samples. The fit normalization sample remains fixed during minimization so that the objective is deterministic.
-
-For coefficient-only fits, component amplitudes and the normalization matrix are cached. If a dynamical parameter floats, only its owning component and the corresponding normalization-matrix rows/columns are recomputed.
+When a dynamical parameter is later floated, only its owning component and the affected matrix row/column are reevaluated.
