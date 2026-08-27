@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "dalitzplotfitter"
 version = "0.1.0.dev0"
-description = "Dalitz-plot amplitude fitter with Laura++-style dynamics and JAX likelihoods"
+description = "Dalitz-plot amplitude fitter with JAX likelihoods"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Juan B. S. Leite" }]
@@ -15,6 +15,7 @@ dependencies = [
   "matplotlib>=3.9",
   "mplhep>=0.4",
   "numpy>=2.0",
+  "particle>=1.0.0",
   "phasespace[tf]>=1.10.4",
 ]
 
