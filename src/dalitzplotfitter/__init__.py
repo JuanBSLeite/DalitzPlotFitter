@@ -30,6 +30,7 @@ from .kinematics import (
     boost_to_rest_frame,
     covariant_kinematics,
 )
+from .sampling import weighted_resample
 
 __all__ = [
     "AmplitudeComponent",
@@ -57,4 +58,5 @@ __all__ = [
     "boost_to_rest_frame",
     "covariant_kinematics",
     "enable_x64",
+    "weighted_resample",
 ]
