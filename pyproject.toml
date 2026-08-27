@@ -10,15 +10,12 @@ readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Juan B. S. Leite" }]
 dependencies = [
-  "ampform>=0.16.0",
   "iminuit>=2.31",
   "jax>=0.4.35",
   "matplotlib>=3.9",
   "mplhep>=0.4",
   "numpy>=2.0",
   "phasespace[tf]>=1.10.4",
-  "qrules>=0.10.8",
-  "tensorwaves[jax]>=0.4.16",
 ]
 
 [project.optional-dependencies]
