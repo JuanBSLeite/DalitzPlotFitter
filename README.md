@@ -27,8 +27,7 @@ model = DecayModel(
     ],
 )
 
-normalization_mc = model.generate_phase_space(1_000_000, seed=2027)
-pdf = model.pdf(normalization_mc)
+pdf = model.pdf()
 ```
 
 `DecayChannel` resolves the parent and daughter masses from the `particle` package. `Resonance` resolves resonance mass, width and spin from `particle` unless an analysis-specific override is supplied.
@@ -48,24 +47,73 @@ Resonance(
 )
 ```
 
+## Component normalization convention
+
+The default amplitude convention is
+
+```text
+integral dPhi |F_j|^2 = 1
+```
+
+for every dynamical component before the complex coefficient is applied. This keeps the scale of `RealImag` coefficients stable when lineshape parameters such as pole mass or width float.
+
+`DecayModel` manages the weighted phase-space integration sample internally. The public defaults are
+
+```python
+model = DecayModel(
+    channel,
+    components,
+    normalize_components=True,
+    normalization_size=1_000_000,
+    normalization_seed=2027,
+)
+```
+
+The 1,000,000-event sample is generated **lazily**: constructing `DecayModel` does not immediately launch `phasespace`. The sample is created on the first amplitude/PDF/cache operation that requires component normalization and is then reused for the lifetime of the model.
+
+The same internal sample is available as
+
+```python
+model.normalization_sample
+```
+
+and the default normalized PDF is simply
+
+```python
+pdf = model.pdf()
+```
+
+For an analysis that explicitly needs raw, unnormalized components, the convention can be disabled:
+
+```python
+model = DecayModel(
+    channel,
+    components,
+    normalize_components=False,
+)
+```
+
+Detector efficiency is **not** included in the individual component normalization. It enters only the total PDF normalization, so the meaning of the complex coefficients does not depend on the detector efficiency model.
+
 ## Architecture
 
 ```text
 DecayChannel + amplitude-component declarations
         -> particle masses / widths / spins
-        -> phasespace weighted MC
+        -> internal weighted phasespace normalization MC
         -> four-momenta and Dalitz invariants
         -> resonance lineshape
         -> Blatt-Weisskopf factors
         -> angular factor
         -> automatic identical-particle symmetrization
+        -> unit-integral component normalization
         -> RealImag coefficient
         -> coherent amplitude
         -> normalized SignalPDF
         -> JAX NLL + iminuit
 ```
 
-The low-level complete resonance object is `ResonanceAmplitude`. The relativistic Breit-Wigner is exposed as `relativistic_breit_wigner`; neither the lineshape nor amplitude class carries a Laura++ or angular-formalism name.
+The low-level complete resonance object is `ResonanceAmplitude`. The relativistic Breit-Wigner is exposed as `RelativisticBreitWigner`; neither the lineshape nor amplitude class carries a Laura++ or angular-formalism name.
 
 ## Angular convention
 
@@ -122,9 +170,9 @@ w_target(k) = w_PS(k) |A(x_k; theta_gen)|^2
 
 followed by `weighted_resample()`.
 
-## E791 Fit 2 generation example
+## E791 examples
 
-`notebooks/01_e791_dplus_fit2_generation.ipynb` gives a generation example based on Fit 2 of E791, arXiv:hep-ex/0007028v2. The notebook uses the high-level `DecayChannel` / `DecayModel` API, `particle` for standard particle properties, explicit paper-specific overrides where needed, a 1,000,000-event weighted candidate pool and 100,000 resampled pseudo-data events, with Dalitz and projection plots.
+`notebooks/01_e791_dplus_fit2_generation.ipynb` gives a generation example based on Fit 2 of E791, arXiv:hep-ex/0007028v2. `notebooks/02_fit_dynamic_parameters.ipynb` performs a closure fit, and `notebooks/03_lineshape_parameter_diagnostics.ipynb` isolates lineshape-parameter behaviour and normalization-MC effects.
 
 ## Coefficients
 
@@ -151,8 +199,8 @@ using HESSE uncertainties with `errordef=0.5`.
 3. weighted `phasespace` MC — implemented;
 4. `particle`-driven decay/channel model — implemented;
 5. automatic identical-particle symmetrization — implemented;
-6. E791 Fit 2 generation notebook — implemented;
-7. end-to-end 100k/1M closure on the new path — next;
+6. unit-integral component normalization with internal MC — implemented;
+7. E791 generation/fit diagnostics — implemented;
 8. Gounaris-Sakurai;
 9. Flatte;
 10. LASS and K-matrix.
