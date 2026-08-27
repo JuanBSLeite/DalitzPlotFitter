@@ -97,6 +97,27 @@ def _collect_parameters(value: object) -> tuple[Parameter, ...]:
     return ()
 
 
+def _validate_positive_quantity(value: object, label: str, *, allow_zero: bool) -> None:
+    """Validate numerical/Parameter values and lower bounds for core dynamics."""
+
+    parameter = value if isinstance(value, Parameter) else None
+    nominal = float(parameter.value if parameter is not None else value)
+    invalid = nominal < 0.0 if allow_zero else nominal <= 0.0
+    if invalid:
+        comparator = "non-negative" if allow_zero else "positive"
+        raise ValueError(f"{label} must be {comparator}, got {nominal}")
+
+    if parameter is not None and parameter.bounds is not None:
+        lower, _ = parameter.bounds
+        if lower is not None:
+            invalid_lower = lower < 0.0 if allow_zero else lower <= 0.0
+            if invalid_lower:
+                comparator = "non-negative" if allow_zero else "positive"
+                raise ValueError(
+                    f"lower bound for {label} must be {comparator}, got {lower}"
+                )
+
+
 @dataclass(frozen=True)
 class DecayChannel:
     """Parent particle and ordered three-body final state."""
@@ -107,6 +128,10 @@ class DecayChannel:
     def __post_init__(self) -> None:
         if len(self.final_state) != 3:
             raise ValueError("DecayChannel requires exactly three final-state particles")
+        if self.parent_mass <= sum(self.daughter_masses):
+            raise ValueError(
+                "parent mass must exceed the sum of final-state masses for a physical three-body decay"
+            )
 
     @property
     def parent_mass(self) -> float:
@@ -115,6 +140,12 @@ class DecayChannel:
     @property
     def daughter_masses(self) -> tuple[float, float, float]:
         return tuple(_mass_gev(name) for name in self.final_state)
+
+    @property
+    def final_state_ids(self) -> tuple[int, int, int]:
+        """Canonical PDG identities used for identical-particle detection."""
+
+        return tuple(int(_particle(name).pdgid) for name in self.final_state)
 
 
 @dataclass(frozen=True)
@@ -139,6 +170,22 @@ class Resonance:
             raise ValueError(
                 "resonance pair must contain two distinct indices from 0, 1, 2"
             )
+        if self.mass is not None:
+            _validate_positive_quantity(self.mass, f"{self.name}.mass", allow_zero=False)
+        if self.width is not None:
+            _validate_positive_quantity(self.width, f"{self.name}.width", allow_zero=True)
+        _validate_positive_quantity(
+            self.resonance_radius,
+            f"{self.name}.resonance_radius",
+            allow_zero=True,
+        )
+        _validate_positive_quantity(
+            self.parent_radius,
+            f"{self.name}.parent_radius",
+            allow_zero=True,
+        )
+        if self.spin is not None and (self.spin < 0 or int(self.spin) != self.spin):
+            raise ValueError("resonance spin must be a non-negative integer")
 
 
 @dataclass(frozen=True)
@@ -163,6 +210,9 @@ class DecayModel:
         object.__setattr__(self, "components", tuple(components))
         if not self.components:
             raise ValueError("DecayModel requires at least one amplitude component")
+        names = [component.name for component in self.components]
+        if len(set(names)) != len(names):
+            raise ValueError("DecayModel component names must be unique")
         self._validate_parameters()
 
     def _validate_parameters(self) -> None:
@@ -178,6 +228,14 @@ class DecayModel:
                 ):
                     raise ValueError(
                         f"Dynamics parameter {parameter.name!r} must have owner={component.name!r}"
+                    )
+                if (
+                    parameter.kind is ParameterKind.COEFFICIENT
+                    and parameter.owner is not None
+                    and parameter.owner != component.name
+                ):
+                    raise ValueError(
+                        f"Coefficient parameter {parameter.name!r} must have owner={component.name!r}"
                     )
 
     @property
@@ -213,7 +271,7 @@ class DecayModel:
             daughter_key=f"p{i + 1}",
             partner_key=f"p{j + 1}",
             bachelor_key=f"p{bachelor + 1}",
-            final_state=self.channel.final_state,
+            final_state=self.channel.final_state_ids,
             lineshape=component.lineshape,
             angular=component.angular,
         )
