@@ -12,22 +12,27 @@ from dalitzplotfitter.amplitude import (
     CoherentAmplitudeModel,
     ConstantAmplitude,
 )
-from dalitzplotfitter.dynamics import ResonanceAmplitude
+from dalitzplotfitter.dynamics import (
+    CovariantAngular,
+    RelativisticBreitWigner,
+    ResonanceAmplitude,
+    ResonanceContext,
+)
 from dalitzplotfitter.integration import MonteCarloIntegrator
-from dalitzplotfitter.kinematics import PhasespaceMC, PhaseSpaceSample
+from dalitzplotfitter.kinematics import PhaseSpaceSample, PhasespaceMC
 from dalitzplotfitter.pdf import SignalPDF
 
 
 def _particle(name: str) -> Particle:
-    """Resolve a particle using common Particle package naming conventions."""
-
     errors: list[Exception] = []
     for resolver in (Particle.from_evtgen_name, Particle.from_name):
         try:
             return resolver(name)
-        except Exception as exc:  # Particle raises different lookup exceptions.
+        except Exception as exc:
             errors.append(exc)
-    raise ValueError(f"Could not resolve particle {name!r} with the particle package") from errors[-1]
+    raise ValueError(
+        f"Could not resolve particle {name!r} with the particle package"
+    ) from errors[-1]
 
 
 def _mass_gev(name: str) -> float:
@@ -82,13 +87,16 @@ class Resonance:
     """Declarative resonance component.
 
     ``pair`` contains zero-based indices into ``DecayChannel.final_state``.
-    Mass, width and spin default to values from the ``particle`` package and can
-    be overridden for a specific analysis or historical model.
+    Mass, width and spin default to the ``particle`` package. ``lineshape`` and
+    ``angular`` are interchangeable plugins; RBW and the covariant angular model
+    are the defaults.
     """
 
     name: str
     pair: tuple[int, int]
     coefficient: object
+    lineshape: object = RelativisticBreitWigner()
+    angular: object = CovariantAngular()
     mass: float | None = None
     width: float | None = None
     spin: int | None = None
@@ -96,14 +104,16 @@ class Resonance:
     parent_radius: float = 5.0
 
     def __post_init__(self) -> None:
-        if len(set(self.pair)) != 2 or any(index not in (0, 1, 2) for index in self.pair):
-            raise ValueError("resonance pair must contain two distinct indices from 0, 1, 2")
+        if len(set(self.pair)) != 2 or any(
+            index not in (0, 1, 2) for index in self.pair
+        ):
+            raise ValueError(
+                "resonance pair must contain two distinct indices from 0, 1, 2"
+            )
 
 
 @dataclass(frozen=True)
 class NonResonant:
-    """Constant non-resonant component."""
-
     coefficient: object
     name: str = "NR"
 
@@ -134,19 +144,25 @@ class DecayModel:
         width0 = component.width if component.width is not None else _width_gev(component.name)
         spin = component.spin if component.spin is not None else _spin(component.name)
 
-        dynamics = ResonanceAmplitude(
-            mass0=mass0,
-            width0=width0,
+        context = ResonanceContext(
             parent_mass=self.channel.parent_mass,
             daughter_masses=(masses[i], masses[j]),
             bachelor_mass=masses[bachelor],
-            angular_momentum=spin,
+            spin=spin,
+            pole_mass=mass0,
+            pole_width=width0,
             resonance_radius=component.resonance_radius,
             parent_radius=component.parent_radius,
+        )
+
+        dynamics = ResonanceAmplitude(
+            context=context,
             daughter_key=f"p{i + 1}",
             partner_key=f"p{j + 1}",
             bachelor_key=f"p{bachelor + 1}",
             final_state=self.channel.final_state,
+            lineshape=component.lineshape,
+            angular=component.angular,
         )
         return AmplitudeComponent(component.name, dynamics, component.coefficient)
 
@@ -168,7 +184,12 @@ class DecayModel:
                 raise TypeError(f"Unsupported amplitude component: {type(component)!r}")
         return CoherentAmplitudeModel(tuple(built))
 
-    def generate_phase_space(self, size: int, *, seed: int | None = None) -> PhaseSpaceSample:
+    def generate_phase_space(
+        self,
+        size: int,
+        *,
+        seed: int | None = None,
+    ) -> PhaseSpaceSample:
         return PhasespaceMC(
             self.channel.parent_mass,
             self.channel.daughter_masses,
@@ -186,9 +207,12 @@ class DecayModel:
             coefficient_values=coefficient_values,
         )
 
-    def pdf(self, normalization_sample: PhaseSpaceSample, *, efficiency=None) -> SignalPDF:
-        """Build a normalized signal PDF on a fixed weighted MC sample."""
-
+    def pdf(
+        self,
+        normalization_sample: PhaseSpaceSample,
+        *,
+        efficiency=None,
+    ) -> SignalPDF:
         def intensity(data, parameters):
             return self.intensity(data, coefficient_values=parameters)
 
