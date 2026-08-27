@@ -1,4 +1,4 @@
-"""Numerical Laura++ covariant resonance components."""
+"""Numerical Laura++ covariant resonance dynamics."""
 
 from __future__ import annotations
 
@@ -11,12 +11,17 @@ from jax import Array
 from dalitzplotfitter.kinematics import covariant_kinematics
 
 
-def _kallen(x, y, z):
+def kallen(x, y, z):
+    """Källén function ``lambda(x,y,z)``."""
+
     return x**2 + y**2 + z**2 - 2 * x * y - 2 * x * z - 2 * y * z
 
 
-def _breakup_momentum(mass, mass1, mass2):
-    return jnp.sqrt(jnp.maximum(_kallen(mass**2, mass1**2, mass2**2), 0.0)) / (
+def breakup_momentum(mass, mass1, mass2):
+    """Two-body breakup momentum in the parent rest frame."""
+
+    mass = jnp.asarray(mass)
+    return jnp.sqrt(jnp.maximum(kallen(mass**2, mass1**2, mass2**2), 0.0)) / (
         2.0 * mass
     )
 
@@ -33,7 +38,7 @@ def _blatt_polynomial(z, angular_momentum: int):
         return z**6 + 6.0 * z**4 + 45.0 * z**2 + 225.0
     if l == 4:
         return z**8 + 10.0 * z**6 + 135.0 * z**4 + 1575.0 * z**2 + 11025.0
-    raise NotImplementedError("Covariant resonance components currently support L=0..4")
+    raise NotImplementedError("Laura++ covariant components currently support L=0..4")
 
 
 def blatt_weisskopf_from_momenta(
@@ -42,7 +47,7 @@ def blatt_weisskopf_from_momenta(
     angular_momentum: int,
     radius,
 ):
-    """Laura++ Blatt-Weisskopf factor with unit value at the pole momentum."""
+    """Laura++ Blatt-Weisskopf factor normalized to one at the pole."""
 
     l = int(angular_momentum)
     momentum = jnp.asarray(momentum)
@@ -61,7 +66,7 @@ def covariant_spin_factor(
     parent_mass,
     angular_momentum: int,
 ):
-    """Numerical Laura++ covariant angular factor, Eqs. (91)-(95)."""
+    """Laura++ covariant angular factor, Eqs. (91)-(95)."""
 
     l = int(angular_momentum)
     r = p**2 / parent_mass**2
@@ -91,16 +96,54 @@ def covariant_spin_factor(
     raise NotImplementedError("Laura++ covariant angular factors support L=0..4")
 
 
+def energy_dependent_width(
+    mass,
+    mass0,
+    width0,
+    daughter_mass1,
+    daughter_mass2,
+    angular_momentum: int,
+    resonance_radius,
+):
+    """Laura++ running width used by the relativistic Breit-Wigner."""
+
+    l = int(angular_momentum)
+    q = breakup_momentum(mass, daughter_mass1, daughter_mass2)
+    q0 = breakup_momentum(mass0, daughter_mass1, daughter_mass2)
+    x_res = blatt_weisskopf_from_momenta(q, q0, l, resonance_radius)
+    safe_q0 = jnp.where(q0 > 0.0, q0, 1.0)
+    safe_mass = jnp.where(mass > 0.0, mass, 1.0)
+    return width0 * (q / safe_q0) ** (2 * l + 1) * (mass0 / safe_mass) * x_res**2
+
+
+def relativistic_breit_wigner(
+    mass,
+    mass0,
+    width0,
+    daughter_mass1,
+    daughter_mass2,
+    angular_momentum: int,
+    resonance_radius,
+):
+    """Laura++ RBW with unit numerator."""
+
+    width = energy_dependent_width(
+        mass,
+        mass0,
+        width0,
+        daughter_mass1,
+        daughter_mass2,
+        angular_momentum,
+        resonance_radius,
+    )
+    return 1.0 / (mass0**2 - mass**2 - 1j * mass0 * width)
+
+
 @dataclass(frozen=True)
 class LauraCovariantRBW:
     """Complete Laura++ RBW component with covariant angular dependence.
 
-    The component evaluates
-
-    ``F = R(m) X_L(p* r_parent) X_L(q r_res) T_L``
-
-    using raw four-vectors already converted to the project's
-    ``(E, px, py, pz)`` convention.
+    ``F = R(m) X_L(p* r_parent) X_L(q r_res) T_L``.
     """
 
     mass0: float
@@ -130,39 +173,24 @@ class LauraCovariantRBW:
             data[self.partner_key],
             data[self.bachelor_key],
         )
-        m = kin.resonance_mass
         l = int(self.angular_momentum)
         m1, m2 = self.daughter_masses
-
-        q0 = _breakup_momentum(self.mass0, m1, m2)
-        p_star0 = _breakup_momentum(
-            self.parent_mass,
-            self.mass0,
-            self.bachelor_mass,
-        )
+        q0 = breakup_momentum(self.mass0, m1, m2)
+        p_star0 = breakup_momentum(self.parent_mass, self.mass0, self.bachelor_mass)
         x_res = blatt_weisskopf_from_momenta(
-            kin.q,
-            q0,
-            l,
-            self.resonance_radius,
+            kin.q, q0, l, self.resonance_radius
         )
         x_parent = blatt_weisskopf_from_momenta(
-            kin.p_star,
-            p_star0,
+            kin.p_star, p_star0, l, self.parent_radius
+        )
+        resonance = relativistic_breit_wigner(
+            kin.resonance_mass,
+            self.mass0,
+            self.width0,
+            m1,
+            m2,
             l,
-            self.parent_radius,
-        )
-
-        safe_q0 = jnp.where(q0 > 0.0, q0, 1.0)
-        safe_m = jnp.where(m > 0.0, m, 1.0)
-        running_width = (
-            self.width0
-            * (kin.q / safe_q0) ** (2 * l + 1)
-            * (self.mass0 / safe_m)
-            * x_res**2
-        )
-        resonance = 1.0 / (
-            self.mass0**2 - m**2 - 1j * self.mass0 * running_width
+            self.resonance_radius,
         )
         angular = covariant_spin_factor(
             kin.p_star,
