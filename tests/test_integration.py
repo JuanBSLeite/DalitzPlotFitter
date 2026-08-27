@@ -1,4 +1,3 @@
-import jax
 import jax.numpy as jnp
 
 from dalitzplotfitter.integration import (
@@ -6,12 +5,16 @@ from dalitzplotfitter.integration import (
     matrix_normalization,
     normalization_matrix,
 )
-from dalitzplotfitter.kinematics import ThreeBodyPhaseSpace
+from dalitzplotfitter.kinematics import PhaseSpaceSample
 
 
-def test_monte_carlo_integrator_is_deterministic():
-    phase_space = ThreeBodyPhaseSpace(1.86966, (0.13957, 0.13957, 0.13957))
-    sample = phase_space.generate(jax.random.key(1), 4096)
+def test_monte_carlo_integrator_is_deterministic_for_fixed_sample():
+    sample = PhaseSpaceSample(
+        s12=jnp.linspace(0.1, 1.0, 4096),
+        s13=jnp.linspace(0.2, 1.1, 4096),
+        s23=jnp.linspace(0.3, 1.2, 4096),
+        weights=jnp.linspace(0.5, 1.5, 4096),
+    )
     integrator = MonteCarloIntegrator(sample)
 
     def function(data):
@@ -33,7 +36,6 @@ def test_normalization_matrix_matches_direct_intensity():
     )
     weights = jnp.asarray([0.7, 1.1, 0.9])
     coefficients = jnp.asarray([1.2 + 0.3j, -0.4 + 0.8j])
-
     matrix = normalization_matrix(components, weights)
     matrix_value = matrix_normalization(coefficients, matrix)
     direct = jnp.mean(weights * jnp.abs(components @ coefficients) ** 2)
