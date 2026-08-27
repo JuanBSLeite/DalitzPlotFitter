@@ -12,6 +12,7 @@ weighted phasespace MC
   -> running width Gamma(m)
   -> Blatt-Weisskopf factors
   -> Covariant angular factor T_L
+  -> automatic identical-particle symmetrization
   -> complete component F_i(x)
   -> RealImag coefficient c_i = x_i + i y_i
   -> coherent amplitude A = sum_i c_i F_i
@@ -80,7 +81,22 @@ and the Blatt-Weisskopf factor is normalized so `X_L(q0 r)=1`.
 F_i(x) = R_i(m) X_parent X_resonance T_L(x).
 ```
 
-For identical final-state particles, all allowed pairings must be summed coherently inside the dynamical component before applying the external `RealImag` coefficient.
+A resonance is specified once by its nominal `daughter_key`, `partner_key` and `bachelor_key`. When `final_state` is supplied, the component checks for repeated particle labels and coherently sums all equivalent assignments generated only by exchanges of identical final-state particles.
+
+For example, with
+
+```text
+final_state = ("pi-", "pi+", "pi+")
+nominal pairing = (p1,p2)p3
+```
+
+the component evaluates
+
+```text
+F = F[(12)3] + F[(13)2].
+```
+
+No external Bose-symmetrization wrapper is required. A constant non-resonant term remains a single constant and is therefore not multiplied by the number of identical-particle permutations.
 
 ## Monte Carlo normalization
 
@@ -113,9 +129,9 @@ X(q0 r) = 1
 T0 = 1
 ```
 
-as well as the published Covariant expressions, Lorentz boosts, daughter-exchange parity, phase-space four-momentum conservation, and weighted resampling.
+as well as the published Covariant expressions, Lorentz boosts, daughter-exchange parity, phase-space four-momentum conservation, weighted resampling, and equality between automatic identical-particle symmetrization and the corresponding explicit sum of pairings.
 
-The next end-to-end milestone is explicit identical-particle symmetrization for `D+ -> pi- pi+ pi+` followed by the 100k/1M `RealImag` closure test. After that, the dynamics roadmap is Gounaris-Sakurai for `rho(770)`, Flatte for `f0(980)`, then LASS and K-matrix.
+The next end-to-end milestone is the 100k/1M `RealImag` closure test on this Laura++/`phasespace` path. After that, the dynamics roadmap is Gounaris-Sakurai for `rho(770)`, Flatte for `f0(980)`, then LASS and K-matrix.
 
 ## Reference
 
