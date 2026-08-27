@@ -14,6 +14,71 @@ so HESSE one-parameter uncertainties correspond to `Delta NLL = 0.5`.
 
 The EDM tolerance is explicit in `Minimizer`. Multistart trial minima use Minuit strategy 1. The selected minimum is rerun with the careful strategy 2 before HESSE because amplitude fits can contain strong correlations between complex coefficients and dynamical shape parameters.
 
+## Component normalization is the default amplitude convention
+
+Every dynamical component is normalized by default according to
+
+```text
+integral dPhi |F_j|^2 = 1.
+```
+
+The normalization is applied **before** multiplication by the complex coefficient. Thus
+
+```text
+A = sum_j c_j F_j_normalized.
+```
+
+This is particularly important for floating lineshape parameters. Without per-component normalization, changing a width also changes the overall scale of the raw Breit-Wigner and produces an avoidable correlation between `|c_j|` and the width. With the default convention the lineshape may change shape, but its phase-space norm remains fixed.
+
+`DecayModel` owns a weighted phase-space normalization sample with public defaults
+
+```python
+model = DecayModel(
+    channel,
+    components,
+    normalize_components=True,
+    normalization_size=1_000_000,
+    normalization_seed=2027,
+)
+```
+
+The sample is generated lazily on first use and then reused. Creating the model itself therefore does not immediately allocate one million events or initialize `phasespace`/TensorFlow.
+
+The sample can be inspected explicitly as
+
+```python
+model.normalization_sample
+```
+
+and the common fit workflow is now
+
+```python
+data = ...
+cache = model.prepare_cache(data)
+pdf = model.pdf()
+```
+
+without manually generating a second normalization sample.
+
+The convention is user-configurable. Raw components can be requested explicitly with
+
+```python
+DecayModel(..., normalize_components=False)
+```
+
+and the MC precision can be changed with `normalization_size`.
+
+Detector efficiency is deliberately excluded from the individual component normalization. It enters only the total signal-PDF normalization. Therefore the meaning of a complex coefficient does not change when the detector-efficiency model changes.
+
+For a floating dynamical parameter the component scale is recalculated at each parameter point:
+
+```text
+F_j(x;theta)
+ -> F_j(x;theta) / sqrt(<w_PS |F_j(theta)|^2>).
+```
+
+The same fixed internal MC sample is used throughout the fit, so the likelihood remains deterministic.
+
 ## RealImag coefficients
 
 The supported complex coefficient is
@@ -54,7 +119,8 @@ These tests are designed to expose errors in
 
 ```text
 Parameter -> ResonanceContext -> lineshape -> component amplitude
-          -> normalization cache -> JAX gradient -> Minuit
+          -> component normalization -> normalization cache
+          -> JAX gradient -> Minuit
 ```
 
 rather than relying only on one pseudoexperiment closure.
@@ -77,12 +143,17 @@ N(theta) ~= (1/N_MC) sum_k w_PS,k |A(x_k;theta)|^2.
 
 A fixed normalization sample keeps the objective deterministic, but finite-MC integration error remains. This is substantially more important when masses, widths or other lineshape parameters float: their likelihood gradients contain derivatives of the normalization integral itself.
 
-For reference closure studies the current notebooks therefore use
+For reference closure studies the default internal normalization sample therefore contains
+
+```text
+normalization MC: 1,000,000 events
+```
+
+while the E791 examples use
 
 ```text
 pseudo-data:             100,000 events
 candidate generation:  1,000,000 events
-normalization MC:       1,000,000 events
 ```
 
 Using a candidate pool comparable in size to the pseudo-data while resampling with replacement is discouraged for shape-parameter validation because the pseudo-data then inherit visible finite-pool discreteness.
@@ -162,7 +233,7 @@ sigma x/y/mass/width
 all coefficients + sigma mass/width
 rho1450 x/y/mass/width
 all coefficients + rho1450 mass/width
-100k versus 1M normalization MC
+normalization-MC precision
 local mass-profile curvature for sigma versus rho1450
 ```
 
