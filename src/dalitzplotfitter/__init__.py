@@ -6,7 +6,7 @@ from .amplitude import (
     ConstantAmplitude,
     PreparedAmplitudeCache,
 )
-from .coefficients import Flavor, RealImag
+from .coefficients import RealImag
 from .config import enable_x64
 from .dynamics import LauraCovariantRBW
 from .fit import Parameter, ParameterKind
@@ -24,7 +24,6 @@ __all__ = [
     "CoherentAmplitudeModel",
     "ConstantAmplitude",
     "CovariantKinematics",
-    "Flavor",
     "LauraCovariantRBW",
     "Parameter",
     "ParameterKind",
