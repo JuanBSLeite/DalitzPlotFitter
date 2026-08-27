@@ -34,7 +34,9 @@ class Minimizer:
 
     ``errordef=0.5`` is the Minuit convention for a negative log-likelihood.
     ``tolerance`` is passed to ``Minuit.tol`` and therefore controls the EDM
-    convergence target explicitly instead of relying on Minuit's looser default.
+    convergence target explicitly. The default is intentionally tighter than
+    iminuit's generic default because amplitude fits can contain strongly
+    correlated shape and complex-coefficient parameters.
     """
 
     def __init__(
@@ -43,7 +45,7 @@ class Minimizer:
         parameters: Sequence[Parameter],
         *,
         errordef: float = 0.5,
-        tolerance: float = 1e-6,
+        tolerance: float = 1e-10,
     ):
         if errordef <= 0:
             raise ValueError("errordef must be positive")
@@ -251,10 +253,7 @@ class Minimizer:
             )
 
         preliminary = min(valid, key=lambda result: float(result.fval))
-        best_values = {
-            name: float(preliminary.values[name])
-            for name in names
-        }
+        best_values = {name: float(preliminary.values[name]) for name in names}
         best = self._run(
             free,
             names,
