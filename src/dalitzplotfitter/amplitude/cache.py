@@ -23,7 +23,12 @@ def _component_scales(matrix: Array) -> Array:
 
 @dataclass(frozen=True)
 class PreparedAmplitudeCache:
-    """Pre-evaluated Laura++ components and normalization matrix."""
+    """Pre-evaluated amplitude components and normalization matrix.
+
+    Individual dynamical functions are normalized to unit phase-space integral
+    by default. Detector efficiency, when supplied, affects only the total PDF
+    normalization and never the definition of the complex coefficients.
+    """
 
     components: tuple[AmplitudeComponent, ...]
     data: Mapping[str, Array]
@@ -34,7 +39,7 @@ class PreparedAmplitudeCache:
     normalization_components: Array
     normalization_matrix_fixed: Array
     efficiency_normalization: Array | None = None
-    normalize_components: bool = False
+    normalize_components: bool = True
 
     @classmethod
     def prepare(
@@ -46,7 +51,7 @@ class PreparedAmplitudeCache:
         normalization_weights: Array,
         parameters: Sequence[Parameter] = (),
         efficiency_normalization: Array | None = None,
-        normalize_components: bool = False,
+        normalize_components: bool = True,
     ) -> "PreparedAmplitudeCache":
         components = tuple(components)
         if not components:
@@ -58,22 +63,25 @@ class PreparedAmplitudeCache:
             [jnp.asarray(c.function(normalization_data, None)) for c in components],
             axis=1,
         )
-        raw_matrix = normalization_matrix(
-            raw_norm, normalization_weights, efficiency_normalization
+
+        # Component normalization defines the amplitude convention and therefore
+        # uses phase-space weights only. Efficiency belongs to the total PDF.
+        raw_component_matrix = normalization_matrix(
+            raw_norm, normalization_weights, None
         )
         if normalize_components:
-            scales = _component_scales(raw_matrix)
+            scales = _component_scales(raw_component_matrix)
             data_components = raw_data * scales
             normalization_components = raw_norm * scales
-            fixed_matrix = normalization_matrix(
-                normalization_components,
-                normalization_weights,
-                efficiency_normalization,
-            )
         else:
             data_components = raw_data
             normalization_components = raw_norm
-            fixed_matrix = raw_matrix
+
+        fixed_matrix = normalization_matrix(
+            normalization_components,
+            normalization_weights,
+            efficiency_normalization,
+        )
         return cls(
             components=components,
             data=data,
@@ -117,14 +125,14 @@ class PreparedAmplitudeCache:
             if p.kind is ParameterKind.DYNAMICS and p.owner == component_name
         }
 
-    def _weights(self) -> Array:
+    def _pdf_weights(self) -> Array:
         weights = self.normalization_weights
         if self.efficiency_normalization is not None:
             weights = weights * jnp.asarray(self.efficiency_normalization)
         return weights
 
     def _single_component_scale(self, values: Array) -> Array:
-        integral = jnp.mean(self._weights() * jnp.abs(values) ** 2)
+        integral = jnp.mean(self.normalization_weights * jnp.abs(values) ** 2)
         return 1.0 / jnp.sqrt(integral)
 
     def _evaluate_components(
@@ -158,7 +166,7 @@ class PreparedAmplitudeCache:
         dynamic_indices = [
             i for i, component in enumerate(self.components) if component.name in owners
         ]
-        weights = self._weights()
+        weights = self._pdf_weights()
         n_events = norm_components.shape[0]
         matrix = self.normalization_matrix_fixed
         for i in dynamic_indices:
