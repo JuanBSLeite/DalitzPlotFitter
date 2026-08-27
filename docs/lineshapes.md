@@ -7,12 +7,10 @@ DalitzPlotFitter implements resonance dynamics directly in JAX. Laura++ is one o
 ```text
 DecayChannel + component declarations
   -> particle masses / widths / spins
-  -> weighted phasespace MC
-  -> four-momenta and invariants
-  -> resonance line shape R(m)
-  -> running width Gamma(m)
+  -> ResonanceContext
+  -> interchangeable lineshape R(m)
   -> Blatt-Weisskopf factors
-  -> angular factor T_L
+  -> interchangeable angular model T_L
   -> automatic identical-particle symmetrization
   -> complete component F_i(x)
   -> RealImag coefficient
@@ -26,9 +24,63 @@ The high-level `DecayChannel` and `Resonance` API uses the Scikit-HEP `particle`
 
 Analysis-specific values are explicit overrides. This is important for historical amplitude models in which the fitted pole parameters do not coincide with current reference values.
 
+## ResonanceContext
+
+`DecayModel` converts the decay channel and resonance declaration into a `ResonanceContext` containing the physical quantities needed by dynamics plugins:
+
+```text
+parent mass
+resonance-daughter masses
+bachelor mass
+spin
+pole mass
+pole width
+parent radius
+resonance radius
+```
+
+Users normally do not construct this object manually.
+
+## Interchangeable lineshapes
+
+A lineshape is any callable with the interface
+
+```python
+lineshape(mass, context)
+```
+
+The default is
+
+```python
+RelativisticBreitWigner()
+```
+
+so these are equivalent:
+
+```python
+Resonance(
+    "rho(770)0",
+    pair=(0, 1),
+    coefficient=RealImag(1.0, 0.0),
+)
+```
+
+and
+
+```python
+Resonance(
+    "rho(770)0",
+    pair=(0, 1),
+    coefficient=RealImag(1.0, 0.0),
+    lineshape=RelativisticBreitWigner(),
+)
+```
+
+Future dynamics such as Gounaris-Sakurai, Flatte, LASS or K-matrix plug into the same field without changing `DecayModel`.
+
 ## Covariant angular formalism
 
-The current angular convention is covariant. For
+The default angular model is `CovariantAngular()`. For
 
 ```text
 P -> R b
@@ -37,7 +89,7 @@ R -> d1 d2
 
 define `p*` as the bachelor momentum in the parent rest frame, `p` as the bachelor momentum in the resonance rest frame, `q` as the selected resonance-daughter momentum in the resonance rest frame, and `theta` as the angle between that daughter and the bachelor in the resonance rest frame.
 
-`covariant_spin_factor()` implements the expressions used as the current project convention for `L=0..4`:
+`covariant_spin_factor()` implements the current convention for `L=0..4`:
 
 ```text
 T0 = 1
@@ -49,11 +101,11 @@ T4 = (16/35) (p* q)^4 [8 p^4/mP^4 + 40 p^2/mP^2 + 35]
      [35 cos^4(theta) - 30 cos^2(theta) + 3]
 ```
 
-The signs and numerical factors are part of the amplitude convention. Laura++ is used as a validation reference for these expressions.
+The angular model is also interchangeable. `Resonance(..., angular=...)` can replace the default without coupling the choice to the lineshape.
 
 ## Relativistic Breit-Wigner
 
-The current Breit-Wigner line shape is
+The default Breit-Wigner lineshape is
 
 ```text
 R(m) = 1 / (m0^2 - m^2 - i m0 Gamma(m))
@@ -65,7 +117,7 @@ with
 Gamma(m) = Gamma0 (q/q0)^(2L+1) (m0/m) X_L(q r)^2.
 ```
 
-The low-level function is `relativistic_breit_wigner()`. The complete resonance object is `ResonanceAmplitude`; its name does not encode the angular formalism or an external package/reference.
+`RelativisticBreitWigner` uses only `mass` and the fields it needs from `ResonanceContext`.
 
 ## High-level resonance declaration
 
