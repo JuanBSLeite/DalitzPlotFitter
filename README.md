@@ -1,119 +1,122 @@
 # DalitzPlotFitter
 
-DalitzPlotFitter is a Python package under development for unbinned amplitude fits of three-body decays. It is built around **QRules**, **AmpForm**, **TensorWaves/JAX** and **mplhep**.
+DalitzPlotFitter is a Python package under development for unbinned amplitude fits of three-body decays. The primary physics convention is being aligned directly with **Laura++**, while **JAX** is used for numerical amplitude evaluation, likelihoods and gradients and **iminuit** is used for minimization.
 
-The project deliberately uses one numerical backend: **JAX**. JAX is an internal implementation choice and is not included in public class names.
+## Current physics strategy
 
-## Design goals
+The primary model path is now
 
-- construct decay chains and validate quantum numbers with QRules;
-- formulate symbolic amplitudes with AmpForm;
-- compile numerical amplitudes to JAX through TensorWaves;
-- keep complex fit coefficients owned by DalitzPlotFitter rather than by AmpForm;
-- allow both coefficient parameters and dynamical line-shape parameters to float in fits;
-- keep Blatt-Weisskopf meson radii fixed by default and float them only on explicit request;
-- cache fixed component amplitudes on data and normalization samples;
-- use cached normalization matrices for coefficient-only fits;
-- perform deterministic Monte Carlo normalization on a fixed three-body phase-space sample generated natively with JAX;
-- optionally include efficiency in the signal PDF;
-- model background with analytic/JAX callables or Dalitz histograms;
-- support signal-only weighted likelihoods with sWeights;
-- support simultaneous particle/antiparticle fits with CP violation;
-- calculate fit fractions, interference fractions and CP-asymmetry observables;
-- use iminuit while JAX evaluates the NLL and gradients;
-- validate fitter changes with toy-MC closure tests;
-- provide HEP-style diagnostics and Dalitz plots with mplhep.
+```text
+phasespace weighted MC
+        -> four-momenta in the parent rest frame
+        -> Dalitz invariants and Laura++ covariant kinematics
+        -> Laura++ line shape + Blatt-Weisskopf + Covariant angular term
+        -> complex RealImag coefficient
+        -> coherent amplitude
+        -> cached MC normalization
+        -> JAX NLL + iminuit
+```
+
+QRules/AmpForm remain useful during the transition for topology validation and reference comparisons, but production dynamical PDFs should follow the Laura++ conventions implemented explicitly by DalitzPlotFitter.
 
 ## Coherent amplitude convention
 
-DalitzPlotFitter uses AmpForm to construct the dynamical functions but owns the complex coefficients itself:
+The signal amplitude is
 
 ```text
 A(x) = sum_i c_i F_i(x)
 ```
 
-For an AmpForm resonance component, `compile_amplitude_component()` removes the AmpForm-generated helicity coupling `C_...` by setting it to unity. The resulting function is therefore only `F_i(x)`. A DalitzPlotFitter `AmplitudeComponent` then applies a coefficient object such as `MagPhase`, `CartesianCP`, or another Laura++ parameterisation.
-
-This separation is essential for CP-violating simultaneous fits because the same dynamical component can be multiplied by different particle and antiparticle coefficients without modifying AmpForm.
-
-## Fit parameters and caching
-
-Fit parameters are first-class objects. They can represent coefficient parameters such as magnitudes and phases, or dynamical parameters such as resonance masses and widths.
-
-Blatt-Weisskopf meson radii are **fixed by default**. AmpForm introduces the symbolic radius `d_res` with default value `1` in its form-factor and energy-dependent-width builders. DalitzPlotFitter keeps that value fixed unless the user explicitly creates a floating meson-radius parameter. A fixed radius therefore never invalidates the line-shape cache during minimization. If explicitly floated, it is treated as a dynamical parameter owned by the corresponding amplitude and invalidates only that component.
-
-For a coefficient-only fit, the component amplitudes
+where the preferred CP-conserving coefficient convention is
 
 ```text
-F_i(x_n)
+c_i = x_i + i y_i
 ```
 
-are evaluated once on the data and once on the normalization sample. Every likelihood call then requires only the coherent linear combination
+through `RealImag`. The reference amplitude fixes one coefficient to `1 + 0 i` to remove the arbitrary global scale and phase.
+
+## Laura++ resonance components
+
+The first complete project-owned resonance component is `LauraCovariantRBW`. It evaluates
 
 ```text
-A_n = sum_i c_i F_i(x_n)
+F = R(m) X_L(p* r_parent) X_L(q r_res) T_L^Covariant
 ```
 
-rather than reevaluating Breit-Wigner functions, angular terms or form factors.
-
-The normalization matrix
+with the Laura++ relativistic Breit-Wigner
 
 ```text
-M_ij = integral epsilon(x) F_i*(x) F_j(x) dPhi
+R(m) = 1 / (m0^2 - m^2 - i m0 Gamma(m))
 ```
 
-is also cached, so the normalization for new coefficients is only
+and
 
 ```text
-I(c) = c^dagger M c.
+Gamma(m) = Gamma0 (q/q0)^(2L+1) (m0/m) X_L(q r_res)^2.
 ```
 
-If a dynamical parameter of one component floats, only that component is reevaluated. The cache updates only the affected normalization-matrix row and column; static components and static matrix blocks are reused.
+The angular term uses the **Laura++ Covariant formalism**, not Zemach or the AmpForm helicity factor. `covariant_angular_factor()` and the numerical `covariant_spin_factor()` implement the published Laura++ expressions for `L=0..4`.
 
-## CP-violating coefficients
+The event-wise inputs are calculated directly from four-vectors:
 
-The coefficient API follows Table 1 of the Laura++ paper [J. Back et al., arXiv:1711.09854](https://arxiv.org/abs/1711.09854). The implemented parameterisations are `MagPhase`, `RealImag`, `BelleCP`, `CartesianCP`, `CartesianGammaCP`, `CleoCP`, `MagPhaseCP`, `PolarGammaCP`, `RealImagCP` and `RealImagGammaCP`.
+```text
+p*        bachelor momentum in the parent rest frame
+p         bachelor momentum in the resonance rest frame
+q         chosen resonance-daughter momentum in the resonance rest frame
+cos(theta) angle between the chosen daughter and bachelor in the resonance rest frame
+```
 
-`Flavor.PARTICLE` uses the `+` convention and `Flavor.ANTIPARTICLE` uses the `-` convention of the Laura++ table.
+The chosen daughter fixes the sign convention for odd-spin amplitudes. Tests verify that exchanging equal-mass resonance daughters flips `cos(theta)` and the complete `L=1` amplitude sign.
+
+See `docs/lineshapes.md` for the detailed formulas and implementation plan.
+
+## Weighted phase-space Monte Carlo
+
+The primary MC generator is now the external `phasespace` package. `PhasespaceMC` wraps it and immediately converts its TensorFlow output to JAX arrays.
 
 ```python
-from dalitzplotfitter import CartesianCP, Flavor
+from dalitzplotfitter import PhasespaceMC
 
-coefficient = CartesianCP(x=1.0, y=0.2, dx=0.03, dy=-0.01)
-c_particle = coefficient.value(Flavor.PARTICLE)
-c_antiparticle = coefficient.value(Flavor.ANTIPARTICLE)
-```
-
-## Three-body phase space
-
-The core package does not depend on the TensorFlow-based `phasespace` package. Instead, `ThreeBodyPhaseSpace` generates weighted points directly in Dalitz coordinates using JAX and reconstructs a deterministic mother-rest-frame four-momentum configuration in the `(E, px, py, pz)` convention expected by AmpForm/TensorWaves.
-
-The raw reconstruction is followed by a fixed global spatial rotation. This leaves every invariant mass and relative decay angle unchanged, but avoids placing a two-body subsystem exactly on a coordinate axis. That prevents artificial helicity-coordinate singularities in AmpForm for perfectly valid Dalitz points. This convention is physically harmless for the current unpolarized scalar-mother use case.
-
-```python
-import jax
-from dalitzplotfitter import ThreeBodyPhaseSpace
-
-phase_space = ThreeBodyPhaseSpace(
+mc = PhasespaceMC(
     mother_mass=1.86966,
     masses=(0.13957, 0.13957, 0.13957),
 )
-sample = phase_space.generate(jax.random.key(7), size=1_000_000)
+sample = mc.generate(1_000_000, seed=2027)
 ```
 
-When a QRules reaction is available, masses can be taken directly from it:
+`phasespace` produces four-vectors in `(px, py, pz, E)` order. The wrapper converts them once to the DalitzPlotFitter convention `(E, px, py, pz)` and calculates `s12`, `s13` and `s23`.
 
-```python
-phase_space = ThreeBodyPhaseSpace.from_reaction(reaction)
+For Monte Carlo integration DalitzPlotFitter requests
+
+```text
+normalize_weights=False
 ```
 
-`ThreeBodyPhaseSpace.from_unit_square()` exposes the same deterministic mapping used internally by the random generator. The map takes points in `[0,1]^2` to physical Dalitz coordinates and returns the exact Jacobian `ds12 ds23 = w_PS du1 du2`. This shared parametrization is used by the toy-generator envelope search.
+from `phasespace`. This is important: independently normalizing each generated batch to its own maximum would make weights from different batches incompatible. The raw phase-space weights are retained and used in normalization sums such as
 
-The same phase-space sample should be reused throughout a fit, making Monte Carlo normalization deterministic.
+```text
+N(theta) proportional to sum_k w_PS(k) |A(x_k; theta)|^2.
+```
 
-## D+ -> pi- pi+ pi+ reference model
+TensorFlow is therefore confined to MC generation; no TensorFlow object enters the JAX likelihood or minimization.
 
-The reference benchmark uses the explicit final-state ordering
+## Covariant kinematics API
+
+`covariant_kinematics(daughter, partner, bachelor)` returns
+
+```text
+resonance_mass
+p_star
+p
+q
+cos_theta
+```
+
+for arrays of four-vectors stored as `(E, px, py, pz)`. Lorentz boosts are performed numerically with JAX and are independent of the MC source, so the same code can be used for generated events and real data.
+
+## D+ -> pi- pi+ pi+ reference ordering
+
+The reference ordering remains
 
 ```text
 1 = pi-
@@ -121,84 +124,39 @@ The reference benchmark uses the explicit final-state ordering
 3 = pi+_2
 ```
 
-so that
+and
 
 ```text
 s12 = m2(pi- pi+_1)
 s13 = m2(pi- pi+_2)
-s23 = m2(pi+_1 pi+_2)
+s23 = m2(pi+_1 pi+_2).
 ```
 
-The two positive pions are identical. QRules keeps indistinguishable quantum-state transitions and AmpForm restores the kinematically distinct `pi- pi+` pairings inside the amplitude. `KinematicTransformer` registers the corresponding topology permutations so all required invariant masses and helicity angles are generated automatically.
+For a `rho(770)0` in the `(pi-, pi+_1)` pair, the other `pi+_2` is the bachelor. The identical-pion contribution with `(pi-, pi+_2)` must be added coherently with the corresponding daughter/bachelor assignment.
 
-The minimal rho-only benchmark is:
-
-```bash
-python examples/01_dplus_rho.py
-```
-
-The first coherent multi-component benchmark is:
-
-```bash
-python examples/02_dplus_rho_f0_nr.py
-```
-
-and uses
+The intended physics model is
 
 ```text
-A = c_rho F_rho(770) + c_f0 F_f0(980) + c_NR
+A = c_rho F_rho + c_f0 F_f0 + c_NR
 ```
 
-with `rho(770)0` fixed as the global magnitude/phase reference. The `f(0)(980)` component currently uses the default relativistic Breit-Wigner infrastructure as an integration benchmark. A Flatte parameterisation should be used as the dedicated physics option near the KK threshold and is a planned dynamics extension.
+with Gounaris-Sakurai planned for `rho(770)`, Flatte planned for `f0(980)`, and the Laura++ Covariant angular term used for nonzero spin.
 
-The multi-component example explicitly compares coherent and incoherent normalizations to demonstrate the presence of interference.
+## Fit parameters and caching
 
-## Toy-MC closure validation
-
-`tests/test_fit_closure.py` is the first full fitter closure test. It uses the same `pi- pi+ pi+` ordering and performs the complete validation chain:
+For coefficient-only fits the complete component amplitudes `F_i(x)` are evaluated once on the data and normalization samples. The normalization matrix
 
 ```text
-known truth parameters
-    -> deterministic search for the accept-reject envelope maximum
-    -> accept-reject toy generation from fresh phase-space batches
-    -> several separated Minuit starting points
-    -> independent MC normalization sample
-    -> cached unbinned likelihood
-    -> select the valid minimum with the lowest NLL
-    -> pull and absolute-sanity checks against injected parameters
+M_ij = integral epsilon(x) F_i*(x) F_j(x) dPhi
 ```
 
-The current reference closure uses **100,000 generated fit events** and an independent **1,000,000-event Monte Carlo normalization sample**. The notebook `notebooks/01_dplus_fit_closure.ipynb` uses the same statistics so visual diagnostics and CI validation probe the same regime.
-
-`ToyGenerator` uses accept-reject rather than categorical resampling from a finite pool. The native phase-space proposal is uniform in the unit square used to parametrize the Dalitz plot, so the proposal-to-Dalitz Jacobian returned as `PhaseSpaceSample.weights` enters the accept-reject score,
+is cached, so
 
 ```text
-score(u) = w_PS(u) |A(x(u))|^2.
+N(c) = c^dagger M c.
 ```
 
-The accept-reject envelope is no longer estimated from the maximum of a random pilot sample. Before generation, `ToyGenerator.estimate_maximum()` evaluates the score on a regular grid covering the full unit square, keeps several of the highest-score cells, and performs successive local refinements around those candidates. `envelope_safety` is then applied only as a safety margin above this deterministically located maximum. If a later generation batch nevertheless exceeds the envelope, the generator enlarges it and restarts the accepted sample so no event is retained with an inconsistent acceptance probability.
-
-`pool_size` remains temporarily in the `ToyGenerator` constructor for backwards compatibility with existing examples, but it no longer controls envelope estimation.
-
-The reference rho coefficient is fixed to remove the arbitrary global scale and phase. The test floats the `f0` and non-resonant magnitudes and phases and compares the fitted values with the injected truth, including wrapped phase differences. Because coherent amplitudes can contain separated local minima in phase space, closure validation does not rely on a single arbitrary Minuit start: the same cached objective is minimized from several starts, including one close to the injected point, and the valid minimum with the lowest NLL is selected. `Minimizer.fit(start_values=...)` provides these explicit starts without rebuilding the amplitude or normalization cache.
-
-The closure test also compares `NLL(truth)` with the best fitted NLL. A finite toy may prefer a nearby parameter point, but a large separation is treated as evidence that toy generation or the fitted probability model is still inconsistent.
-
-Closure is evaluated primarily through pulls using HESSE uncertainties, while broad absolute limits guard against wrong local minima or pathological error estimates.
-
-For likelihood minimization, `Minimizer` uses the Minuit NLL convention `errordef=0.5` by default, and each `Parameter.step` is propagated to the corresponding Minuit initial error/step size.
-
-Toy generation and fit normalization intentionally use independent Monte Carlo samples. A separate deterministic expected-NLL/Asimov regression test verifies that the likelihood normalization is stationary at the injected parameters when toy fluctuations are removed.
-
-An interactive version of the same validation is available in:
-
-```text
-notebooks/01_dplus_fit_closure.ipynb
-```
-
-The notebook includes the generated toy Dalitz plot, truth/start/fit parameter comparison with fit uncertainties, one-dimensional `s12`, `s13` and `s23` projections before and after minimization, and side-by-side two-dimensional toy/model densities before and after the fit. The model projections use the independent normalization MC sample weighted by the fitted amplitude, so they visualize the same probability model used in the likelihood.
-
-Closure tests are intended to be mandatory validation for new important coefficient parameterisations and dynamical line-shape implementations.
+When a dynamical parameter is eventually floated, only its owning component and the affected normalization-matrix row/column should be invalidated.
 
 ## Numerical convention
 
@@ -210,16 +168,30 @@ p_sig(x | theta) = epsilon(x) |A(x; theta)|^2
                    integral epsilon(x) |A(x; theta)|^2 dPhi
 ```
 
-For a linear model `A = sum_i c_i A_i`, the cached normalization matrix is
+The preferred reference normalization sample contains **1,000,000 weighted phase-space events**. The reference fit/toy sample target remains **100,000 events**.
+
+For closure of `RealImag` coefficients, generated and fitted parameters are considered compatible when each fitted coordinate satisfies
 
 ```text
-M_ij = integral epsilon(x) A_i*(x) A_j(x) dPhi,
-I    = c^dagger M c.
+abs((x_gen - x_fit) / sigma_x_fit) < 1
+abs((y_gen - y_fit) / sigma_y_fit) < 1
 ```
 
-## QRules and sub-threshold resonances
+using HESSE uncertainties with the NLL convention `errordef=0.5`.
 
-`ReactionBuilder` exposes QRules' `mass_conservation_factor`. Set it to `None` when mass conservation should not reject intermediate states, for example for a sub-threshold resonance.
+## Transition status
+
+`ThreeBodyPhaseSpace` and the deterministic-envelope `ToyGenerator` are retained temporarily because existing tests and examples still exercise them. They are no longer the intended primary MC path. The closure notebook and end-to-end closure test will be migrated to `PhasespaceMC` and weighted/resampled MC after the new Laura++ covariant component has passed its lower-level validation tests.
+
+## Planned native dynamics
+
+1. Laura++ relativistic Breit-Wigner — implemented;
+2. Laura++ Covariant angular term — implemented for `L=0..4`;
+3. weighted `phasespace` MC wrapper — implemented;
+4. complete Laura++ covariant RBW component — implemented, validation in progress;
+5. Gounaris-Sakurai — next for `rho(770)`;
+6. Flatte — next for `f0(980)`;
+7. LASS and K-matrix after the simpler models pass closure/reference tests.
 
 ## Installation
 
@@ -240,8 +212,8 @@ from dalitzplotfitter import enable_x64
 enable_x64()
 ```
 
-## Current status
+## Reference
 
-The package now contains CP-aware coefficient sets, fit-aware coefficient parameters, coherent external amplitude coefficients, cache-aware amplitude evaluation, native JAX three-body Dalitz kinematics and four-momentum reconstruction, QRules/AmpForm model building, TensorWaves/JAX compilation and symmetrized kinematic transformation, fixed-sample Monte Carlo normalization, deterministic-envelope accept-reject toy generation, efficiency/background interfaces, likelihood scaffolding, a Minuit/JAX bridge, fit/interference fractions and CP observables.
+The amplitude, Blatt-Weisskopf and Covariant angular conventions are based on:
 
-The current validation milestone is the full `D+ -> pi- pi+ pi+` toy-MC coefficient closure test. The next closure milestone is floating one or more dynamical parameters such as resonance mass or width while verifying selective cache invalidation and parameter recovery.
+J. Back et al., **Laura++: a Dalitz plot fitter**, Computer Physics Communications 231 (2018) 198-242, arXiv:1711.09854.
