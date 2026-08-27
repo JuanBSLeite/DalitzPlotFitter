@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 
-from dalitzplotfitter.dynamics import ResonanceAmplitude
+from dalitzplotfitter.dynamics import ResonanceAmplitude, ResonanceContext
 from dalitzplotfitter.kinematics import PhasespaceMC
 
 
@@ -15,16 +15,26 @@ def _data():
     return sample.as_dict()
 
 
-def _component(spin, daughter_key="p1", partner_key="p2", bachelor_key="p3", *, final_state=None):
-    return ResonanceAmplitude(
-        mass0=0.77526,
-        width0=0.1491,
+def _component(
+    spin,
+    daughter_key="p1",
+    partner_key="p2",
+    bachelor_key="p3",
+    *,
+    final_state=None,
+):
+    context = ResonanceContext(
         parent_mass=1.86966,
         daughter_masses=(0.13957, 0.13957),
         bachelor_mass=0.13957,
-        angular_momentum=spin,
+        spin=spin,
+        pole_mass=0.77526,
+        pole_width=0.1491,
         resonance_radius=1.5,
         parent_radius=5.0,
+    )
+    return ResonanceAmplitude(
+        context=context,
         daughter_key=daughter_key,
         partner_key=partner_key,
         bachelor_key=bachelor_key,
