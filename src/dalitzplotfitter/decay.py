@@ -217,18 +217,29 @@ class DecayModel:
 
     def _validate_parameters(self) -> None:
         names: dict[str, Parameter] = {}
+        dynamics_slots: dict[tuple[str, str], Parameter] = {}
         for component in self.components:
             for parameter in _collect_parameters(component):
                 if parameter.name in names and names[parameter.name] != parameter:
-                    raise ValueError(f"Conflicting definitions for parameter {parameter.name!r}")
-                names[parameter.name] = parameter
-                if (
-                    parameter.kind is ParameterKind.DYNAMICS
-                    and parameter.owner != component.name
-                ):
                     raise ValueError(
-                        f"Dynamics parameter {parameter.name!r} must have owner={component.name!r}"
+                        f"Conflicting definitions for parameter {parameter.name!r}"
                     )
+                names[parameter.name] = parameter
+                if parameter.kind is ParameterKind.DYNAMICS:
+                    if parameter.owner != component.name:
+                        raise ValueError(
+                            f"Dynamics parameter {parameter.name!r} must have owner={component.name!r}"
+                        )
+                    backend_key = parameter.backend_name or parameter.name
+                    slot = (component.name, backend_key)
+                    previous = dynamics_slots.get(slot)
+                    if previous is not None and previous.name != parameter.name:
+                        raise ValueError(
+                            "Dynamics parameters "
+                            f"{previous.name!r} and {parameter.name!r} map to the same "
+                            f"backend key {backend_key!r} for component {component.name!r}"
+                        )
+                    dynamics_slots[slot] = parameter
                 if (
                     parameter.kind is ParameterKind.COEFFICIENT
                     and parameter.owner is not None
