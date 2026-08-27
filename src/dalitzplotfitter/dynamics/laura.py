@@ -1,8 +1,7 @@
 """Laura++-style symbolic resonance dynamics.
 
 The functions in this module are independent of AmpForm. They construct SymPy
-expressions that can be inserted into an AmpForm model through a custom dynamics
-builder and subsequently compiled to JAX by TensorWaves.
+expressions following the conventions documented by Laura++.
 """
 
 from __future__ import annotations
@@ -27,6 +26,104 @@ def breakup_momentum(mass, daughter_mass1, daughter_mass2):
     return sp.sqrt(
         kallen(mass**2, daughter_mass1**2, daughter_mass2**2)
     ) / (2 * mass)
+
+
+def bachelor_momentum_parent_frame(parent_mass, resonance_mass, bachelor_mass):
+    """Bachelor momentum ``p*`` in the parent-particle rest frame."""
+
+    return sp.sqrt(
+        kallen(parent_mass**2, resonance_mass**2, bachelor_mass**2)
+    ) / (2 * parent_mass)
+
+
+def bachelor_momentum_resonance_frame(parent_mass, resonance_mass, bachelor_mass):
+    """Bachelor momentum ``p`` in the resonance rest frame.
+
+    This is the Laura++ momentum entering the relativistic correction factors of
+    the covariant spin formalism. Algebraically,
+
+    ``p = sqrt(lambda(mP^2, mR^2, mb^2)) / (2 mR)``.
+    """
+
+    return sp.sqrt(
+        kallen(parent_mass**2, resonance_mass**2, bachelor_mass**2)
+    ) / (2 * resonance_mass)
+
+
+def covariant_angular_factor(
+    p_star,
+    p,
+    q,
+    cos_theta,
+    parent_mass,
+    angular_momentum: int,
+):
+    """Laura++ covariant angular spin factor.
+
+    Implements Eqs. (91)-(95) of Back et al., CPC 231 (2018) 198-242.
+
+    Parameters
+    ----------
+    p_star:
+        Magnitude of the bachelor momentum in the parent rest frame, ``p*``.
+    p:
+        Magnitude of the bachelor momentum in the resonance rest frame, ``p``.
+    q:
+        Magnitude of one resonance-daughter momentum in the resonance rest
+        frame, ``q``.
+    cos_theta:
+        Cosine of the helicity angle between the chosen resonance daughter and
+        the bachelor, evaluated in the resonance rest frame, using the Laura++
+        daughter-ordering convention.
+    parent_mass:
+        Parent-particle mass ``mP``.
+    angular_momentum:
+        Resonance spin/orbital angular momentum ``L``. Laura++ documents the
+        covariant expressions explicitly for ``L=0..4``.
+
+    Notes
+    -----
+    The sign and numerical prefactors are intentionally kept exactly as in the
+    Laura++ convention. They therefore belong to the amplitude definition and
+    must not be silently absorbed into a coefficient when comparing parameters
+    with Laura++.
+    """
+
+    l = int(angular_momentum)
+    c = sp.sympify(cos_theta)
+    p_star = sp.sympify(p_star)
+    p = sp.sympify(p)
+    q = sp.sympify(q)
+    parent_mass = sp.sympify(parent_mass)
+    r = p**2 / parent_mass**2
+    pq = p_star * q
+
+    if l == 0:
+        return sp.Integer(1)
+    if l == 1:
+        return -2 * pq * sp.sqrt(1 + r) * c
+    if l == 2:
+        return sp.Rational(4, 3) * pq**2 * (sp.Rational(3, 2) + r) * (
+            3 * c**2 - 1
+        )
+    if l == 3:
+        return (
+            -sp.Rational(24, 15)
+            * pq**3
+            * sp.sqrt(1 + r)
+            * (sp.Rational(5, 2) + r)
+            * (5 * c**3 - 3 * c)
+        )
+    if l == 4:
+        return (
+            sp.Rational(16, 35)
+            * pq**4
+            * (8 * r**2 + 40 * r + 35)
+            * (35 * c**4 - 30 * c**2 + 3)
+        )
+    raise NotImplementedError(
+        "Laura++ covariant angular factors are documented for L=0..4"
+    )
 
 
 def _blatt_weisskopf_polynomial(z, angular_momentum: int):
