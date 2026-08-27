@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from typing import Iterable
 
 from particle import Particle
@@ -11,6 +11,7 @@ from dalitzplotfitter.amplitude import (
     AmplitudeComponent,
     CoherentAmplitudeModel,
     ConstantAmplitude,
+    PreparedAmplitudeCache,
 )
 from dalitzplotfitter.dynamics import (
     CovariantAngular,
@@ -18,6 +19,7 @@ from dalitzplotfitter.dynamics import (
     ResonanceAmplitude,
     ResonanceContext,
 )
+from dalitzplotfitter.fit import Parameter, ParameterKind
 from dalitzplotfitter.integration import MonteCarloIntegrator
 from dalitzplotfitter.kinematics import PhaseSpaceSample, PhasespaceMC
 from dalitzplotfitter.pdf import SignalPDF
@@ -62,6 +64,39 @@ def _spin(name: str) -> int:
     return int(rounded)
 
 
+def _collect_parameters(value: object) -> tuple[Parameter, ...]:
+    """Recursively collect fit Parameters from model declarations/plugins."""
+
+    if isinstance(value, Parameter):
+        return (value,)
+    parameters = getattr(value, "parameters", None)
+    if parameters is not None and not callable(parameters):
+        if isinstance(parameters, dict):
+            return tuple(
+                item for item in parameters.values() if isinstance(item, Parameter)
+            )
+        try:
+            return tuple(item for item in parameters if isinstance(item, Parameter))
+        except TypeError:
+            pass
+    if is_dataclass(value) and not isinstance(value, type):
+        found = []
+        for field in fields(value):
+            found.extend(_collect_parameters(getattr(value, field.name)))
+        return tuple(found)
+    if isinstance(value, dict):
+        return tuple(
+            parameter
+            for item in value.values()
+            for parameter in _collect_parameters(item)
+        )
+    if isinstance(value, (tuple, list)):
+        return tuple(
+            parameter for item in value for parameter in _collect_parameters(item)
+        )
+    return ()
+
+
 @dataclass(frozen=True)
 class DecayChannel:
     """Parent particle and ordered three-body final state."""
@@ -84,24 +119,18 @@ class DecayChannel:
 
 @dataclass(frozen=True)
 class Resonance:
-    """Declarative resonance component.
-
-    ``pair`` contains zero-based indices into ``DecayChannel.final_state``.
-    Mass, width and spin default to the ``particle`` package. ``lineshape`` and
-    ``angular`` are interchangeable plugins; RBW and the covariant angular model
-    are the defaults.
-    """
+    """Declarative resonance component with interchangeable dynamics plugins."""
 
     name: str
     pair: tuple[int, int]
     coefficient: object
     lineshape: object = RelativisticBreitWigner()
     angular: object = CovariantAngular()
-    mass: float | None = None
-    width: float | None = None
+    mass: object | None = None
+    width: object | None = None
     spin: int | None = None
-    resonance_radius: float = 1.5
-    parent_radius: float = 5.0
+    resonance_radius: object = 1.5
+    parent_radius: object = 5.0
 
     def __post_init__(self) -> None:
         if len(set(self.pair)) != 2 or any(
@@ -134,6 +163,30 @@ class DecayModel:
         object.__setattr__(self, "components", tuple(components))
         if not self.components:
             raise ValueError("DecayModel requires at least one amplitude component")
+        self._validate_parameters()
+
+    def _validate_parameters(self) -> None:
+        names: dict[str, Parameter] = {}
+        for component in self.components:
+            for parameter in _collect_parameters(component):
+                if parameter.name in names and names[parameter.name] != parameter:
+                    raise ValueError(f"Conflicting definitions for parameter {parameter.name!r}")
+                names[parameter.name] = parameter
+                if (
+                    parameter.kind is ParameterKind.DYNAMICS
+                    and parameter.owner != component.name
+                ):
+                    raise ValueError(
+                        f"Dynamics parameter {parameter.name!r} must have owner={component.name!r}"
+                    )
+
+    @property
+    def parameters(self) -> tuple[Parameter, ...]:
+        unique: dict[str, Parameter] = {}
+        for component in self.components:
+            for parameter in _collect_parameters(component):
+                unique.setdefault(parameter.name, parameter)
+        return tuple(unique.values())
 
     def _build_resonance(self, component: Resonance) -> AmplitudeComponent:
         i, j = component.pair
@@ -195,17 +248,20 @@ class DecayModel:
             self.channel.daughter_masses,
         ).generate(size, seed=seed)
 
-    def amplitude(self, data, coefficient_values=None):
-        return self.amplitude_model.amplitude(
-            data,
-            coefficient_values=coefficient_values,
-        )
+    def amplitude(self, data, values=None):
+        total = None
+        for component in self.amplitude_model.components:
+            component_values = component.value(
+                data,
+                parameters=values,
+                coefficient_values=values,
+            )
+            total = component_values if total is None else total + component_values
+        return total
 
-    def intensity(self, data, coefficient_values=None):
-        return self.amplitude_model.intensity(
-            data,
-            coefficient_values=coefficient_values,
-        )
+    def intensity(self, data, values=None):
+        amplitude = self.amplitude(data, values)
+        return (amplitude * amplitude.conj()).real
 
     def pdf(
         self,
@@ -214,7 +270,7 @@ class DecayModel:
         efficiency=None,
     ) -> SignalPDF:
         def intensity(data, parameters):
-            return self.intensity(data, coefficient_values=parameters)
+            return self.intensity(data, parameters)
 
         kwargs = {}
         if efficiency is not None:
@@ -223,4 +279,24 @@ class DecayModel:
             intensity=intensity,
             integrator=MonteCarloIntegrator(normalization_sample),
             **kwargs,
+        )
+
+    def prepare_cache(
+        self,
+        data_sample: PhaseSpaceSample,
+        normalization_sample: PhaseSpaceSample,
+        *,
+        efficiency_normalization=None,
+        normalize_components: bool = False,
+    ) -> PreparedAmplitudeCache:
+        """Prepare the optimized likelihood cache for fitting this model."""
+
+        return PreparedAmplitudeCache.prepare(
+            self.amplitude_model.components,
+            data=data_sample.as_dict(),
+            normalization_data=normalization_sample.as_dict(),
+            normalization_weights=normalization_sample.weights,
+            parameters=self.parameters,
+            efficiency_normalization=efficiency_normalization,
+            normalize_components=normalize_components,
         )
