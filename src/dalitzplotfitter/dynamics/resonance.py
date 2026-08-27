@@ -13,7 +13,11 @@ from dalitzplotfitter.kinematics import covariant_kinematics
 
 from .angular import CovariantAngular
 from .context import ResonanceContext
-from .lineshapes import RelativisticBreitWigner, blatt_weisskopf_from_momenta, breakup_momentum
+from .lineshapes import (
+    RelativisticBreitWigner,
+    blatt_weisskopf_from_momenta,
+    breakup_momentum,
+)
 
 
 def _key_index(key: str) -> int:
@@ -35,6 +39,11 @@ def _identical_permutations(
     )
 
 
+def _resolve_plugin(plugin: object, values: Mapping[str, object] | None):
+    resolver = getattr(plugin, "resolve", None)
+    return resolver(values) if resolver is not None else plugin
+
+
 @dataclass(frozen=True)
 class ResonanceAmplitude:
     """Complete resonance amplitude assembled from interchangeable plugins."""
@@ -47,21 +56,20 @@ class ResonanceAmplitude:
     lineshape: object = RelativisticBreitWigner()
     angular: object = CovariantAngular()
 
-    @property
-    def parameters(self) -> dict[str, object]:
-        return {}
-
     def _evaluate_pairing(
         self,
         data: Mapping[str, Array],
         daughter_key: str,
         partner_key: str,
         bachelor_key: str,
+        parameters: Mapping[str, object] | None,
     ) -> Array:
         kin = covariant_kinematics(
             data[daughter_key], data[partner_key], data[bachelor_key]
         )
-        context = self.context
+        context = self.context.resolve(parameters)
+        lineshape = _resolve_plugin(self.lineshape, parameters)
+        angular_model = _resolve_plugin(self.angular, parameters)
         l = int(context.spin)
         m1, m2 = context.daughter_masses
 
@@ -75,8 +83,8 @@ class ResonanceAmplitude:
         x_parent = blatt_weisskopf_from_momenta(
             kin.p_star, p_star0, l, context.parent_radius
         )
-        resonance = self.lineshape(kin.resonance_mass, context)
-        angular = self.angular(kin, context)
+        resonance = lineshape(kin.resonance_mass, context)
+        angular = angular_model(kin, context)
         return resonance * x_parent * x_res * angular
 
     def __call__(
@@ -84,10 +92,9 @@ class ResonanceAmplitude:
         data: Mapping[str, Array],
         parameters: Mapping[str, object] | None = None,
     ) -> Array:
-        del parameters
         base_keys = (self.daughter_key, self.partner_key, self.bachelor_key)
         if self.final_state is None:
-            return self._evaluate_pairing(data, *base_keys)
+            return self._evaluate_pairing(data, *base_keys, parameters)
         if len(self.final_state) != 3:
             raise ValueError("final_state must contain exactly three particle labels")
 
@@ -99,5 +106,5 @@ class ResonanceAmplitude:
             if keys in seen:
                 continue
             seen.add(keys)
-            values.append(self._evaluate_pairing(data, *keys))
+            values.append(self._evaluate_pairing(data, *keys, parameters))
         return sum(values, start=jnp.zeros_like(values[0]))
