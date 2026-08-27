@@ -1,4 +1,4 @@
-"""Coherent amplitude components with DalitzPlotFitter-owned coefficients."""
+"""Coherent amplitude components with RealImag coefficients."""
 
 from __future__ import annotations
 
@@ -8,12 +8,10 @@ from typing import Mapping
 import jax.numpy as jnp
 from jax import Array
 
-from dalitzplotfitter.coefficients import Flavor
-
 
 @dataclass(frozen=True)
 class AmplitudeComponent:
-    """Named Laura++ dynamical component ``F_i(x)`` with an external coefficient."""
+    """Named Laura++ dynamical component ``F_i(x)`` with a RealImag coefficient."""
 
     name: str
     function: object
@@ -23,12 +21,11 @@ class AmplitudeComponent:
         self,
         data: Mapping[str, Array],
         *,
-        flavor: Flavor = Flavor.PARTICLE,
         parameters: Mapping[str, object] | None = None,
         coefficient_values: Mapping[str, object] | None = None,
     ) -> Array:
         dynamics = jnp.asarray(self.function(data, parameters))
-        coefficient = jnp.asarray(self.coefficient.value(flavor, coefficient_values))
+        coefficient = jnp.asarray(self.coefficient.value(coefficient_values))
         return coefficient * dynamics
 
 
@@ -65,7 +62,6 @@ class CoherentAmplitudeModel:
         self,
         data: Mapping[str, Array],
         *,
-        flavor: Flavor = Flavor.PARTICLE,
         parameters: Mapping[str, Mapping[str, object]] | None = None,
         coefficient_values: Mapping[str, object] | None = None,
     ) -> Array:
@@ -76,7 +72,6 @@ class CoherentAmplitudeModel:
             component_parameters = None if parameters is None else parameters.get(component.name)
             value = component.value(
                 data,
-                flavor=flavor,
                 parameters=component_parameters,
                 coefficient_values=coefficient_values,
             )
