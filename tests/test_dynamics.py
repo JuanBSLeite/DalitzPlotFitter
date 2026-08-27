@@ -5,20 +5,22 @@ import jax.numpy as jnp
 from dalitzplotfitter.dynamics import (
     RelativisticBreitWigner,
     ResonanceContext,
+    bachelor_momentum_resonance_frame,
     blatt_weisskopf_from_momenta,
     breakup_momentum,
     covariant_spin_factor,
+    effective_pole_mass,
     energy_dependent_width,
 )
 
 
-def _context(spin=1):
+def _context(spin=1, *, pole_mass=0.775):
     return ResonanceContext(
         parent_mass=1.86966,
         daughter_masses=(0.13957, 0.13957),
         bachelor_mass=0.13957,
         spin=spin,
-        pole_mass=0.775,
+        pole_mass=pole_mass,
         pole_width=0.149,
         resonance_radius=1.5,
         parent_radius=5.0,
@@ -32,6 +34,42 @@ def test_breakup_momentum_matches_two_body_formula():
     )
     expected = math.sqrt(lam) / (2 * m)
     assert math.isclose(float(breakup_momentum(m, m1, m2)), expected, rel_tol=1e-6)
+
+
+def test_bachelor_momentum_in_resonance_frame_matches_two_body_formula():
+    parent, resonance, bachelor = 1.87, 0.775, 0.140
+    lam = parent**4 + resonance**4 + bachelor**4 - 2 * (
+        parent**2 * resonance**2
+        + parent**2 * bachelor**2
+        + resonance**2 * bachelor**2
+    )
+    expected = math.sqrt(lam) / (2 * resonance)
+    value = bachelor_momentum_resonance_frame(parent, resonance, bachelor)
+    assert math.isclose(float(value), expected, rel_tol=1e-7)
+
+
+def test_effective_pole_mass_matches_reference_virtual_state_mapping():
+    context = _context(pole_mass=2.2)
+    minimum = sum(context.daughter_masses)
+    maximum = context.parent_mass - context.bachelor_mass
+    span = maximum - minimum
+    midpoint = 0.5 * (minimum + maximum)
+    expected = minimum + 0.5 * span * (
+        1.0 + math.tanh((context.pole_mass - midpoint) / span)
+    )
+    value = float(effective_pole_mass(context))
+    assert minimum < value < maximum
+    assert math.isclose(value, expected, rel_tol=1e-12, abs_tol=1e-12)
+
+
+def test_effective_pole_mass_is_unchanged_inside_physical_range():
+    context = _context(pole_mass=0.775)
+    assert math.isclose(
+        float(effective_pole_mass(context)),
+        context.pole_mass,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
 
 
 def test_covariant_spin_factors_match_reference_formulas():
@@ -66,6 +104,13 @@ def test_running_width_equals_pole_width_at_pole():
     assert math.isclose(
         float(width), context.pole_width, rel_tol=1e-6, abs_tol=1e-7
     )
+
+
+def test_virtual_pole_width_is_finite_inside_dalitz_region():
+    context = _context(spin=1, pole_mass=2.2)
+    width = energy_dependent_width(jnp.asarray(1.0), context)
+    assert bool(jnp.isfinite(width))
+    assert float(width) > 0.0
 
 
 def test_rbw_has_unit_numerator_at_pole():
