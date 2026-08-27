@@ -126,19 +126,17 @@ w_target = w_PS |A(theta_gen)|^2.
 
 ## Fit notebook
 
-`notebooks/02_fit_dynamic_parameters.ipynb` provides an end-to-end example for
+`notebooks/02_fit_dynamic_parameters.ipynb` duplicates the E791 Fit 2 amplitude model used in notebook 1 for
 
 ```text
 D+ -> pi- pi+ pi+
 ```
 
-with a symmetrized rho resonance plus a constant non-resonant amplitude. The fit simultaneously floats
+The rho(770) coefficient is fixed to `1 + 0 i` as the reference amplitude. The `RealImag` coefficients of the other Fit 2 components float. Among dynamical parameters, only
 
 ```text
-rho.x
-rho.y
-rho.mass
-rho.width
+rho1450.mass
+rho1450.width
 ```
 
-using 100,000 pseudo-data events and 1,000,000 normalization events. The notebook prints generated-versus-fitted pulls and plots the Dalitz distribution and the unlike-sign pion projection before and after the fit.
+float; all other resonance masses and widths remain fixed to the values used in the generation example. The notebook uses 100,000 pseudo-data events and 1,000,000 normalization events, prints generated-versus-fitted pulls, and compares the full unlike-sign pion projection before and after the fit, including a rho(1450)-sensitive zoom.
