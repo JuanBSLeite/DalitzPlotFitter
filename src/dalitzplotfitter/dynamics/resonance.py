@@ -12,7 +12,7 @@ from jax import Array
 from dalitzplotfitter.kinematics import covariant_kinematics
 
 from .angular import CovariantAngular
-from .context import ResonanceContext
+from .context import ResonanceContext, resolve_value
 from .lineshapes import (
     RelativisticBreitWigner,
     blatt_weisskopf_from_momenta,
@@ -39,11 +39,6 @@ def _identical_permutations(
     )
 
 
-def _resolve_plugin(plugin: object, values: Mapping[str, object] | None):
-    resolver = getattr(plugin, "resolve", None)
-    return resolver(values) if resolver is not None else plugin
-
-
 @dataclass(frozen=True)
 class ResonanceAmplitude:
     """Complete resonance amplitude assembled from interchangeable plugins."""
@@ -68,8 +63,8 @@ class ResonanceAmplitude:
             data[daughter_key], data[partner_key], data[bachelor_key]
         )
         context = self.context.resolve(parameters)
-        lineshape = _resolve_plugin(self.lineshape, parameters)
-        angular_model = _resolve_plugin(self.angular, parameters)
+        lineshape = resolve_value(self.lineshape, parameters)
+        angular_model = resolve_value(self.angular, parameters)
         l = int(context.spin)
         m1, m2 = context.daughter_masses
 
