@@ -1,21 +1,24 @@
 """Numerical resonance dynamics."""
 
-from .covariant import (
-    ResonanceAmplitude,
+from .angular import CovariantAngular, covariant_spin_factor
+from .context import ResonanceContext
+from .lineshapes import (
+    RelativisticBreitWigner,
     blatt_weisskopf_from_momenta,
     breakup_momentum,
-    covariant_spin_factor,
     energy_dependent_width,
     kallen,
-    relativistic_breit_wigner,
 )
+from .resonance import ResonanceAmplitude
 
 __all__ = [
+    "CovariantAngular",
+    "RelativisticBreitWigner",
     "ResonanceAmplitude",
+    "ResonanceContext",
     "blatt_weisskopf_from_momenta",
     "breakup_momentum",
     "covariant_spin_factor",
     "energy_dependent_width",
     "kallen",
-    "relativistic_breit_wigner",
 ]
