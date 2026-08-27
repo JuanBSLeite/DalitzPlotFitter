@@ -8,7 +8,7 @@ The intended model flow is
 
 ```text
 particle masses / decay definition
-  -> weighted phase-space Monte Carlo
+  -> weighted phase-space Monte Carlo from phasespace
   -> Dalitz invariants and four-momenta
   -> DalitzPlotFitter Laura++ dynamics
        - resonance lineshape R(m)
@@ -19,7 +19,9 @@ particle masses / decay definition
   -> complete component F_i(x)
   -> RealImag coefficient c_i = x_i + i y_i
   -> coherent amplitude A = sum_i c_i F_i
-  -> cached likelihood and normalization
+  -> cached weighted-MC normalization
+  -> optional weighted resampling to unweighted pseudo-data
+  -> JAX likelihood + iminuit
 ```
 
 The physics convention should be explicit and testable term by term against Laura++.
@@ -45,24 +47,16 @@ theta = helicity angle between the selected R daughter and the bachelor in the R
 mP = parent mass.
 ```
 
-DalitzPlotFitter provides
+DalitzPlotFitter provides both symbolic and numerical implementations:
 
 ```python
-from dalitzplotfitter.dynamics import covariant_angular_factor
-
-T = covariant_angular_factor(
-    p_star=p_star,
-    p=p,
-    q=q,
-    cos_theta=cos_theta,
-    parent_mass=m_parent,
-    angular_momentum=L,
+from dalitzplotfitter.dynamics import (
+    covariant_angular_factor,
+    covariant_spin_factor,
 )
 ```
 
-The implemented expressions are Eqs. (91)-(95) of J. Back et al., *Laura++: a Dalitz plot fitter*, CPC 231 (2018) 198-242, for `L=0..4`.
-
-They are
+The expressions are Eqs. (91)-(95) of J. Back et al., *Laura++: a Dalitz plot fitter*, CPC 231 (2018) 198-242, for `L=0..4`.
 
 ```text
 L = 0:
@@ -88,21 +82,11 @@ T_4 = (16/35) (p* q)^4
 
 The numerical prefactors and signs are part of the Laura++ amplitude convention and are not absorbed into the fitted coefficient.
 
-The helper functions
-
-```python
-bachelor_momentum_parent_frame(...)
-bachelor_momentum_resonance_frame(...)
-breakup_momentum(...)
-```
-
-provide the corresponding `p*`, `p` and `q` magnitudes from masses.
-
-The helicity-angle sign depends on which resonance daughter is chosen. The final three-body component implementation must use the same daughter-ordering convention as Laura++, and identical-particle symmetrisation must apply the corresponding angular term separately to each pairing.
+`covariant_kinematics(daughter, partner, bachelor)` computes `m`, `p*`, `p`, `q` and `cos(theta)` directly from four-vectors in `(E, px, py, pz)` order. The chosen daughter fixes the odd-spin sign convention. Tests verify that exchanging equal-mass resonance daughters flips `cos(theta)` and the complete `L=1` amplitude sign.
 
 ## Laura++ relativistic Breit-Wigner
 
-The first native resonance lineshape implementation is the Laura++-convention relativistic Breit-Wigner
+The first native resonance lineshape implementation is
 
 ```text
 R(m) = 1 / (m0^2 - m^2 - i m0 Gamma(m))
@@ -132,37 +116,46 @@ The Blatt-Weisskopf factor is normalized at the resonance pole so that
 X(q0 r) = 1.
 ```
 
-The implementation currently supports orbital angular momenta `L=0..5` for the Laura++ Blatt-Weisskopf polynomials.
-
 ## Complete resonance component
 
-For an isobar resonance component the target convention is
+`LauraCovariantRBW` is the first complete numerical component and evaluates
 
 ```text
-F_i(x) = R_i(m) X_parent X_resonance T_L(x),
+F_i(x) = R_i(m) X_parent X_resonance T_L(x).
 ```
 
-with every factor following Laura++ conventions. For identical particles the complete amplitude is the coherent sum over the required pairings before multiplication by the external complex coefficient.
+It receives raw four-vectors and performs its own Laura++ covariant kinematics. It therefore does not depend on an AmpForm angular factor. The first validation tests cover finite physical values and the daughter-exchange parity of `L=0` and `L=1` components.
 
-This complete component, rather than only `R(m)`, is what enters the fit and the Monte Carlo normalization.
+For identical particles the production amplitude must coherently sum the corresponding pairings before multiplication by the external complex coefficient.
 
-## Monte Carlo normalization
+## Weighted phase-space Monte Carlo
 
-The planned phase-space backend is the `phasespace` package, which supplies four-momenta and phase-space event weights. The normalization of a coefficient-only amplitude is then estimated using a fixed weighted sample:
+`PhasespaceMC` wraps the external `phasespace` package. The package generates in `(px, py, pz, E)` order; DalitzPlotFitter converts immediately to `(E, px, py, pz)` and then stays in JAX.
+
+For MC integration the wrapper explicitly requests
+
+```text
+normalize_weights=False
+```
+
+so independent batches retain mutually compatible raw phase-space weights. The coefficient-only normalization matrix is estimated as
 
 ```text
 M_ij proportional to sum_k w_PS,k F_i*(x_k) F_j(x_k),
 N(c) = c^dagger M c.
 ```
 
-The normalization sample is generated once and remains fixed during minimization.
+The reference normalization target is **1,000,000 weighted events**.
 
-For the current high-statistics closure benchmark the intended sample sizes are
+## Weighted pseudo-data resampling
+
+For an ordinary unbinned closure fit, weighted MC candidates are not inserted into the likelihood as if they were independent unweighted observations. Instead the target candidate weight is
 
 ```text
-fit sample:           100,000 events
-normalization sample: 1,000,000 events
+w_target,k = w_PS,k |A(x_k)|^2.
 ```
+
+`weighted_resample()` draws unweighted pseudo-data from those probabilities. The returned events carry unit weights. The reference pseudo-data target remains **100,000 events**; the candidate pool should be substantially larger than the requested pseudo-data sample.
 
 ## Individual component normalization
 
@@ -176,22 +169,22 @@ If individual component normalization is enabled, it must apply to the **complet
 
 The precise convention concerning efficiency in this basis normalization will be validated separately before being treated as production-ready.
 
-## Planned native dynamics
-
-The implementation sequence is:
+## Implementation sequence
 
 1. Laura++ relativistic Breit-Wigner — implemented;
-2. Laura++ Covariant angular formalism — implemented symbolically for `L=0..4`;
-3. weighted phase-space MC backend using `phasespace` — planned;
-4. combine RBW, Blatt-Weisskopf and Covariant terms into the full resonance component;
-5. Gounaris-Sakurai — planned, especially for `rho(770)`;
-6. Flatte — planned, especially for `f0(980)` near the `K Kbar` threshold;
-7. LASS — planned for `K pi` S-wave models;
-8. K-matrix after the simpler models have closure and reference-validation tests.
+2. Laura++ Covariant angular formalism — implemented for `L=0..4`;
+3. four-vector covariant kinematics — implemented;
+4. weighted `phasespace` MC wrapper — implemented;
+5. complete `LauraCovariantRBW` component — implemented, validation in progress;
+6. weighted pseudo-data resampling — implemented;
+7. migrate the `D+ -> pi- pi+ pi+` closure to the new chain;
+8. Gounaris-Sakurai for `rho(770)`;
+9. Flatte for `f0(980)`;
+10. LASS and K-matrix after the simpler models pass closure/reference tests.
 
 ## Validation requirements
 
-Every physics term should have unit tests for its analytic limits and numerical comparison tests against the Laura++ convention. Existing checks include
+Every physics term should have unit tests for its analytic limits and numerical comparison tests against Laura++. Existing checks include
 
 ```text
 q(m0) = q0
@@ -200,9 +193,9 @@ X(q0 r) = 1
 T_0 = 1
 ```
 
-and direct numerical tests of the published Covariant expressions for `L=1..4`.
+plus direct numerical tests of the Covariant expressions, Lorentz-boost/rest-frame consistency, equal-mass daughter exchange, weighted phase-space conservation and weighted-resampling behavior.
 
-The next important validation is to construct the full `rho(770)` component with the Covariant angular term and compare it point-by-point against Laura++ using identical Dalitz kinematics and daughter ordering.
+The next reference-level validation is to compare the full `rho(770)` component point-by-point against Laura++ using identical Dalitz kinematics and daughter ordering.
 
 ## Reference
 
