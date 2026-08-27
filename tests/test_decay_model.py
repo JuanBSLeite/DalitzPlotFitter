@@ -23,6 +23,16 @@ class ConstantLineshape:
         return jnp.ones_like(mass, dtype=jnp.complex128)
 
 
+def _model(channel, components, **kwargs):
+    return DecayModel(
+        channel,
+        components,
+        normalization_size=2048,
+        normalization_seed=2027,
+        **kwargs,
+    )
+
+
 def _floating_rho_model():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     mass = Parameter.dynamics(
@@ -33,7 +43,7 @@ def _floating_rho_model():
     )
     x = Parameter.coefficient("rho.x", 0.8, owner="rho")
     y = Parameter.coefficient("rho.y", 0.2, owner="rho")
-    return DecayModel(
+    return _model(
         channel,
         [
             Resonance(
@@ -62,10 +72,62 @@ def test_unphysical_decay_channel_is_rejected():
         DecayChannel("pi0", ("pi0", "pi0", "pi0"))
 
 
+def test_decay_model_defaults_to_component_normalization_and_one_million_events():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    model = DecayModel(channel, [NonResonant(RealImag(1.0, 0.0))])
+    assert model.normalize_components is True
+    assert model.normalization_size == 1_000_000
+    assert model._normalization_sample is None
+
+
+def test_internal_normalization_sample_is_lazy_and_reused():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    model = _model(channel, [NonResonant(RealImag(1.0, 0.0))])
+    assert model._normalization_sample is None
+    first = model.normalization_sample
+    second = model.normalization_sample
+    assert first is second
+    assert first.size == 2048
+
+
+def test_component_normalization_is_unit_diagonal_by_default():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    model = _model(
+        channel,
+        [
+            Resonance(
+                "rho_test",
+                pair=(0, 1),
+                coefficient=RealImag(1.0, 0.0),
+                mass=0.775,
+                width=0.149,
+                spin=1,
+            ),
+            NonResonant(RealImag(0.3, -0.2)),
+        ],
+    )
+    data = model.generate_phase_space(64, seed=11)
+    cache = model.prepare_cache(data)
+    diagonal = jnp.real(jnp.diag(cache.normalization_matrix_fixed))
+    assert jnp.allclose(diagonal, jnp.ones_like(diagonal), rtol=1e-11, atol=1e-11)
+
+
+def test_component_normalization_can_be_disabled():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    model = _model(
+        channel,
+        [NonResonant(RealImag(1.0, 0.0))],
+        normalize_components=False,
+    )
+    data = model.generate_phase_space(32, seed=12)
+    cache = model.prepare_cache(data)
+    assert cache.normalize_components is False
+
+
 def test_decay_model_rejects_duplicate_component_names():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     with pytest.raises(ValueError, match="component names must be unique"):
-        DecayModel(
+        _model(
             channel,
             [
                 NonResonant(RealImag(1.0, 0.0), name="same"),
@@ -91,7 +153,7 @@ def test_decay_model_rejects_ambiguous_dynamics_backend_names():
         bounds=(0.05, 0.30),
     )
     with pytest.raises(ValueError, match="map to the same backend key"):
-        DecayModel(
+        _model(
             channel,
             [
                 Resonance(
@@ -127,7 +189,7 @@ def test_decay_model_rejects_unphysical_core_parameter_bounds():
 
 def test_decay_model_builds_symmetrized_resonance_without_manual_particle_masses():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
-    model = DecayModel(
+    model = _model(
         channel,
         [
             Resonance(
@@ -150,7 +212,7 @@ def test_decay_model_builds_symmetrized_resonance_without_manual_particle_masses
 
 def test_decay_model_accepts_custom_lineshape_plugin():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
-    model = DecayModel(
+    model = _model(
         channel,
         [
             Resonance(
@@ -197,8 +259,7 @@ def test_decay_model_exposes_and_resolves_dynamic_parameters():
 def test_prepared_cache_recomputes_floating_dynamics():
     model = _floating_rho_model()
     data = model.generate_phase_space(96, seed=41)
-    norm = model.generate_phase_space(256, seed=42)
-    cache = model.prepare_cache(data, norm)
+    cache = model.prepare_cache(data)
 
     initial = {
         "rho.mass": 0.760,
@@ -221,8 +282,8 @@ def test_prepared_cache_recomputes_floating_dynamics():
 def test_prepared_cache_matches_direct_model_for_floating_dynamics():
     model = _floating_rho_model()
     data = model.generate_phase_space(128, seed=51)
-    norm = model.generate_phase_space(1024, seed=52)
-    cache = model.prepare_cache(data, norm)
+    cache = model.prepare_cache(data)
+    norm = model.normalization_sample
 
     points = (
         {"rho.mass": 0.735, "rho.width": 0.095, "rho.x": -0.3, "rho.y": 1.1},
@@ -244,12 +305,12 @@ def test_prepared_cache_matches_direct_model_for_floating_dynamics():
         assert jnp.allclose(cached_norm, direct_norm, rtol=1e-11, atol=1e-12)
 
 
-def test_decay_model_builds_normalized_pdf():
+def test_decay_model_builds_normalized_pdf_with_internal_sample():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
-    model = DecayModel(channel, [NonResonant(RealImag(1.0, 0.0))])
-    norm = model.generate_phase_space(512, seed=21)
-    pdf = model.pdf(norm)
+    model = _model(channel, [NonResonant(RealImag(1.0, 0.0))])
+    pdf = model.pdf()
+    norm = model.normalization_sample
     values = pdf(norm.as_dict(), {})
-    assert values.shape == (512,)
+    assert values.shape == (norm.size,)
     assert bool(jnp.all(jnp.isfinite(values)))
     assert bool(jnp.all(values > 0.0))
