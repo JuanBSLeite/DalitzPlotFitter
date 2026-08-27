@@ -20,12 +20,7 @@ class ParameterKind(str, Enum):
 
 @dataclass(frozen=True)
 class Parameter:
-    """Configuration for one scalar fit parameter.
-
-    ``backend_name`` is used when a user-facing parameter controls a parameter of
-    an external numerical model, for example an AmpForm resonance mass or width.
-    The public ``name`` remains stable even if the backend symbol is verbose.
-    """
+    """Configuration for one scalar fit parameter."""
 
     name: str
     value: float
@@ -39,8 +34,11 @@ class Parameter:
     def resolve(self, values: Mapping[str, object] | None = None):
         """Return the current value from a flat fit-parameter mapping."""
 
-        if values is not None and self.name in values:
-            return values[self.name]
+        if values is not None:
+            if self.name in values:
+                return values[self.name]
+            if self.backend_name is not None and self.backend_name in values:
+                return values[self.backend_name]
         return self.value
 
     @classmethod
@@ -70,12 +68,18 @@ class Parameter:
         name: str,
         value: float,
         *,
-        backend_name: str,
         owner: str,
+        backend_name: str | None = None,
         fixed: bool = False,
         bounds: tuple[float | None, float | None] | None = None,
         step: float | None = None,
     ) -> "Parameter":
+        """Declare a dynamical parameter owned by one amplitude component.
+
+        ``backend_name`` is optional. When omitted the public parameter name is
+        used directly throughout the numerical model.
+        """
+
         return cls(
             name=name,
             value=value,
@@ -93,24 +97,19 @@ class Parameter:
         name: str,
         value: float,
         *,
-        backend_name: str,
         owner: str,
+        backend_name: str | None = None,
         fixed: bool = True,
         bounds: tuple[float | None, float | None] | None = None,
         step: float | None = None,
     ) -> "Parameter":
-        """Declare a Blatt-Weisskopf meson radius.
-
-        Meson radii are fixed by default. Set ``fixed=False`` explicitly only when
-        a fit is intended to vary the radius; in that case it is treated as a
-        dynamical parameter and invalidates only the owning amplitude cache.
-        """
+        """Declare a Blatt-Weisskopf meson radius."""
 
         return cls.dynamics(
             name=name,
             value=value,
-            backend_name=backend_name,
             owner=owner,
+            backend_name=backend_name,
             fixed=fixed,
             bounds=bounds,
             step=step,
