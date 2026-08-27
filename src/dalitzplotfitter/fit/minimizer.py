@@ -33,10 +33,10 @@ class Minimizer:
     """Minimize a mapping-based JAX objective with iminuit.
 
     ``errordef=0.5`` is the Minuit convention for a negative log-likelihood.
-    ``tolerance`` is passed to ``Minuit.tol`` and therefore controls the EDM
-    convergence target explicitly. The default is intentionally tighter than
-    iminuit's generic default because amplitude fits can contain strongly
-    correlated shape and complex-coefficient parameters.
+    ``tolerance`` is passed to ``Minuit.tol`` and controls the EDM convergence
+    target explicitly. Preliminary multistart trials use Minuit strategy 1;
+    the selected minimum and ordinary single fits use the careful strategy 2
+    before HESSE so strongly correlated parameters receive a final refinement.
     """
 
     def __init__(
@@ -130,6 +130,7 @@ class Minimizer:
         minuit = Minuit(fcn, *start, name=names, grad=grad)
         minuit.errordef = self.errordef
         minuit.tol = self.tolerance
+        minuit.strategy = 2 if run_hesse else 1
         for parameter in free:
             if parameter.bounds is not None:
                 minuit.limits[parameter.name] = parameter.bounds
@@ -139,6 +140,10 @@ class Minimizer:
             minuit.simplex()
         minuit.migrad()
         if run_hesse:
+            # Re-run MIGRAD from its own minimum with the careful strategy before
+            # computing covariance. This is cheap compared with the multistart
+            # scan and gives correlated amplitude fits a deterministic refinement.
+            minuit.migrad()
             minuit.hesse()
         return minuit
 
@@ -148,7 +153,7 @@ class Minimizer:
         *,
         simplex: bool = False,
     ):
-        """Run one MIGRAD/HESSE minimization from one starting point."""
+        """Run one carefully refined MIGRAD/HESSE minimization."""
 
         free, names, fcn, grad = self._backend()
         return self._run(
@@ -209,9 +214,9 @@ class Minimizer:
     ) -> MultiStartResult:
         """Run independent starts and select the valid solution with lowest NLL.
 
-        All starts share a single compiled JAX value/gradient backend. MIGRAD is
-        run for every start; HESSE is run only after selecting the lowest finite,
-        valid minimum. No truth information is used in the selection.
+        All starts share a single compiled JAX value/gradient backend. Preliminary
+        starts use strategy 1 and no HESSE. The best finite valid minimum is then
+        rerun with strategy 2 and HESSE. No truth information is used.
         """
 
         if n_starts < 1:
