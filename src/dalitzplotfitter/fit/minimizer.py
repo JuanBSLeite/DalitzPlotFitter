@@ -32,8 +32,9 @@ class MultiStartResult:
 class Minimizer:
     """Minimize a mapping-based JAX objective with iminuit.
 
-    The default ``errordef=0.5`` is the Minuit convention for a negative
-    log-likelihood. It makes HESSE uncertainties correspond to Delta(NLL)=0.5.
+    ``errordef=0.5`` is the Minuit convention for a negative log-likelihood.
+    ``tolerance`` is passed to ``Minuit.tol`` and therefore controls the EDM
+    convergence target explicitly instead of relying on Minuit's looser default.
     """
 
     def __init__(
@@ -42,12 +43,16 @@ class Minimizer:
         parameters: Sequence[Parameter],
         *,
         errordef: float = 0.5,
+        tolerance: float = 1e-6,
     ):
         if errordef <= 0:
             raise ValueError("errordef must be positive")
+        if tolerance <= 0:
+            raise ValueError("tolerance must be positive")
         self.objective = objective
         self.parameters = tuple(parameters)
         self.errordef = float(errordef)
+        self.tolerance = float(tolerance)
 
     def _backend(self):
         free = tuple(parameter for parameter in self.parameters if not parameter.fixed)
@@ -87,6 +92,19 @@ class Minimizer:
         if unknown:
             unknown_text = ", ".join(sorted(unknown))
             raise ValueError(f"Unknown starting parameters: {unknown_text}")
+        for parameter in self.parameters:
+            if parameter.name not in values or parameter.bounds is None:
+                continue
+            value = float(values[parameter.name])
+            low, high = parameter.bounds
+            if low is not None and value < low:
+                raise ValueError(
+                    f"starting value {value} is below the lower bound {low} for {parameter.name!r}"
+                )
+            if high is not None and value > high:
+                raise ValueError(
+                    f"starting value {value} is above the upper bound {high} for {parameter.name!r}"
+                )
         return values
 
     def _run(
@@ -109,6 +127,7 @@ class Minimizer:
         )
         minuit = Minuit(fcn, *start, name=names, grad=grad)
         minuit.errordef = self.errordef
+        minuit.tol = self.tolerance
         for parameter in free:
             if parameter.bounds is not None:
                 minuit.limits[parameter.name] = parameter.bounds
