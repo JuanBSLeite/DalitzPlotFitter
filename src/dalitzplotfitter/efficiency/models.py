@@ -14,8 +14,11 @@ class UnityEfficiency:
     """Efficiency model corresponding to no efficiency correction."""
 
     def __call__(self, data: dict[str, Array]) -> Array:
-        first = next(iter(data.values()))
-        return jnp.ones_like(first, dtype=float)
+        if not data:
+            raise ValueError("efficiency evaluation requires non-empty event data")
+        first = jnp.asarray(next(iter(data.values())))
+        size = first.shape[0] if first.ndim > 0 else 1
+        return jnp.ones((size,), dtype=float)
 
 
 @dataclass(frozen=True)
