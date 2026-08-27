@@ -1,4 +1,5 @@
 import jax.numpy as jnp
+import pytest
 
 from dalitzplotfitter.dynamics import ResonanceAmplitude, ResonanceContext
 from dalitzplotfitter.kinematics import PhasespaceMC
@@ -77,3 +78,25 @@ def test_nonidentical_final_state_does_not_add_extra_pairing():
     automatic = _component(1, final_state=labels)(data)
     nominal = _component(1)(data)
     assert jnp.allclose(automatic, nominal, rtol=1e-6, atol=1e-7)
+
+
+def test_three_identical_bosons_add_three_unique_scalar_pairings():
+    data = _data()
+    labels = ("pi0", "pi0", "pi0")
+    automatic = _component(0, final_state=labels)(data)
+    pair12 = _component(0, "p1", "p2", "p3")(data)
+    pair13 = _component(0, "p1", "p3", "p2")(data)
+    pair23 = _component(0, "p2", "p3", "p1")(data)
+    assert jnp.allclose(
+        automatic,
+        pair12 + pair13 + pair23,
+        rtol=1e-6,
+        atol=1e-7,
+    )
+
+
+def test_odd_spin_identical_resonance_daughters_are_rejected():
+    data = _data()
+    labels = ("pi0", "pi0", "K0")
+    with pytest.raises(ValueError, match="odd-spin resonance"):
+        _component(1, final_state=labels)(data)
