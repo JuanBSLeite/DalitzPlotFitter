@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Iterable
 
+import jax.numpy as jnp
 from particle import Particle
 
 from dalitzplotfitter.amplitude import (
@@ -98,8 +99,6 @@ def _collect_parameters(value: object) -> tuple[Parameter, ...]:
 
 
 def _validate_positive_quantity(value: object, label: str, *, allow_zero: bool) -> None:
-    """Validate numerical/Parameter values and lower bounds for core dynamics."""
-
     parameter = value if isinstance(value, Parameter) else None
     nominal = float(parameter.value if parameter is not None else value)
     invalid = nominal < 0.0 if allow_zero else nominal <= 0.0
@@ -143,8 +142,6 @@ class DecayChannel:
 
     @property
     def final_state_ids(self) -> tuple[int, int, int]:
-        """Canonical PDG identities used for identical-particle detection."""
-
         return tuple(int(_particle(name).pdgid) for name in self.final_state)
 
 
@@ -194,20 +191,39 @@ class NonResonant:
     name: str = "NR"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class DecayModel:
-    """Build a coherent amplitude and normalized PDF from a decay channel."""
+    """Build a coherent three-body amplitude with a stable normalization convention.
+
+    By default every dynamical component is normalized to unit phase-space
+    integral. A weighted phase-space sample used for those integrals is generated
+    lazily on first use and then reused for the lifetime of the model.
+    """
 
     channel: DecayChannel
     components: tuple[Resonance | NonResonant, ...]
+    normalize_components: bool
+    normalization_size: int
+    normalization_seed: int | None
+    _normalization_sample: PhaseSpaceSample | None
 
     def __init__(
         self,
         channel: DecayChannel,
         components: Iterable[Resonance | NonResonant],
+        *,
+        normalize_components: bool = True,
+        normalization_size: int = 1_000_000,
+        normalization_seed: int | None = 2027,
     ) -> None:
+        if normalization_size <= 0:
+            raise ValueError("normalization_size must be positive")
         object.__setattr__(self, "channel", channel)
         object.__setattr__(self, "components", tuple(components))
+        object.__setattr__(self, "normalize_components", bool(normalize_components))
+        object.__setattr__(self, "normalization_size", int(normalization_size))
+        object.__setattr__(self, "normalization_seed", normalization_seed)
+        object.__setattr__(self, "_normalization_sample", None)
         if not self.components:
             raise ValueError("DecayModel requires at least one amplitude component")
         names = [component.name for component in self.components]
@@ -257,6 +273,19 @@ class DecayModel:
                 unique.setdefault(parameter.name, parameter)
         return tuple(unique.values())
 
+    @property
+    def normalization_sample(self) -> PhaseSpaceSample:
+        """Internal weighted MC sample used for component/PDF normalization."""
+
+        sample = self._normalization_sample
+        if sample is None:
+            sample = self.generate_phase_space(
+                self.normalization_size,
+                seed=self.normalization_seed,
+            )
+            object.__setattr__(self, "_normalization_sample", sample)
+        return sample
+
     def _build_resonance(self, component: Resonance) -> AmplitudeComponent:
         i, j = component.pair
         bachelor = next(index for index in range(3) if index not in component.pair)
@@ -276,7 +305,6 @@ class DecayModel:
             resonance_radius=component.resonance_radius,
             parent_radius=component.parent_radius,
         )
-
         dynamics = ResonanceAmplitude(
             context=context,
             daughter_key=f"p{i + 1}",
@@ -317,27 +345,35 @@ class DecayModel:
             self.channel.daughter_masses,
         ).generate(size, seed=seed)
 
+    def _component_scale(self, component: AmplitudeComponent, values=None):
+        if not self.normalize_components:
+            return 1.0
+        sample = self.normalization_sample
+        raw = jnp.asarray(component.function(sample.as_dict(), values))
+        integral = jnp.mean(sample.weights * jnp.abs(raw) ** 2)
+        return 1.0 / jnp.sqrt(integral)
+
     def amplitude(self, data, values=None):
         total = None
         for component in self.amplitude_model.components:
-            component_values = component.value(
-                data,
-                parameters=values,
-                coefficient_values=values,
-            )
+            dynamics = jnp.asarray(component.function(data, values))
+            coefficient = jnp.asarray(component.coefficient.value(values))
+            component_values = coefficient * self._component_scale(component, values) * dynamics
             total = component_values if total is None else total + component_values
-        return total
+        return jnp.asarray(total)
 
     def intensity(self, data, values=None):
         amplitude = self.amplitude(data, values)
-        return (amplitude * amplitude.conj()).real
+        return jnp.real(amplitude * jnp.conj(amplitude))
 
     def pdf(
         self,
-        normalization_sample: PhaseSpaceSample,
+        normalization_sample: PhaseSpaceSample | None = None,
         *,
         efficiency=None,
     ) -> SignalPDF:
+        sample = self.normalization_sample if normalization_sample is None else normalization_sample
+
         def intensity(data, parameters):
             return self.intensity(data, parameters)
 
@@ -346,26 +382,28 @@ class DecayModel:
             kwargs["efficiency"] = efficiency
         return SignalPDF(
             intensity=intensity,
-            integrator=MonteCarloIntegrator(normalization_sample),
+            integrator=MonteCarloIntegrator(sample),
             **kwargs,
         )
 
     def prepare_cache(
         self,
         data_sample: PhaseSpaceSample,
-        normalization_sample: PhaseSpaceSample,
+        normalization_sample: PhaseSpaceSample | None = None,
         *,
         efficiency_normalization=None,
-        normalize_components: bool = False,
+        normalize_components: bool | None = None,
     ) -> PreparedAmplitudeCache:
-        """Prepare the optimized likelihood cache for fitting this model."""
+        """Prepare the optimized likelihood cache using the model convention."""
 
+        sample = self.normalization_sample if normalization_sample is None else normalization_sample
+        normalize = self.normalize_components if normalize_components is None else bool(normalize_components)
         return PreparedAmplitudeCache.prepare(
             self.amplitude_model.components,
             data=data_sample.as_dict(),
-            normalization_data=normalization_sample.as_dict(),
-            normalization_weights=normalization_sample.weights,
+            normalization_data=sample.as_dict(),
+            normalization_weights=sample.weights,
             parameters=self.parameters,
             efficiency_normalization=efficiency_normalization,
-            normalize_components=normalize_components,
+            normalize_components=normalize,
         )
