@@ -1,7 +1,7 @@
-"""Laura++-style numerical dynamics."""
+"""Numerical resonance dynamics."""
 
 from .covariant import (
-    LauraCovariantRBW,
+    ResonanceAmplitude,
     blatt_weisskopf_from_momenta,
     breakup_momentum,
     covariant_spin_factor,
@@ -11,7 +11,7 @@ from .covariant import (
 )
 
 __all__ = [
-    "LauraCovariantRBW",
+    "ResonanceAmplitude",
     "blatt_weisskopf_from_momenta",
     "breakup_momentum",
     "covariant_spin_factor",
