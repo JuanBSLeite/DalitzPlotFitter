@@ -31,6 +31,26 @@ class Parameter:
     owner: str | None = None
     backend_name: str | None = None
 
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("parameter name must be non-empty")
+        value = float(self.value)
+        if self.step is not None and self.step <= 0.0:
+            raise ValueError(f"parameter step must be positive for {self.name!r}")
+        if self.bounds is None:
+            return
+        low, high = self.bounds
+        if low is not None and high is not None and not low < high:
+            raise ValueError(f"invalid bounds for {self.name!r}: {self.bounds}")
+        if low is not None and value < low:
+            raise ValueError(
+                f"initial value {value} is below the lower bound {low} for {self.name!r}"
+            )
+        if high is not None and value > high:
+            raise ValueError(
+                f"initial value {value} is above the upper bound {high} for {self.name!r}"
+            )
+
     def resolve(self, values: Mapping[str, object] | None = None):
         """Return the current value from a flat fit-parameter mapping."""
 
@@ -80,6 +100,8 @@ class Parameter:
         used directly throughout the numerical model.
         """
 
+        if not owner:
+            raise ValueError("dynamics parameters require a non-empty owner")
         return cls(
             name=name,
             value=value,
