@@ -15,8 +15,10 @@ from .angular import CovariantAngular
 from .context import ResonanceContext, resolve_value
 from .lineshapes import (
     RelativisticBreitWigner,
+    bachelor_momentum_resonance_frame,
     blatt_weisskopf_from_momenta,
     breakup_momentum,
+    effective_pole_mass,
 )
 
 
@@ -37,6 +39,42 @@ def _identical_permutations(
         for perm in permutations(range(3))
         if all(final_state[i] == final_state[perm[i]] for i in range(3))
     )
+
+
+def _physical_pairings(
+    final_state: tuple[str, str, str],
+    role_indices: tuple[int, int, int],
+    spin: int,
+) -> tuple[tuple[str, str, str], ...]:
+    """Return unique Bose-related resonance pairings.
+
+    Exchanges of the two resonance daughters are not separate physical topologies
+    when those daughters are identical. Such a pair cannot form an odd-L state
+    when all daughters are spinless bosons, so odd spin is rejected explicitly.
+    """
+
+    daughter_index, partner_index, _ = role_indices
+    identical_pair_daughters = (
+        final_state[daughter_index] == final_state[partner_index]
+    )
+    if identical_pair_daughters and spin % 2:
+        raise ValueError(
+            "an odd-spin resonance cannot decay to two identical spinless bosons"
+        )
+
+    unique: dict[tuple[int, int, int], tuple[str, str, str]] = {}
+    for perm in _identical_permutations(final_state):
+        mapped = tuple(perm[index] for index in role_indices)
+        if identical_pair_daughters:
+            first, second, bachelor = mapped
+            canonical = (*sorted((first, second)), bachelor)
+        else:
+            canonical = mapped
+        unique.setdefault(
+            canonical,
+            tuple(f"p{index + 1}" for index in canonical),
+        )
+    return tuple(unique.values())
 
 
 @dataclass(frozen=True)
@@ -68,15 +106,20 @@ class ResonanceAmplitude:
         l = int(context.spin)
         m1, m2 = context.daughter_masses
 
-        q0 = breakup_momentum(context.pole_mass, m1, m2)
-        p_star0 = breakup_momentum(
-            context.parent_mass, context.pole_mass, context.bachelor_mass
+        pole_mass_for_momenta = effective_pole_mass(context)
+        q0 = breakup_momentum(pole_mass_for_momenta, m1, m2)
+        p0 = bachelor_momentum_resonance_frame(
+            context.parent_mass,
+            pole_mass_for_momenta,
+            context.bachelor_mass,
         )
         x_res = blatt_weisskopf_from_momenta(
             kin.q, q0, l, context.resonance_radius
         )
+        # Laura++'s default parent form factor uses the bachelor momentum in the
+        # resonance rest frame (p), not p* in the parent rest frame.
         x_parent = blatt_weisskopf_from_momenta(
-            kin.p_star, p_star0, l, context.parent_radius
+            kin.p, p0, l, context.parent_radius
         )
         resonance = lineshape(kin.resonance_mass, context)
         angular = angular_model(kin, context)
@@ -94,12 +137,13 @@ class ResonanceAmplitude:
             raise ValueError("final_state must contain exactly three particle labels")
 
         role_indices = tuple(_key_index(key) for key in base_keys)
-        seen = set()
-        values = []
-        for perm in _identical_permutations(self.final_state):
-            keys = tuple(f"p{perm[index] + 1}" for index in role_indices)
-            if keys in seen:
-                continue
-            seen.add(keys)
-            values.append(self._evaluate_pairing(data, *keys, parameters))
+        pairings = _physical_pairings(
+            self.final_state,
+            role_indices,
+            int(self.context.spin),
+        )
+        values = [
+            self._evaluate_pairing(data, *keys, parameters)
+            for keys in pairings
+        ]
         return sum(values, start=jnp.zeros_like(values[0]))
