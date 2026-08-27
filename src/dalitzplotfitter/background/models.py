@@ -9,14 +9,27 @@ import jax.numpy as jnp
 from jax import Array
 
 
+def _validate_histogram_edges(edges: Array, label: str) -> Array:
+    edges = jnp.asarray(edges)
+    if edges.ndim != 1 or edges.size < 2:
+        raise ValueError(f"{label} edges must be a one-dimensional array with at least two entries")
+    if not bool(jnp.all(jnp.isfinite(edges))):
+        raise ValueError(f"{label} edges must be finite")
+    if not bool(jnp.all(jnp.diff(edges) > 0.0)):
+        raise ValueError(f"{label} edges must be strictly increasing")
+    return edges
+
+
 @dataclass(frozen=True)
 class FunctionalBackground:
-    """Wrap a JAX-compatible analytic or user-defined background density."""
+    """Wrap a JAX-compatible non-negative background density."""
 
     function: Callable[[dict[str, Array]], Array]
 
     def __call__(self, data: dict[str, Array]) -> Array:
-        return jnp.clip(jnp.asarray(self.function(data)), min=0.0)
+        values = jnp.asarray(self.function(data))
+        valid = jnp.isfinite(values) & (values >= 0.0)
+        return jnp.where(valid, values, jnp.nan)
 
 
 @dataclass(frozen=True)
@@ -30,12 +43,16 @@ class HistogramBackground:
     y_variable: str = "s13"
 
     def __post_init__(self) -> None:
-        x_edges = jnp.asarray(self.x_edges)
-        y_edges = jnp.asarray(self.y_edges)
+        x_edges = _validate_histogram_edges(self.x_edges, "x")
+        y_edges = _validate_histogram_edges(self.y_edges, "y")
         values = jnp.asarray(self.values)
         expected = (x_edges.size - 1, y_edges.size - 1)
         if values.shape != expected:
             raise ValueError(f"Histogram values shape must be {expected}, got {values.shape}")
+        if not bool(jnp.all(jnp.isfinite(values))):
+            raise ValueError("Histogram background values must be finite")
+        if bool(jnp.any(values < 0.0)):
+            raise ValueError("Histogram background values must be non-negative")
         object.__setattr__(self, "x_edges", x_edges)
         object.__setattr__(self, "y_edges", y_edges)
         object.__setattr__(self, "values", values)
@@ -53,5 +70,5 @@ class HistogramBackground:
         )
         safe_ix = jnp.clip(ix, 0, self.values.shape[0] - 1)
         safe_iy = jnp.clip(iy, 0, self.values.shape[1] - 1)
-        values = jnp.clip(self.values[safe_ix, safe_iy], min=0.0)
+        values = self.values[safe_ix, safe_iy]
         return jnp.where(in_range, values, 0.0)
