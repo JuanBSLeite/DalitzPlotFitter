@@ -139,4 +139,8 @@ rho1450.mass
 rho1450.width
 ```
 
-float; all other resonance masses and widths remain fixed to the values used in the generation example. The notebook uses 100,000 pseudo-data events and 1,000,000 normalization events, prints generated-versus-fitted pulls, and compares the full unlike-sign pion projection before and after the fit, including a rho(1450)-sensitive zoom.
+float; all other resonance masses and widths remain fixed to the values used in the generation example.
+
+Before minimization, every free parameter is randomized uniformly inside its configured bounds. A fixed random seed is used only to keep the notebook reproducible, and the randomized point is passed explicitly to `Minimizer.fit(start_values=...)`.
+
+The notebook uses 100,000 pseudo-data events and 1,000,000 normalization events, prints generated-versus-fitted pulls, and compares the full unlike-sign pion projection before and after the fit, including a rho(1450)-sensitive zoom.
