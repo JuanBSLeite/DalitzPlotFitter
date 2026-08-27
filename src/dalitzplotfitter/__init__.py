@@ -23,7 +23,13 @@ from .coefficients import (
 )
 from .config import enable_x64
 from .fit import Parameter, ParameterKind
-from .kinematics import ThreeBodyPhaseSpace
+from .kinematics import (
+    CovariantKinematics,
+    PhasespaceMC,
+    ThreeBodyPhaseSpace,
+    boost_to_rest_frame,
+    covariant_kinematics,
+)
 
 __all__ = [
     "AmplitudeComponent",
@@ -33,6 +39,7 @@ __all__ = [
     "CleoCP",
     "CoherentAmplitudeModel",
     "ConstantAmplitude",
+    "CovariantKinematics",
     "FitCartesianCP",
     "FitMagPhase",
     "Flavor",
@@ -40,11 +47,14 @@ __all__ = [
     "MagPhaseCP",
     "Parameter",
     "ParameterKind",
+    "PhasespaceMC",
     "PolarGammaCP",
     "PreparedAmplitudeCache",
     "RealImag",
     "RealImagCP",
     "RealImagGammaCP",
     "ThreeBodyPhaseSpace",
+    "boost_to_rest_frame",
+    "covariant_kinematics",
     "enable_x64",
 ]
