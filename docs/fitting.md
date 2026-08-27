@@ -2,7 +2,7 @@
 
 DalitzPlotFitter uses `iminuit` for minimization while JAX evaluates the objective and gradient.
 
-## NLL convention
+## NLL and Minuit convention
 
 For a negative log-likelihood, Minuit uses
 
@@ -10,15 +10,9 @@ For a negative log-likelihood, Minuit uses
 errordef = 0.5
 ```
 
-so HESSE one-parameter uncertainties correspond to `Delta NLL = 0.5`. `Minimizer` uses this convention by default.
+so HESSE one-parameter uncertainties correspond to `Delta NLL = 0.5`.
 
-The Minuit EDM tolerance is also explicit. The fitter defaults to
-
-```text
-tolerance = 1e-6
-```
-
-rather than relying on Minuit's looser default. `Parameter.step` and parameter bounds are forwarded to Minuit.
+The EDM tolerance is explicit in `Minimizer`. Multistart trial minima use Minuit strategy 1. The selected minimum is rerun with the careful strategy 2 before HESSE because amplitude fits can contain strong correlations between complex coefficients and dynamical shape parameters.
 
 ## RealImag coefficients
 
@@ -28,77 +22,75 @@ The supported complex coefficient is
 c = x + i y
 ```
 
-through `RealImag`. `x` and `y` may be constants or fit `Parameter` objects.
-
-Example:
-
-```python
-x = Parameter.coefficient("rho.x", 0.8, owner="rho")
-y = Parameter.coefficient("rho.y", 0.2, owner="rho")
-coefficient = RealImag(x, y)
-```
-
-One complex coefficient should be fixed to remove the arbitrary global amplitude scale and phase.
+through `RealImag`. One complex coefficient should be fixed to remove the arbitrary global amplitude scale and phase.
 
 ## Floating dynamical parameters
 
-Resonance mass, width and Blatt-Weisskopf radii may also be `Parameter` objects. Dynamical parameters have an `owner` equal to the resonance component name:
+Mass, width and Blatt-Weisskopf radii may be `Parameter` objects. Dynamics parameters must have an `owner` equal to their amplitude-component name.
 
 ```python
 mass = Parameter.dynamics(
-    "rho.mass",
-    0.760,
-    owner="rho",
-    bounds=(0.73, 0.81),
+    "rho.mass", 0.760, owner="rho", bounds=(0.73, 0.81)
 )
 width = Parameter.dynamics(
-    "rho.width",
-    0.180,
-    owner="rho",
-    bounds=(0.10, 0.22),
+    "rho.width", 0.180, owner="rho", bounds=(0.10, 0.22)
 )
 ```
 
-`DecayModel.parameters` collects coefficient and dynamics parameters automatically. `DecayModel.prepare_cache()` uses the same list to configure optimized likelihood evaluation.
+`DecayModel.parameters` collects coefficient and dynamics parameters automatically. When a dynamical parameter changes, `PreparedAmplitudeCache` reevaluates only its owning component on data and normalization samples and recomputes the affected rows and columns of the normalization matrix.
 
-Spin remains a fixed discrete model choice.
+## Dynamic-path consistency tests
 
-## Cached normalization
+Floating shape parameters receive dedicated tests in `tests/test_dynamic_fit_consistency.py`.
 
-For coefficient-only fits, component amplitudes are cached on data and normalization samples. The matrix
+The validation deliberately separates implementation correctness from statistical identifiability:
+
+1. JAX mass/width gradients are compared with central finite differences.
+2. A discrete Asimov construction uses the same phase-space support for the truth distribution and normalization; the gradient at the injected truth must vanish.
+3. With an identifiable resonance and fixed coefficient, a multistart fit of mass and width must recover the injected values from displaced starts.
+4. Cached intensity and normalization are independently checked against direct model evaluation at multiple dynamic-parameter points.
+
+These tests are designed to expose errors in
 
 ```text
-M_ij = (1/N_MC) sum_k w_PS,k F_i*(x_k) F_j(x_k)
+Parameter -> ResonanceContext -> lineshape -> component amplitude
+          -> normalization cache -> JAX gradient -> Minuit
 ```
 
-is cached and the normalization becomes
+rather than relying only on one pseudoexperiment closure.
 
-```text
-N(c) = c^dagger M c.
-```
+## Monte Carlo normalization and floating shapes
 
-When a dynamical parameter floats, only its owning component is reevaluated on the data and normalization samples. The affected row and column of the normalization matrix are recomputed.
-
-The cache is tested numerically against direct amplitude and normalization evaluation at multiple values of floating mass, width and complex coefficients.
-
-## Unbinned NLL
-
-For unweighted data events, up to parameter-independent constants,
+For unweighted data,
 
 ```text
 NLL(theta)
  = -sum_n log |A(x_n;theta)|^2
-   + N_data log N(theta).
+   + N_data log N(theta)
 ```
 
-The normalization uses a fixed weighted phase-space Monte Carlo sample so the objective remains deterministic during minimization.
+with
+
+```text
+N(theta) ~= (1/N_MC) sum_k w_PS,k |A(x_k;theta)|^2.
+```
+
+A fixed normalization sample keeps the objective deterministic, but finite-MC integration error remains. This is substantially more important when masses, widths or other lineshape parameters float: their likelihood gradients contain derivatives of the normalization integral itself.
+
+For reference closure studies the current notebooks therefore use
+
+```text
+pseudo-data:             100,000 events
+candidate generation:  1,000,000 events
+normalization MC:       1,000,000 events
+```
+
+Using a candidate pool comparable in size to the pseudo-data while resampling with replacement is discouraged for shape-parameter validation because the pseudo-data then inherit visible finite-pool discreteness.
 
 ## Multistart minimization
 
-Amplitude likelihoods may contain local minima. A robust fit should therefore not depend on one fortunate initial point.
-
 ```python
-minimizer = Minimizer(nll, model.parameters, tolerance=1e-6)
+minimizer = Minimizer(nll, model.parameters)
 scan = minimizer.fit_multistart(
     n_starts=20,
     seed=314159,
@@ -108,76 +100,70 @@ scan = minimizer.fit_multistart(
 result = scan.best
 ```
 
-Each trial begins from an independently randomized parameter point. The best solution is selected only from valid finite minima using the lowest NLL. The injected truth is never used to select or seed the fit. HESSE is run on the selected best minimum.
-
-Useful closure diagnostics include
+The injected truth is never used to seed or select the fit. Useful diagnostics are
 
 ```text
 trial validity
 trial NLL
 trial EDM
 NLL(truth)
-NLL(best fit)
-NLL(best fit) - NLL(truth)
+NLL(best)
+NLL(best) - NLL(truth)
+correlation matrix / profile scans
 ```
 
-If the best valid minimum remains significantly above `NLL(truth)`, minimization has not found the known closure-region solution. If the best fit has an equal or lower NLL but noticeably different parameters, the issue may instead be statistical fluctuation, parameter correlation or a likelihood degeneracy.
+If `NLL(best)` remains significantly above `NLL(truth)`, the minimizer did not find the known closure-region solution. If the best fit has equal or lower NLL but very different parameters, investigate statistical fluctuations, correlations, weak identifiability and normalization-MC precision.
 
 ## Closure criterion
 
-For every floating coordinate, generated and fitted values are compatible when
+For each floating coordinate,
 
 ```text
 pull = (value_gen - value_fit) / sigma_fit
 abs(pull) < 1
 ```
 
-where `sigma_fit` is the HESSE uncertainty from the `errordef=0.5` NLL fit.
+is the reference one-pseudoexperiment compatibility check. A single pull outside one standard deviation is not by itself evidence of fitter bias; bias studies require ensembles of pseudoexperiments. The criterion remains useful as a strict regression target for controlled closure examples.
 
-The reference validation scale is
+## E791 examples and conventions
 
-```text
-unweighted fit pseudo-data:     100,000 events
-weighted normalization MC:    1,000,000 events
-```
-
-Pseudo-data are produced by weighted resampling from a larger `phasespace` candidate pool using
-
-```text
-w_target = w_PS |A(theta_gen)|^2.
-```
-
-## E791 notebooks
-
-`notebooks/01_e791_dplus_fit2_generation.ipynb` and `notebooks/02_fit_dynamic_parameters.ipynb` use the same Fit-2-based amplitude definition for
+The E791 notebooks use the Fit-2 resonance content for
 
 ```text
 D+ -> pi- pi+ pi+
 ```
 
-with current DalitzPlotFitter dynamics conventions.
+with current DalitzPlotFitter angular conventions.
 
-For consistency with E791's treatment of the parent decay form factor, the examples use
+Historical E791 three-pion analyses used effective Blatt-Weisskopf radii
 
 ```text
-parent_radius = 0
+parent_radius = 3.0 GeV^-1
+resonance_radius = 3.0 GeV^-1
 ```
 
-which makes the parent Blatt-Weisskopf factor unity.
+for the parent and resonance factors. The notebooks use those values.
 
-The project RBW convention is
+The project RBW convention
 
 ```text
 1 / (m0^2 - m^2 - i m0 Gamma)
 ```
 
-which differs by a constant minus sign from the propagator sign written in E791. The notebooks keep `rho(770)=1+0i` as the reference and translate this constant sign by shifting only the non-resonant phase by 180 degrees. The current covariant angular convention remains a project convention, so the notebooks should be described as Fit-2-based examples rather than exact historical reproductions of the E791 fitter.
+is the negative of the propagator sign written by E791. With `rho(770)=1+0i` retained as the reference coefficient, the examples account for the relative sign to the constant non-resonant term by shifting the NR phase by 180 degrees.
 
-In notebook 2 the rho(770) coefficient is fixed to `1 + 0 i`; the `RealImag` coefficients of the other components float. Among dynamical parameters only
+`notebooks/02_fit_dynamic_parameters.ipynb` intentionally floats the mass and width of `rho1450` as a difficult stress test. This component has only about 0.7% Fit-2 fraction, so its shape parameters are intrinsically weakly constrained.
+
+`notebooks/03_lineshape_parameter_diagnostics.ipynb` investigates this explicitly. It compares:
 
 ```text
-rho1450.mass
-rho1450.width
+sigma mass/width only
+sigma x/y/mass/width
+all coefficients + sigma mass/width
+rho1450 x/y/mass/width
+all coefficients + rho1450 mass/width
+100k versus 1M normalization MC
+local mass-profile curvature for sigma versus rho1450
 ```
 
-float. The fit uses 20 randomized multistart trials and reports NLL, EDM, the selected minimum, generated-versus-fitted pulls and projection comparisons.
+The dominant sigma contribution (about 46% in E791 Fit 2) is the more appropriate validation target for basic mass/width recovery; E791 itself determined the sigma mass and width from the data, whereas rho(1450) was a very small contribution in this D+ model.
