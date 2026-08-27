@@ -15,7 +15,7 @@ from .dynamics import (
     ResonanceAmplitude,
     ResonanceContext,
 )
-from .fit import Parameter, ParameterKind
+from .fit import Minimizer, Parameter, ParameterKind
 from .kinematics import (
     CovariantKinematics,
     PhaseSpaceSample,
@@ -33,6 +33,7 @@ __all__ = [
     "CovariantKinematics",
     "DecayChannel",
     "DecayModel",
+    "Minimizer",
     "NonResonant",
     "Parameter",
     "ParameterKind",
