@@ -74,6 +74,38 @@ def test_decay_model_rejects_duplicate_component_names():
         )
 
 
+def test_decay_model_rejects_ambiguous_dynamics_backend_names():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    mass = Parameter.dynamics(
+        "rho.mass",
+        0.775,
+        owner="rho",
+        backend_name="same_backend",
+        bounds=(0.70, 0.85),
+    )
+    width = Parameter.dynamics(
+        "rho.width",
+        0.149,
+        owner="rho",
+        backend_name="same_backend",
+        bounds=(0.05, 0.30),
+    )
+    with pytest.raises(ValueError, match="map to the same backend key"):
+        DecayModel(
+            channel,
+            [
+                Resonance(
+                    "rho",
+                    pair=(0, 1),
+                    coefficient=RealImag(1.0, 0.0),
+                    mass=mass,
+                    width=width,
+                    spin=1,
+                )
+            ],
+        )
+
+
 def test_decay_model_rejects_unphysical_core_parameter_bounds():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     mass = Parameter.dynamics(
