@@ -9,6 +9,14 @@ from dalitzplotfitter import (
 )
 
 
+class ConstantLineshape:
+    """Minimal test plugin proving DecayModel is lineshape-agnostic."""
+
+    def __call__(self, mass, context):
+        del context
+        return jnp.ones_like(mass, dtype=jnp.complex128)
+
+
 def test_decay_channel_resolves_particle_masses_in_gev():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     assert 1.86 < channel.parent_mass < 1.88
@@ -34,6 +42,29 @@ def test_decay_model_builds_symmetrized_resonance_without_manual_particle_masses
     sample = model.generate_phase_space(128, seed=17)
     values = model.intensity(sample.as_dict())
     assert values.shape == (128,)
+    assert bool(jnp.all(jnp.isfinite(values)))
+    assert bool(jnp.all(values >= 0.0))
+
+
+def test_decay_model_accepts_custom_lineshape_plugin():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    model = DecayModel(
+        channel,
+        [
+            Resonance(
+                "rho_test",
+                pair=(0, 1),
+                coefficient=RealImag(1.0, 0.0),
+                lineshape=ConstantLineshape(),
+                mass=0.77526,
+                width=0.1491,
+                spin=1,
+            )
+        ],
+    )
+    sample = model.generate_phase_space(64, seed=19)
+    values = model.intensity(sample.as_dict())
+    assert values.shape == (64,)
     assert bool(jnp.all(jnp.isfinite(values)))
     assert bool(jnp.all(values >= 0.0))
 
