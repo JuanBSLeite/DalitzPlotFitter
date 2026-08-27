@@ -9,7 +9,12 @@ from .amplitude import (
 from .coefficients import RealImag
 from .config import enable_x64
 from .decay import DecayChannel, DecayModel, NonResonant, Resonance
-from .dynamics import ResonanceAmplitude
+from .dynamics import (
+    CovariantAngular,
+    RelativisticBreitWigner,
+    ResonanceAmplitude,
+    ResonanceContext,
+)
 from .fit import Parameter, ParameterKind
 from .kinematics import (
     CovariantKinematics,
@@ -24,6 +29,7 @@ __all__ = [
     "AmplitudeComponent",
     "CoherentAmplitudeModel",
     "ConstantAmplitude",
+    "CovariantAngular",
     "CovariantKinematics",
     "DecayChannel",
     "DecayModel",
@@ -34,8 +40,10 @@ __all__ = [
     "PhasespaceMC",
     "PreparedAmplitudeCache",
     "RealImag",
+    "RelativisticBreitWigner",
     "Resonance",
     "ResonanceAmplitude",
+    "ResonanceContext",
     "boost_to_rest_frame",
     "covariant_kinematics",
     "enable_x64",
