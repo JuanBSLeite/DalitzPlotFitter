@@ -20,15 +20,85 @@ The supported complex coefficient is
 c = x + i y
 ```
 
-through `RealImag`. `x` and `y` may be constants or fit `Parameter` objects. There is no parallel magnitude/phase, Cartesian, or CP coefficient API in the current code base.
+through `RealImag`. `x` and `y` may be constants or fit `Parameter` objects.
 
-For the `D+ -> pi- pi+ pi+` reference model, the rho coefficient is fixed to
+Example:
 
-```text
-c_rho = 1 + 0 i
+```python
+x = Parameter.coefficient("rho.x", 0.8, owner="rho")
+y = Parameter.coefficient("rho.y", 0.2, owner="rho")
+coefficient = RealImag(x, y)
 ```
 
-and the remaining real and imaginary coordinates float.
+One complex coefficient should be fixed to remove the arbitrary global amplitude scale and phase.
+
+## Floating dynamical parameters
+
+Resonance mass, width and Blatt-Weisskopf radii may also be `Parameter` objects. Dynamical parameters have an `owner` equal to the resonance component name:
+
+```python
+mass = Parameter.dynamics(
+    "rho.mass",
+    0.760,
+    owner="rho",
+    bounds=(0.73, 0.81),
+)
+width = Parameter.dynamics(
+    "rho.width",
+    0.180,
+    owner="rho",
+    bounds=(0.10, 0.22),
+)
+
+rho = Resonance(
+    "rho",
+    pair=(0, 1),
+    coefficient=RealImag(x, y),
+    mass=mass,
+    width=width,
+    spin=1,
+)
+```
+
+`DecayModel.parameters` collects coefficient and dynamics parameters automatically. `DecayModel.prepare_cache()` uses the same list to configure optimized likelihood evaluation.
+
+Dynamics plugins are also parameter-aware. Dataclass fields containing `Parameter` objects are resolved for each likelihood evaluation. This allows future plugins such as `Flatte`, `LASS`, or other lineshapes to expose fit parameters without changing `DecayModel`.
+
+Spin remains a fixed discrete model choice.
+
+## Cached normalization
+
+For coefficient-only fits, component amplitudes are cached on data and normalization samples. The matrix
+
+```text
+M_ij = (1/N_MC) sum_k w_PS,k F_i*(x_k) F_j(x_k)
+```
+
+is cached and the normalization becomes
+
+```text
+N(c) = c^dagger M c.
+```
+
+When a dynamical parameter floats, only its owning component is reevaluated on the data and normalization samples. The affected row and column of the normalization matrix are then recomputed; unrelated fixed components remain cached.
+
+## Unbinned NLL
+
+For unweighted data events,
+
+```text
+-NLL = sum log P(x; theta)
+```
+
+or equivalently, up to parameter-independent constants,
+
+```text
+NLL(theta)
+ = -sum_n log |A(x_n;theta)|^2
+   + N_data log N(theta).
+```
+
+The normalization is evaluated with a fixed weighted phase-space Monte Carlo sample so the objective remains deterministic during minimization.
 
 ## Closure criterion
 
@@ -41,7 +111,7 @@ abs(pull) < 1
 
 where `sigma_fit` is the HESSE uncertainty from the `errordef=0.5` NLL fit.
 
-The reference end-to-end validation target is
+The reference validation scale is
 
 ```text
 unweighted fit pseudo-data:     100,000 events
@@ -54,20 +124,21 @@ Pseudo-data are produced by weighted resampling from a larger `phasespace` candi
 w_target = w_PS |A(theta_gen)|^2.
 ```
 
-The normalization sample is fixed during minimization so the objective remains deterministic.
+## Fit notebook
 
-## Cached normalization
-
-For coefficient-only fits, the complete Laura++ component amplitudes are cached on data and normalization samples. The matrix
+`notebooks/02_fit_dynamic_parameters.ipynb` provides an end-to-end example for
 
 ```text
-M_ij = (1/N_MC) sum_k w_PS,k F_i*(x_k) F_j(x_k)
+D+ -> pi- pi+ pi+
 ```
 
-is cached and the normalization becomes
+with a symmetrized rho resonance plus a constant non-resonant amplitude. The fit simultaneously floats
 
 ```text
-N(c) = c^dagger M c.
+rho.x
+rho.y
+rho.mass
+rho.width
 ```
 
-When a dynamical parameter is later floated, only its owning component and the affected matrix row/column are reevaluated.
+using 100,000 pseudo-data events and 1,000,000 normalization events. The notebook prints generated-versus-fitted pulls and plots the Dalitz distribution and the unlike-sign pion projection before and after the fit.
