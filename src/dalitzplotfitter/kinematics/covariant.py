@@ -1,4 +1,4 @@
-"""Kinematics used by the Laura++ covariant angular formalism."""
+"""Kinematics used by the covariant angular formalism."""
 
 from __future__ import annotations
 
@@ -46,12 +46,77 @@ class CovariantKinematics:
     cos_theta: Array
 
 
+def _kallen(x, y, z):
+    return x**2 + y**2 + z**2 - 2.0 * x * y - 2.0 * x * z - 2.0 * y * z
+
+
+def covariant_kinematics_from_invariants(
+    resonance_mass_squared: Array,
+    daughter_bachelor_mass_squared: Array,
+    *,
+    parent_mass: float,
+    daughter_mass: float,
+    partner_mass: float,
+    bachelor_mass: float,
+) -> CovariantKinematics:
+    """Compute covariant kinematics directly from Dalitz invariants.
+
+    This is algebraically equivalent to boosting the four-vectors, but avoids
+    repeated Lorentz transformations during likelihood evaluation.  The selected
+    daughter's angle is reconstructed from its invariant mass with the bachelor.
+    """
+
+    s = jnp.asarray(resonance_mass_squared)
+    s_db = jnp.asarray(daughter_bachelor_mass_squared)
+    resonance_mass = jnp.sqrt(jnp.maximum(s, 0.0))
+    safe_mass = jnp.where(resonance_mass > 0.0, resonance_mass, 1.0)
+
+    q2 = jnp.maximum(
+        _kallen(s, daughter_mass**2, partner_mass**2),
+        0.0,
+    ) / (4.0 * jnp.maximum(s, 1e-300))
+    common_parent = jnp.maximum(
+        _kallen(parent_mass**2, s, bachelor_mass**2),
+        0.0,
+    )
+    p2 = common_parent / (4.0 * jnp.maximum(s, 1e-300))
+    p_star2 = common_parent / (4.0 * parent_mass**2)
+
+    q = jnp.sqrt(q2)
+    p = jnp.sqrt(p2)
+    p_star = jnp.sqrt(p_star2)
+
+    daughter_energy = (
+        s + daughter_mass**2 - partner_mass**2
+    ) / (2.0 * safe_mass)
+    bachelor_energy = (
+        parent_mass**2 - s - bachelor_mass**2
+    ) / (2.0 * safe_mass)
+    denominator = 2.0 * q * p
+    safe_denominator = jnp.where(denominator > 0.0, denominator, 1.0)
+    cos_theta = (
+        daughter_mass**2
+        + bachelor_mass**2
+        + 2.0 * daughter_energy * bachelor_energy
+        - s_db
+    ) / safe_denominator
+    cos_theta = jnp.where(denominator > 0.0, cos_theta, 0.0)
+
+    return CovariantKinematics(
+        resonance_mass=resonance_mass,
+        p_star=p_star,
+        p=p,
+        q=q,
+        cos_theta=jnp.clip(cos_theta, -1.0, 1.0),
+    )
+
+
 def covariant_kinematics(
     daughter: Array,
     partner: Array,
     bachelor: Array,
 ) -> CovariantKinematics:
-    """Compute Laura++ covariant-spin kinematics from daughter four-vectors."""
+    """Compute covariant-spin kinematics from daughter four-vectors."""
 
     daughter = jnp.asarray(daughter)
     partner = jnp.asarray(partner)
