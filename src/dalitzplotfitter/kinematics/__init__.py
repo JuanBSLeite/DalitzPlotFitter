@@ -1,9 +1,10 @@
-"""Kinematic utilities for Laura++-style amplitudes."""
+"""Kinematic utilities for three-body amplitudes."""
 
 from .covariant import (
     CovariantKinematics,
     boost_to_rest_frame,
     covariant_kinematics,
+    covariant_kinematics_from_invariants,
     spatial_magnitude,
 )
 from .phasespace_mc import PhasespaceMC
@@ -16,6 +17,7 @@ __all__ = [
     "PhasespaceMC",
     "boost_to_rest_frame",
     "covariant_kinematics",
+    "covariant_kinematics_from_invariants",
     "invariant_mass_squared",
     "spatial_magnitude",
 ]
