@@ -37,6 +37,12 @@ class Minimizer:
     target explicitly. Preliminary multistart trials use Minuit strategy 1;
     the selected minimum and ordinary single fits use the careful strategy 2
     before HESSE so strongly correlated parameters receive a final refinement.
+
+    Verbosity levels are:
+
+    - ``verbose=0``: silent;
+    - ``verbose=1``: fitter-level progress and one summary per multistart trial;
+    - ``verbose>=2``: the same progress plus iminuit's internal print output.
     """
 
     def __init__(
@@ -46,15 +52,32 @@ class Minimizer:
         *,
         errordef: float = 0.5,
         tolerance: float = 1e-10,
+        verbose: int = 0,
     ):
         if errordef <= 0:
             raise ValueError("errordef must be positive")
         if tolerance <= 0:
             raise ValueError("tolerance must be positive")
+        if isinstance(verbose, bool) or not isinstance(verbose, int) or verbose < 0:
+            raise ValueError("verbose must be a non-negative integer")
         self.objective = objective
         self.parameters = tuple(parameters)
         self.errordef = float(errordef)
         self.tolerance = float(tolerance)
+        self.verbose = int(verbose)
+
+    def _log(self, message: str) -> None:
+        if self.verbose >= 1:
+            print(f"[Minimizer] {message}", flush=True)
+
+    @staticmethod
+    def _summary(result) -> str:
+        return (
+            f"valid={bool(result.valid)}  "
+            f"NLL={float(result.fval):.6f}  "
+            f"EDM={float(result.fmin.edm):.3e}  "
+            f"nfcn={int(result.nfcn)}"
+        )
 
     def _backend(self):
         free = tuple(parameter for parameter in self.parameters if not parameter.fixed)
@@ -131,6 +154,7 @@ class Minimizer:
         minuit.errordef = self.errordef
         minuit.tol = self.tolerance
         minuit.strategy = 2 if run_hesse else 1
+        minuit.print_level = max(0, self.verbose - 1)
         for parameter in free:
             if parameter.bounds is not None:
                 minuit.limits[parameter.name] = parameter.bounds
@@ -156,7 +180,11 @@ class Minimizer:
         """Run one carefully refined MIGRAD/HESSE minimization."""
 
         free, names, fcn, grad = self._backend()
-        return self._run(
+        self._log(
+            f"single fit with {len(free)} free parameters "
+            f"(simplex={simplex})"
+        )
+        result = self._run(
             free,
             names,
             fcn,
@@ -165,6 +193,8 @@ class Minimizer:
             run_hesse=True,
             simplex=simplex,
         )
+        self._log(f"single fit finished: {self._summary(result)}")
+        return result
 
     @staticmethod
     def _draw_parameter(
@@ -235,8 +265,14 @@ class Minimizer:
                 }
             )
 
-        results = tuple(
-            self._run(
+        self._log(
+            f"multistart with {len(free)} free parameters, {len(starts)} starts "
+            f"(simplex={simplex}, seed={seed})"
+        )
+        results = []
+        for index, start in enumerate(starts, start=1):
+            self._log(f"start {index}/{len(starts)} running")
+            result = self._run(
                 free,
                 names,
                 fcn,
@@ -245,19 +281,28 @@ class Minimizer:
                 run_hesse=False,
                 simplex=simplex,
             )
-            for start in starts
-        )
-        valid = tuple(
-            result
-            for result in results
+            results.append(result)
+            self._log(
+                f"start {index}/{len(starts)} finished: {self._summary(result)}"
+            )
+        results = tuple(results)
+
+        valid_indices = tuple(
+            index
+            for index, result in enumerate(results)
             if bool(result.valid) and np.isfinite(float(result.fval))
         )
-        if not valid:
+        if not valid_indices:
             raise RuntimeError(
                 "No valid finite minimum was found across the multistart scan"
             )
 
-        preliminary = min(valid, key=lambda result: float(result.fval))
+        best_index = min(valid_indices, key=lambda index: float(results[index].fval))
+        preliminary = results[best_index]
+        self._log(
+            f"selected start {best_index + 1}/{len(starts)} for strategy-2/HESSE "
+            f"refinement: {self._summary(preliminary)}"
+        )
         best_values = {name: float(preliminary.values[name]) for name in names}
         best = self._run(
             free,
@@ -270,6 +315,7 @@ class Minimizer:
         )
         if not bool(best.valid) or not np.isfinite(float(best.fval)):
             raise RuntimeError("Best multistart solution is invalid after HESSE")
+        self._log(f"final refined minimum: {self._summary(best)}")
 
         return MultiStartResult(
             best=best,
