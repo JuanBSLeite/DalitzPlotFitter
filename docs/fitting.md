@@ -156,6 +156,8 @@ pseudo-data:             100,000 events
 candidate generation:  1,000,000 events
 ```
 
+The candidate-generation pool is independent of the model-owned normalization MC. This avoids correlating the pseudo-data resampling support with the finite sample used to define component and likelihood normalization.
+
 Using a candidate pool comparable in size to the pseudo-data while resampling with replacement is discouraged for shape-parameter validation because the pseudo-data then inherit visible finite-pool discreteness.
 
 ## Multistart minimization
@@ -223,9 +225,11 @@ The project RBW convention
 
 is the negative of the propagator sign written by E791. With `rho(770)=1+0i` retained as the reference coefficient, the examples account for the relative sign to the constant non-resonant term by shifting the NR phase by 180 degrees.
 
-`notebooks/02_fit_dynamic_parameters.ipynb` intentionally floats the mass and width of `rho1450` as a difficult stress test. This component has only about 0.7% Fit-2 fraction, so its shape parameters are intrinsically weakly constrained.
+All notebook plots that decompose the model into amplitude components now use the normalized component columns from `PreparedAmplitudeCache`; raw `component.value()` is not used for component-comparison plots because that would mix the old raw-amplitude convention with the default normalized one.
 
-`notebooks/03_lineshape_parameter_diagnostics.ipynb` investigates this explicitly. It compares:
+`notebooks/02_fit_dynamic_parameters.ipynb` intentionally floats the mass and width of `rho1450` as a difficult stress test. This component has only about 0.7% Fit-2 fraction, so its shape parameters are intrinsically weakly constrained. The notebook uses `model.normalization_sample` and `model.prepare_cache(data)` rather than generating a second normalization sample manually.
+
+`notebooks/03_lineshape_parameter_diagnostics.ipynb` investigates this explicitly. Standard fits use each model's internal normalization sample. It compares:
 
 ```text
 sigma mass/width only
@@ -233,7 +237,7 @@ sigma x/y/mass/width
 all coefficients + sigma mass/width
 rho1450 x/y/mass/width
 all coefficients + rho1450 mass/width
-normalization-MC precision
+100k versus 1M internal normalization MC
 local mass-profile curvature for sigma versus rho1450
 ```
 
