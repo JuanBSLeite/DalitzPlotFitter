@@ -10,6 +10,7 @@ import jax.numpy as jnp
 from jax import Array
 
 from dalitzplotfitter.kinematics import (
+    CovariantKinematics,
     covariant_kinematics,
     covariant_kinematics_from_invariants,
 )
@@ -46,6 +47,14 @@ def _invariant_key(first_key: str, second_key: str) -> str:
         raise ValueError("could not resolve invariant-mass key") from exc
 
 
+def _kinematics_prefix(
+    daughter_key: str,
+    partner_key: str,
+    bachelor_key: str,
+) -> str:
+    return f"__kin_{daughter_key}_{partner_key}_{bachelor_key}"
+
+
 def _identical_permutations(
     final_state: tuple[str, str, str],
 ) -> tuple[tuple[int, int, int], ...]:
@@ -61,8 +70,6 @@ def _physical_pairings(
     role_indices: tuple[int, int, int],
     spin: int,
 ) -> tuple[tuple[str, str, str], ...]:
-    """Return unique Bose-related resonance pairings."""
-
     daughter_index, partner_index, _ = role_indices
     identical_pair_daughters = (
         final_state[daughter_index] == final_state[partner_index]
@@ -99,6 +106,19 @@ class ResonanceAmplitude:
     lineshape: object = RelativisticBreitWigner()
     angular: object = CovariantAngular()
 
+    def _pairings(self) -> tuple[tuple[str, str, str], ...]:
+        base_keys = (self.daughter_key, self.partner_key, self.bachelor_key)
+        if self.final_state is None:
+            return (base_keys,)
+        if len(self.final_state) != 3:
+            raise ValueError("final_state must contain exactly three particle labels")
+        role_indices = tuple(_key_index(key) for key in base_keys)
+        return _physical_pairings(
+            self.final_state,
+            role_indices,
+            int(self.context.spin),
+        )
+
     def _kinematics(
         self,
         data: Mapping[str, Array],
@@ -106,7 +126,21 @@ class ResonanceAmplitude:
         partner_key: str,
         bachelor_key: str,
         context: ResonanceContext,
-    ):
+    ) -> CovariantKinematics:
+        prefix = _kinematics_prefix(daughter_key, partner_key, bachelor_key)
+        prepared_keys = tuple(
+            f"{prefix}_{name}"
+            for name in ("mass", "pstar", "p", "q", "costheta")
+        )
+        if all(key in data for key in prepared_keys):
+            return CovariantKinematics(
+                resonance_mass=data[prepared_keys[0]],
+                p_star=data[prepared_keys[1]],
+                p=data[prepared_keys[2]],
+                q=data[prepared_keys[3]],
+                cos_theta=data[prepared_keys[4]],
+            )
+
         resonance_key = _invariant_key(daughter_key, partner_key)
         daughter_bachelor_key = _invariant_key(daughter_key, bachelor_key)
         if resonance_key in data and daughter_bachelor_key in data:
@@ -121,6 +155,33 @@ class ResonanceAmplitude:
         return covariant_kinematics(
             data[daughter_key], data[partner_key], data[bachelor_key]
         )
+
+    def prepare_data(self, data: Mapping[str, Array]) -> dict[str, Array]:
+        """Attach parameter-independent kinematics for fast repeated evaluation."""
+
+        prepared = dict(data)
+        context = self.context.resolve(None)
+        for daughter_key, partner_key, bachelor_key in self._pairings():
+            prefix = _kinematics_prefix(daughter_key, partner_key, bachelor_key)
+            if f"{prefix}_mass" in prepared:
+                continue
+            kin = self._kinematics(
+                prepared,
+                daughter_key,
+                partner_key,
+                bachelor_key,
+                context,
+            )
+            prepared.update(
+                {
+                    f"{prefix}_mass": kin.resonance_mass,
+                    f"{prefix}_pstar": kin.p_star,
+                    f"{prefix}_p": kin.p,
+                    f"{prefix}_q": kin.q,
+                    f"{prefix}_costheta": kin.cos_theta,
+                }
+            )
+        return prepared
 
     def _evaluate_pairing(
         self,
@@ -165,20 +226,8 @@ class ResonanceAmplitude:
         data: Mapping[str, Array],
         parameters: Mapping[str, object] | None = None,
     ) -> Array:
-        base_keys = (self.daughter_key, self.partner_key, self.bachelor_key)
-        if self.final_state is None:
-            return self._evaluate_pairing(data, *base_keys, parameters)
-        if len(self.final_state) != 3:
-            raise ValueError("final_state must contain exactly three particle labels")
-
-        role_indices = tuple(_key_index(key) for key in base_keys)
-        pairings = _physical_pairings(
-            self.final_state,
-            role_indices,
-            int(self.context.spin),
-        )
         values = [
             self._evaluate_pairing(data, *keys, parameters)
-            for keys in pairings
+            for keys in self._pairings()
         ]
         return sum(values, start=jnp.zeros_like(values[0]))
