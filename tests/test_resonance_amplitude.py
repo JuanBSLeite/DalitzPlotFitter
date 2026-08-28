@@ -1,15 +1,18 @@
 import jax.numpy as jnp
 import pytest
 
+from dalitzplotfitter import enable_x64
 from dalitzplotfitter.dynamics import ResonanceAmplitude, ResonanceContext
-from dalitzplotfitter.kinematics import PhasespaceMC
+from dalitzplotfitter.kinematics import PhaseSpaceMC
 
+
+enable_x64()
 
 FINAL_STATE = ("pi-", "pi+", "pi+")
 
 
 def _data():
-    sample = PhasespaceMC(
+    sample = PhaseSpaceMC(
         mother_mass=1.86966,
         masses=(0.13957, 0.13957, 0.13957),
     ).generate(3, seed=9281)
