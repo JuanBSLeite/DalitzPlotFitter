@@ -64,8 +64,6 @@ class PreparedAmplitudeCache:
         if not components:
             raise ValueError("At least one amplitude component is required")
 
-        # Parameter-independent event kinematics are prepared once here and then
-        # reused by every dynamic lineshape evaluation during the fit.
         data = _prepare_component_data(components, data)
         normalization_data = _prepare_component_data(components, normalization_data)
 
@@ -174,19 +172,24 @@ class PreparedAmplitudeCache:
         owners = self.floating_dynamic_owners
         if not owners:
             return self.normalization_matrix_fixed
-        dynamic_indices = [
+        dynamic_indices = tuple(
             i for i, component in enumerate(self.components) if component.name in owners
-        ]
+        )
         weights = self._pdf_weights()
-        n_events = norm_components.shape[0]
         matrix = self.normalization_matrix_fixed
+
+        # One vectorized reduction per dynamic component instead of one full
+        # normalization-sample pass for every matrix element in its row.
         for i in dynamic_indices:
             fi = norm_components[:, i]
-            for j in range(norm_components.shape[1]):
-                fj = norm_components[:, j]
-                value = jnp.sum(weights * jnp.conj(fi) * fj) / n_events
-                matrix = matrix.at[i, j].set(value)
-                matrix = matrix.at[j, i].set(jnp.conj(value))
+            row = jnp.mean(
+                weights[:, None] * jnp.conj(fi)[:, None] * norm_components,
+                axis=0,
+            )
+            matrix = matrix.at[i, :].set(row)
+            matrix = matrix.at[:, i].set(jnp.conj(row))
+            # The diagonal is real by construction; avoid tiny round-off phases.
+            matrix = matrix.at[i, i].set(jnp.real(row[i]))
         return matrix
 
     def evaluate(self, fit_values: Mapping[str, object]) -> tuple[Array, Array]:
