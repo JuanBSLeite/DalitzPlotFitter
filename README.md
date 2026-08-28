@@ -1,6 +1,8 @@
 # DalitzPlotFitter
 
-DalitzPlotFitter is a Python package under development for unbinned amplitude fits of three-body decays. JAX evaluates amplitudes, likelihoods and gradients, iminuit performs minimization, `phasespace` supplies weighted Monte Carlo, and `particle` supplies standard particle properties.
+DalitzPlotFitter is a Python package under development for unbinned amplitude fits of three-body decays. The numerical pipeline is JAX end to end: phase-space generation, four-momentum kinematics, amplitudes, Monte Carlo normalization, likelihoods and gradients all run on the active JAX device. `iminuit` performs minimization and `particle` supplies standard particle properties.
+
+There is no TensorFlow dependency or mixed TensorFlow/JAX numerical path.
 
 Laura++ is one of the main physics references used to define and validate resonance, barrier-factor and angular conventions, but implementation classes use neutral names rather than backend/reference-specific names.
 
@@ -69,7 +71,7 @@ model = DecayModel(
 )
 ```
 
-The 1,000,000-event sample is generated **lazily**: constructing `DecayModel` does not immediately launch `phasespace`. The sample is created on the first amplitude/PDF/cache operation that requires component normalization and is then reused for the lifetime of the model.
+The 1,000,000-event sample is generated **lazily** by the pure-JAX generator. Constructing `DecayModel` does not immediately allocate it. The sample is created on the first amplitude/PDF/cache operation that requires component normalization and is then reused for the lifetime of the model.
 
 The same internal sample is available as
 
@@ -100,8 +102,8 @@ Detector efficiency is **not** included in the individual component normalizatio
 ```text
 DecayChannel + amplitude-component declarations
         -> particle masses / widths / spins
-        -> internal weighted phasespace normalization MC
-        -> four-momenta and Dalitz invariants
+        -> pure-JAX weighted three-body phase-space MC
+        -> four-momenta and Dalitz invariants on the JAX device
         -> resonance lineshape
         -> Blatt-Weisskopf factors
         -> angular factor
@@ -110,14 +112,15 @@ DecayChannel + amplitude-component declarations
         -> RealImag coefficient
         -> coherent amplitude
         -> normalized SignalPDF
-        -> JAX NLL + iminuit
+        -> JAX NLL + automatic gradients
+        -> iminuit
 ```
 
 The low-level complete resonance object is `ResonanceAmplitude`. The relativistic Breit-Wigner is exposed as `RelativisticBreitWigner`; neither the lineshape nor amplitude class carries a Laura++ or angular-formalism name.
 
 ## Angular convention
 
-The current angular implementation uses the covariant formalism. Event-wise quantities are calculated directly from four-momenta:
+The current angular implementation uses the covariant formalism. Event-wise quantities are calculated from the Dalitz invariants or, for validation, directly from four-momenta:
 
 ```text
 p*          bachelor momentum in the parent rest frame
@@ -152,9 +155,40 @@ F = F[(12)3] + F[(13)2].
 
 There is no separate Bose-symmetrization wrapper. Constant non-resonant terms are not duplicated.
 
-## Weighted phase-space Monte Carlo
+## Pure-JAX weighted phase-space Monte Carlo
 
-`DecayModel.generate_phase_space()` uses `phasespace` with raw weights (`normalize_weights=False`). TensorFlow is confined to generation inside `phasespace`; generated arrays are immediately converted to the internal JAX representation.
+`PhaseSpaceMC` implements three-body Lorentz-invariant phase space directly in JAX. It factorizes
+
+```text
+dPhi3 = ds12/(2*pi) * dPhi2(P -> R12 3) * dPhi2(R12 -> 1 2)
+```
+
+and samples `s12` and both two-body solid angles uniformly. The returned importance weight is the exact Lorentz-invariant phase-space measure divided by that proposal density:
+
+```text
+w_PS = Delta(s12) * p_parent * q / (32*pi^3*M*sqrt(s12)).
+```
+
+The generator returns four-momenta in `(E, px, py, pz)` order together with `s12`, `s13`, `s23` and the phase-space weights.
+
+Because generation is JAX-native, a CUDA-enabled JAX installation generates directly on the GPU and the arrays remain on the same backend used by the amplitude and likelihood.
+
+Direct use is available as
+
+```python
+from dalitzplotfitter import PhaseSpaceMC
+
+sample = PhaseSpaceMC(
+    1.86966,
+    (0.13957, 0.13957, 0.13957),
+).generate(1_000_000, seed=2027)
+```
+
+or through the high-level model:
+
+```python
+sample = model.generate_phase_space(1_000_000, seed=2027)
+```
 
 For Monte Carlo normalization,
 
@@ -196,7 +230,7 @@ using HESSE uncertainties with `errordef=0.5`.
 
 1. relativistic Breit-Wigner — implemented;
 2. covariant angular formalism — implemented for `L=0..4`;
-3. weighted `phasespace` MC — implemented;
+3. pure-JAX weighted three-body phase-space MC — implemented;
 4. `particle`-driven decay/channel model — implemented;
 5. automatic identical-particle symmetrization — implemented;
 6. unit-integral component normalization with internal MC — implemented;
