@@ -1,7 +1,11 @@
 import jax
 import jax.numpy as jnp
 
+from dalitzplotfitter import enable_x64
 from dalitzplotfitter.kinematics import PhaseSpaceMC, invariant_mass_squared
+
+
+enable_x64()
 
 
 def test_phase_space_mc_returns_weighted_conserving_three_body_events():
