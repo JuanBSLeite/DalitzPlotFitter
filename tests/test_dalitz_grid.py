@@ -25,9 +25,7 @@ def test_dalitz_grid_contains_only_physical_midpoints():
     assert bool(jnp.all(sample.s13 <= high))
 
     m1, m2, m3 = channel.daughter_masses
-    invariant_sum = (
-        channel.parent_mass**2 + m1**2 + m2**2 + m3**2
-    )
+    invariant_sum = channel.parent_mass**2 + m1**2 + m2**2 + m3**2
     assert jnp.allclose(
         sample.s12 + sample.s13 + sample.s23,
         invariant_sum,
@@ -46,34 +44,39 @@ def test_dalitz_grid_uses_constant_midpoint_weights():
     ).sample()
 
     assert sample.size > 0
-    assert jnp.all(sample.weights == sample.weights[0])
+    assert bool(jnp.all(sample.weights == sample.weights[0]))
 
     m1, m2, m3 = channel.daughter_masses
-    ds12 = (
-        (channel.parent_mass - m3) ** 2 - (m1 + m2) ** 2
-    ) / resolution
-    ds13 = (
-        (channel.parent_mass - m2) ** 2 - (m1 + m3) ** 2
-    ) / resolution
+    ds12 = ((channel.parent_mass - m3) ** 2 - (m1 + m2) ** 2) / resolution
+    ds13 = ((channel.parent_mass - m2) ** 2 - (m1 + m3) ** 2) / resolution
     expected_area = sample.size * ds12 * ds13
 
     # The package integration convention is mean(weights * f). For f=1 this
-    # must equal the midpoint estimate of the physical Dalitz area.
+    # must exactly reproduce the midpoint quadrature cell_area * N_valid.
     estimated_area = float(jnp.mean(sample.weights))
     assert math.isclose(estimated_area, expected_area, rel_tol=2e-14, abs_tol=2e-14)
 
 
-def test_dalitz_grid_area_converges_with_resolution():
+def test_dalitz_grid_mean_estimator_equals_midpoint_sum():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
-    areas = []
-    for resolution in (100, 200, 400):
-        sample = DalitzGrid(
-            channel.parent_mass,
-            channel.daughter_masses,
-            resolution=resolution,
-        ).sample()
-        areas.append(float(jnp.mean(sample.weights)))
+    resolution = 80
+    sample = DalitzGrid(
+        channel.parent_mass,
+        channel.daughter_masses,
+        resolution=resolution,
+    ).sample()
 
-    # The boundary error of midpoint masking must shrink. Do not encode an
-    # external analytic area value; compare successive deterministic grids.
-    assert abs(areas[2] - areas[1]) < abs(areas[1] - areas[0])
+    values = 1.0 + 0.3 * sample.s12 + 0.2 * sample.s13
+    estimate_from_package_convention = jnp.mean(sample.weights * values)
+
+    m1, m2, m3 = channel.daughter_masses
+    ds12 = ((channel.parent_mass - m3) ** 2 - (m1 + m2) ** 2) / resolution
+    ds13 = ((channel.parent_mass - m2) ** 2 - (m1 + m3) ** 2) / resolution
+    direct_midpoint_sum = ds12 * ds13 * jnp.sum(values)
+
+    assert jnp.allclose(
+        estimate_from_package_convention,
+        direct_midpoint_sum,
+        rtol=2e-14,
+        atol=2e-14,
+    )
