@@ -14,6 +14,40 @@ so HESSE one-parameter uncertainties correspond to `Delta NLL = 0.5`.
 
 The EDM tolerance is explicit in `Minimizer`. Multistart trial minima use Minuit strategy 1. The selected minimum is rerun with the careful strategy 2 before HESSE because amplitude fits can contain strong correlations between complex coefficients and dynamical shape parameters.
 
+## Minimizer verbosity
+
+`Minimizer` has an explicit verbosity level:
+
+```python
+minimizer = Minimizer(
+    nll,
+    model.parameters,
+    verbose=1,
+)
+```
+
+The levels are
+
+```text
+verbose = 0   silent (default)
+verbose = 1   fitter-level progress
+verbose >= 2  fitter-level progress + iminuit internal output
+```
+
+For a multistart fit, `verbose=1` prints one compact status line before and after each trial, including
+
+```text
+start index / total starts
+validity
+NLL
+EDM
+number of function calls
+```
+
+and then reports which trial was selected for the strategy-2/HESSE refinement. This is the recommended setting for interactive notebook examples because it shows that the fit is progressing without flooding the notebook with Minuit's detailed internal log.
+
+Examples 2 and 3 use `verbose=1`.
+
 ## Component normalization is the default amplitude convention
 
 Every dynamical component is normalized by default according to
@@ -201,7 +235,7 @@ The candidate-generation pool is independent of the model-owned normalization MC
 ## Multistart minimization
 
 ```python
-minimizer = Minimizer(nll, model.parameters)
+minimizer = Minimizer(nll, model.parameters, verbose=1)
 scan = minimizer.fit_multistart(
     n_starts=20,
     seed=314159,
