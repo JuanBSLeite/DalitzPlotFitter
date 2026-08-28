@@ -16,7 +16,6 @@ dependencies = [
   "mplhep>=0.4",
   "numpy>=2.0",
   "particle>=1.0.0",
-  "phasespace[tf]>=1.10.4",
 ]
 
 [project.optional-dependencies]
