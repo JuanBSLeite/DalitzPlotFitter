@@ -22,13 +22,13 @@ Every dynamical component is normalized by default according to
 integral dPhi |F_j|^2 = 1.
 ```
 
-The normalization is applied **before** multiplication by the complex coefficient. Thus
+The normalization is applied before multiplication by the complex coefficient:
 
 ```text
 A = sum_j c_j F_j_normalized.
 ```
 
-This is particularly important for floating lineshape parameters. Without per-component normalization, changing a width also changes the overall scale of the raw Breit-Wigner and produces an avoidable correlation between `|c_j|` and the width. With the default convention the lineshape may change shape, but its phase-space norm remains fixed.
+This is especially important for floating lineshape parameters. Without per-component normalization, changing a width also changes the overall scale of the raw Breit-Wigner and produces an avoidable correlation between `|c_j|` and the width.
 
 `DecayModel` owns a weighted phase-space normalization sample with public defaults
 
@@ -42,15 +42,7 @@ model = DecayModel(
 )
 ```
 
-The sample is generated lazily on first use and then reused. Creating the model itself therefore does not immediately allocate one million events or initialize `phasespace`/TensorFlow.
-
-The sample can be inspected explicitly as
-
-```python
-model.normalization_sample
-```
-
-and the common fit workflow is now
+The sample is generated lazily on first use and then reused. The common fit workflow is
 
 ```python
 data = ...
@@ -60,7 +52,7 @@ pdf = model.pdf()
 
 without manually generating a second normalization sample.
 
-The convention is user-configurable. Raw components can be requested explicitly with
+Raw components can be requested explicitly with
 
 ```python
 DecayModel(..., normalize_components=False)
@@ -68,7 +60,7 @@ DecayModel(..., normalize_components=False)
 
 and the MC precision can be changed with `normalization_size`.
 
-Detector efficiency is deliberately excluded from the individual component normalization. It enters only the total signal-PDF normalization. Therefore the meaning of a complex coefficient does not change when the detector-efficiency model changes.
+Detector efficiency is deliberately excluded from the individual component normalization. It enters only the total signal-PDF normalization.
 
 For a floating dynamical parameter the component scale is recalculated at each parameter point:
 
@@ -77,7 +69,55 @@ F_j(x;theta)
  -> F_j(x;theta) / sqrt(<w_PS |F_j(theta)|^2>).
 ```
 
-The same fixed internal MC sample is used throughout the fit, so the likelihood remains deterministic.
+## Fit-performance path
+
+Floating lineshape parameters used to be expensive because every likelihood evaluation rebuilt the full covariant kinematics for the affected component on both the data and normalization samples.
+
+The optimized cache now separates event kinematics from dynamical parameters. For each resonance pairing it prepares once
+
+```text
+m_ij
+p*
+p
+q
+cos(theta)
+```
+
+from the Dalitz invariants. These quantities do not depend on the resonance pole mass or width. During a fit of `m0` or `Gamma0`, repeated likelihood evaluations therefore recompute only the genuinely parameter-dependent pieces:
+
+```text
+q0, p0
+Blatt-Weisskopf pole factors
+running width
+lineshape
+component normalization
+interference row/column
+```
+
+The invariant reconstruction is regression-tested against the original Lorentz-boost calculation.
+
+For a dynamic component, the affected normalization-matrix row is also evaluated with one vectorized reduction instead of one full pass over the normalization sample per matrix element.
+
+JAX still incurs a one-time compilation cost on the first objective/gradient evaluation. Timing should therefore distinguish
+
+```text
+cache preparation / first JIT compilation
+steady-state likelihood evaluations
+full Minuit runtime
+```
+
+The default multistart recommendation uses gradient-based MIGRAD directly:
+
+```python
+scan = minimizer.fit_multistart(
+    n_starts=20,
+    seed=314159,
+    include_default=False,
+    simplex=False,
+)
+```
+
+`simplex=True` remains available as a fallback for difficult starting points, but running Simplex before every one of many starts is substantially more expensive and is not the normal path now that the analytic JAX gradients are validated.
 
 ## RealImag coefficients
 
@@ -141,9 +181,9 @@ with
 N(theta) ~= (1/N_MC) sum_k w_PS,k |A(x_k;theta)|^2.
 ```
 
-A fixed normalization sample keeps the objective deterministic, but finite-MC integration error remains. This is substantially more important when masses, widths or other lineshape parameters float: their likelihood gradients contain derivatives of the normalization integral itself.
+A fixed normalization sample keeps the objective deterministic, but finite-MC integration error remains. This is more important when masses, widths or other lineshape parameters float because their likelihood gradients contain derivatives of the normalization integral itself.
 
-For reference closure studies the default internal normalization sample therefore contains
+For reference closure studies the default internal normalization sample contains
 
 ```text
 normalization MC: 1,000,000 events
@@ -156,9 +196,7 @@ pseudo-data:             100,000 events
 candidate generation:  1,000,000 events
 ```
 
-The candidate-generation pool is independent of the model-owned normalization MC. This avoids correlating the pseudo-data resampling support with the finite sample used to define component and likelihood normalization.
-
-Using a candidate pool comparable in size to the pseudo-data while resampling with replacement is discouraged for shape-parameter validation because the pseudo-data then inherit visible finite-pool discreteness.
+The candidate-generation pool is independent of the model-owned normalization MC.
 
 ## Multistart minimization
 
@@ -168,7 +206,7 @@ scan = minimizer.fit_multistart(
     n_starts=20,
     seed=314159,
     include_default=False,
-    simplex=True,
+    simplex=False,
 )
 result = scan.best
 ```
@@ -196,7 +234,7 @@ pull = (value_gen - value_fit) / sigma_fit
 abs(pull) < 1
 ```
 
-is the reference one-pseudoexperiment compatibility check. A single pull outside one standard deviation is not by itself evidence of fitter bias; bias studies require ensembles of pseudoexperiments. The criterion remains useful as a strict regression target for controlled closure examples.
+is the reference one-pseudoexperiment compatibility check. A single pull outside one standard deviation is not by itself evidence of fitter bias; bias studies require ensembles of pseudoexperiments.
 
 ## E791 examples and conventions
 
@@ -215,7 +253,7 @@ parent_radius = 3.0 GeV^-1
 resonance_radius = 3.0 GeV^-1
 ```
 
-for the parent and resonance factors. The notebooks use those values.
+for the parent and resonance factors.
 
 The project RBW convention
 
@@ -225,20 +263,8 @@ The project RBW convention
 
 is the negative of the propagator sign written by E791. With `rho(770)=1+0i` retained as the reference coefficient, the examples account for the relative sign to the constant non-resonant term by shifting the NR phase by 180 degrees.
 
-All notebook plots that decompose the model into amplitude components now use the normalized component columns from `PreparedAmplitudeCache`; raw `component.value()` is not used for component-comparison plots because that would mix the old raw-amplitude convention with the default normalized one.
+All notebook plots that decompose the model into amplitude components use the normalized component columns from `PreparedAmplitudeCache`.
 
-`notebooks/02_fit_dynamic_parameters.ipynb` intentionally floats the mass and width of `rho1450` as a difficult stress test. This component has only about 0.7% Fit-2 fraction, so its shape parameters are intrinsically weakly constrained. The notebook uses `model.normalization_sample` and `model.prepare_cache(data)` rather than generating a second normalization sample manually.
+`notebooks/02_fit_dynamic_parameters.ipynb` intentionally floats the mass and width of `rho1450` as a difficult stress test. This component has only about 0.7% Fit-2 fraction, so its shape parameters are intrinsically weakly constrained.
 
-`notebooks/03_lineshape_parameter_diagnostics.ipynb` investigates this explicitly. Standard fits use each model's internal normalization sample. It compares:
-
-```text
-sigma mass/width only
-sigma x/y/mass/width
-all coefficients + sigma mass/width
-rho1450 x/y/mass/width
-all coefficients + rho1450 mass/width
-100k versus 1M internal normalization MC
-local mass-profile curvature for sigma versus rho1450
-```
-
-The dominant sigma contribution (about 46% in E791 Fit 2) is the more appropriate validation target for basic mass/width recovery; E791 itself determined the sigma mass and width from the data, whereas rho(1450) was a very small contribution in this D+ model.
+`notebooks/03_lineshape_parameter_diagnostics.ipynb` compares the dominant sigma and weak rho(1450) cases and studies normalization-MC precision.
