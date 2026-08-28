@@ -22,7 +22,7 @@ from dalitzplotfitter.dynamics import (
 )
 from dalitzplotfitter.fit import Parameter, ParameterKind
 from dalitzplotfitter.integration import MonteCarloIntegrator
-from dalitzplotfitter.kinematics import PhaseSpaceSample, PhasespaceMC
+from dalitzplotfitter.kinematics import PhaseSpaceMC, PhaseSpaceSample
 from dalitzplotfitter.pdf import SignalPDF
 
 
@@ -340,7 +340,7 @@ class DecayModel:
         *,
         seed: int | None = None,
     ) -> PhaseSpaceSample:
-        return PhasespaceMC(
+        return PhaseSpaceMC(
             self.channel.parent_mass,
             self.channel.daughter_masses,
         ).generate(size, seed=seed)
