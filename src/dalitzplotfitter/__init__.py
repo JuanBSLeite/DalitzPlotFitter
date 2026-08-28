@@ -18,11 +18,13 @@ from .dynamics import (
 from .fit import Minimizer, MultiStartResult, Parameter, ParameterKind
 from .kinematics import (
     CovariantKinematics,
+    DalitzGrid,
     PhaseSpaceMC,
     PhaseSpaceSample,
     boost_to_rest_frame,
     covariant_kinematics,
     covariant_kinematics_from_invariants,
+    dalitz_s13_limits,
 )
 from .sampling import weighted_resample
 
@@ -32,6 +34,7 @@ __all__ = [
     "ConstantAmplitude",
     "CovariantAngular",
     "CovariantKinematics",
+    "DalitzGrid",
     "DecayChannel",
     "DecayModel",
     "Minimizer",
@@ -50,6 +53,7 @@ __all__ = [
     "boost_to_rest_frame",
     "covariant_kinematics",
     "covariant_kinematics_from_invariants",
+    "dalitz_s13_limits",
     "enable_x64",
     "weighted_resample",
 ]
