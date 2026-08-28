@@ -1,4 +1,4 @@
-"""Deterministic midpoint grid for three-body Dalitz integration."""
+"""Deterministic equal-area grid for three-body Dalitz integration."""
 
 from __future__ import annotations
 
@@ -19,12 +19,7 @@ def dalitz_s13_limits(
     mother_mass: float,
     masses: tuple[float, float, float],
 ):
-    """Return the physical ``s13`` limits at fixed ``s12``.
-
-    The limits are evaluated in the rest frame of the ``(1,2)`` pair. They are
-    exact for a spinless three-body kinematic boundary and are independent of the
-    decay dynamics.
-    """
+    """Return the exact physical ``s13`` limits at fixed ``s12``."""
 
     s12 = jnp.asarray(s12)
     m1, m2, m3 = masses
@@ -44,23 +39,44 @@ def dalitz_s13_limits(
     return common - spread, common + spread
 
 
+def _dalitz_width(
+    s12,
+    *,
+    mother_mass: float,
+    masses: tuple[float, float, float],
+):
+    low, high = dalitz_s13_limits(
+        s12,
+        mother_mass=mother_mass,
+        masses=masses,
+    )
+    return jnp.maximum(high - low, 0.0)
+
+
 @dataclass(frozen=True)
 class DalitzGrid:
-    """Regular ``N x N`` midpoint grid clipped to the physical Dalitz region.
+    """Equal-area ``N x N`` grid mapped directly into the physical Dalitz region.
 
-    The proposal is a Cartesian grid in ``(s12, s13)``. Only bin centres inside
-    the physical boundary are retained. All retained bins have the same area, so
-    there is no importance sampling and no event-dependent phase-space weight.
+    A regular midpoint grid in auxiliary coordinates ``(u, v) in [0,1]^2`` is
+    mapped into ``(s12, s13)``.  The first coordinate is defined by cumulative
+    physical Dalitz area,
 
-    ``PhaseSpaceSample.weights`` follows the package-wide mean-estimator
-    convention. Each retained point therefore receives ``N_valid * cell_area``;
-    consequently ``mean(weights * f)`` is exactly the midpoint quadrature
-    ``cell_area * sum(f)``.
+    ``u(s12) = integral[W(s) ds] / A_DP``,
+
+    where ``W(s12) = s13_max(s12) - s13_min(s12)``.  The second coordinate is
+    linear across the physical ``s13`` interval at fixed ``s12``.  This mapping
+    has constant Jacobian ``A_DP``; consequently all ``N^2`` points are physical
+    and have identical quadrature weight.
+
+    ``PhaseSpaceSample.weights`` follows the package-wide estimator convention
+    ``mean(weights * f)``.  Every point therefore stores the same value
+    ``A_DP``, so the estimator is ``A_DP * mean(f)``.
     """
 
     mother_mass: float
     masses: tuple[float, float, float]
     resolution: int = 800
+    boundary_resolution: int | None = None
 
     def __post_init__(self) -> None:
         if self.resolution < 2:
@@ -69,38 +85,68 @@ class DalitzGrid:
             raise ValueError("DalitzGrid requires exactly three daughter masses")
         if self.mother_mass <= sum(self.masses):
             raise ValueError("Mother mass must be above the three-body threshold")
+        if self.boundary_resolution is not None and self.boundary_resolution < 4:
+            raise ValueError("boundary_resolution must be at least 4")
 
-    def sample(self) -> PhaseSpaceSample:
-        """Return physical midpoint centres with constant quadrature weight."""
+    def _area_mapping(self):
+        """Return dense ``s12`` support, cumulative area and total Dalitz area."""
 
         m1, m2, m3 = self.masses
-        n = int(self.resolution)
-
         s12_min = (m1 + m2) ** 2
         s12_max = (self.mother_mass - m3) ** 2
-        s13_min_global = (m1 + m3) ** 2
-        s13_max_global = (self.mother_mass - m2) ** 2
 
-        ds12 = (s12_max - s12_min) / n
-        ds13 = (s13_max_global - s13_min_global) / n
-
-        s12_centres = s12_min + (jnp.arange(n) + 0.5) * ds12
-        s13_centres = s13_min_global + (jnp.arange(n) + 0.5) * ds13
-        s12_mesh, s13_mesh = jnp.meshgrid(
-            s12_centres,
-            s13_centres,
-            indexing="ij",
+        # The dense one-dimensional support is used only to tabulate and invert
+        # the cumulative physical area.  It is deterministic and independent of
+        # the N x N integration grid itself.
+        n_boundary = (
+            int(self.boundary_resolution)
+            if self.boundary_resolution is not None
+            else max(4097, 8 * int(self.resolution) + 1)
         )
-
-        low, high = dalitz_s13_limits(
-            s12_mesh,
+        support = jnp.linspace(s12_min, s12_max, n_boundary)
+        width = _dalitz_width(
+            support,
             mother_mass=self.mother_mass,
             masses=self.masses,
         )
-        physical = (s13_mesh >= low) & (s13_mesh <= high)
+        ds = support[1:] - support[:-1]
+        increments = 0.5 * (width[:-1] + width[1:]) * ds
+        cumulative = jnp.concatenate(
+            (jnp.zeros((1,), dtype=support.dtype), jnp.cumsum(increments))
+        )
+        area = cumulative[-1]
+        return support, cumulative, area
 
-        s12 = s12_mesh[physical]
-        s13 = s13_mesh[physical]
+    @property
+    def area(self):
+        """Deterministic numerical area of the physical Dalitz region."""
+
+        return self._area_mapping()[2]
+
+    def sample(self) -> PhaseSpaceSample:
+        """Return exactly ``resolution**2`` equal-area physical midpoint points."""
+
+        m1, m2, m3 = self.masses
+        n = int(self.resolution)
+        support, cumulative, area = self._area_mapping()
+
+        # Midpoints of equal-area strips in u.  Inverting the cumulative area
+        # makes every s12 strip contain A_DP/N physical area.
+        u = (jnp.arange(n, dtype=support.dtype) + 0.5) / n
+        target_area = u * area
+        s12_strip = jnp.interp(target_area, cumulative, support)
+
+        low, high = dalitz_s13_limits(
+            s12_strip,
+            mother_mass=self.mother_mass,
+            masses=self.masses,
+        )
+        width = high - low
+
+        # Midpoints of N equal subdivisions across each physical s13 interval.
+        v = (jnp.arange(n, dtype=support.dtype) + 0.5) / n
+        s12 = jnp.repeat(s12_strip, n)
+        s13 = (low[:, None] + width[:, None] * v[None, :]).reshape(-1)
         s23 = (
             self.mother_mass**2
             + m1**2
@@ -110,11 +156,9 @@ class DalitzGrid:
             - s13
         )
 
-        n_valid = s12.shape[0]
-        # Package integrators use mean(weights * f). For a midpoint grid the
-        # desired quadrature is cell_area * sum(f), hence this constant weight.
-        quadrature_weight = n_valid * ds12 * ds13
-        weights = jnp.full_like(s12, quadrature_weight)
+        # Under the package convention mean(weights * f), storing A_DP for every
+        # point gives A_DP * mean(f), the equal-area midpoint quadrature.
+        weights = jnp.full_like(s12, area)
 
         return PhaseSpaceSample(
             s12=s12,
