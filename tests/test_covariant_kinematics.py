@@ -2,6 +2,7 @@ import math
 
 import jax.numpy as jnp
 
+from dalitzplotfitter import enable_x64
 from dalitzplotfitter.kinematics import (
     PhaseSpaceMC,
     boost_to_rest_frame,
@@ -9,6 +10,9 @@ from dalitzplotfitter.kinematics import (
     covariant_kinematics_from_invariants,
     invariant_mass_squared,
 )
+
+
+enable_x64()
 
 
 def _event():
