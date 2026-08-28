@@ -21,14 +21,21 @@ def _component_scales(matrix: Array) -> Array:
     return 1.0 / jnp.sqrt(diagonal)
 
 
+def _prepare_component_data(
+    components: Sequence[AmplitudeComponent],
+    data: Mapping[str, Array],
+) -> Mapping[str, Array]:
+    prepared: Mapping[str, Array] = dict(data)
+    for component in components:
+        prepare = getattr(component.function, "prepare_data", None)
+        if prepare is not None:
+            prepared = prepare(prepared)
+    return prepared
+
+
 @dataclass(frozen=True)
 class PreparedAmplitudeCache:
-    """Pre-evaluated amplitude components and normalization matrix.
-
-    Individual dynamical functions are normalized to unit phase-space integral
-    by default. Detector efficiency, when supplied, affects only the total PDF
-    normalization and never the definition of the complex coefficients.
-    """
+    """Pre-evaluated amplitude components and normalization matrix."""
 
     components: tuple[AmplitudeComponent, ...]
     data: Mapping[str, Array]
@@ -56,6 +63,12 @@ class PreparedAmplitudeCache:
         components = tuple(components)
         if not components:
             raise ValueError("At least one amplitude component is required")
+
+        # Parameter-independent event kinematics are prepared once here and then
+        # reused by every dynamic lineshape evaluation during the fit.
+        data = _prepare_component_data(components, data)
+        normalization_data = _prepare_component_data(components, normalization_data)
+
         raw_data = jnp.stack(
             [jnp.asarray(c.function(data, None)) for c in components], axis=1
         )
@@ -64,8 +77,6 @@ class PreparedAmplitudeCache:
             axis=1,
         )
 
-        # Component normalization defines the amplitude convention and therefore
-        # uses phase-space weights only. Efficiency belongs to the total PDF.
         raw_component_matrix = normalization_matrix(
             raw_norm, normalization_weights, None
         )
