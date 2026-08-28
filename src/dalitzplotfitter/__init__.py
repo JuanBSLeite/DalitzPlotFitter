@@ -18,10 +18,11 @@ from .dynamics import (
 from .fit import Minimizer, MultiStartResult, Parameter, ParameterKind
 from .kinematics import (
     CovariantKinematics,
+    PhaseSpaceMC,
     PhaseSpaceSample,
-    PhasespaceMC,
     boost_to_rest_frame,
     covariant_kinematics,
+    covariant_kinematics_from_invariants,
 )
 from .sampling import weighted_resample
 
@@ -38,8 +39,8 @@ __all__ = [
     "NonResonant",
     "Parameter",
     "ParameterKind",
+    "PhaseSpaceMC",
     "PhaseSpaceSample",
-    "PhasespaceMC",
     "PreparedAmplitudeCache",
     "RealImag",
     "RelativisticBreitWigner",
@@ -48,6 +49,7 @@ __all__ = [
     "ResonanceContext",
     "boost_to_rest_frame",
     "covariant_kinematics",
+    "covariant_kinematics_from_invariants",
     "enable_x64",
     "weighted_resample",
 ]
