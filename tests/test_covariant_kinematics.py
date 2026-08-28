@@ -6,6 +6,7 @@ from dalitzplotfitter.kinematics import (
     PhasespaceMC,
     boost_to_rest_frame,
     covariant_kinematics,
+    covariant_kinematics_from_invariants,
     invariant_mass_squared,
 )
 
@@ -51,6 +52,27 @@ def test_covariant_momenta_match_two_body_invariant_formulae():
     assert math.isclose(float(values.p[0]), p_expected, rel_tol=1e-6)
     assert math.isclose(float(values.q[0]), q_expected, rel_tol=1e-6)
     assert -1.0 <= float(values.cos_theta[0]) <= 1.0
+
+
+def test_invariant_covariant_kinematics_matches_lorentz_boosts():
+    sample = PhasespaceMC(
+        mother_mass=1.86966,
+        masses=(0.13957, 0.13957, 0.13957),
+    ).generate(256, seed=8172)
+    boosted = covariant_kinematics(sample.p1, sample.p2, sample.p3)
+    invariant = covariant_kinematics_from_invariants(
+        sample.s12,
+        sample.s13,
+        parent_mass=1.86966,
+        daughter_mass=0.13957,
+        partner_mass=0.13957,
+        bachelor_mass=0.13957,
+    )
+    assert jnp.allclose(invariant.resonance_mass, boosted.resonance_mass, rtol=1e-9, atol=1e-10)
+    assert jnp.allclose(invariant.p_star, boosted.p_star, rtol=1e-8, atol=1e-9)
+    assert jnp.allclose(invariant.p, boosted.p, rtol=1e-8, atol=1e-9)
+    assert jnp.allclose(invariant.q, boosted.q, rtol=1e-8, atol=1e-9)
+    assert jnp.allclose(invariant.cos_theta, boosted.cos_theta, rtol=1e-8, atol=1e-8)
 
 
 def test_equal_mass_daughter_exchange_flips_covariant_helicity_angle():
