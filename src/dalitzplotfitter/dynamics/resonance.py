@@ -9,7 +9,10 @@ from typing import Mapping
 import jax.numpy as jnp
 from jax import Array
 
-from dalitzplotfitter.kinematics import covariant_kinematics
+from dalitzplotfitter.kinematics import (
+    covariant_kinematics,
+    covariant_kinematics_from_invariants,
+)
 
 from .angular import CovariantAngular
 from .context import ResonanceContext, resolve_value
@@ -31,6 +34,18 @@ def _key_index(key: str) -> int:
         ) from exc
 
 
+def _invariant_key(first_key: str, second_key: str) -> str:
+    pair = frozenset((_key_index(first_key), _key_index(second_key)))
+    try:
+        return {
+            frozenset((0, 1)): "s12",
+            frozenset((0, 2)): "s13",
+            frozenset((1, 2)): "s23",
+        }[pair]
+    except KeyError as exc:
+        raise ValueError("could not resolve invariant-mass key") from exc
+
+
 def _identical_permutations(
     final_state: tuple[str, str, str],
 ) -> tuple[tuple[int, int, int], ...]:
@@ -46,12 +61,7 @@ def _physical_pairings(
     role_indices: tuple[int, int, int],
     spin: int,
 ) -> tuple[tuple[str, str, str], ...]:
-    """Return unique Bose-related resonance pairings.
-
-    Exchanges of the two resonance daughters are not separate physical topologies
-    when those daughters are identical. Such a pair cannot form an odd-L state
-    when all daughters are spinless bosons, so odd spin is rejected explicitly.
-    """
+    """Return unique Bose-related resonance pairings."""
 
     daughter_index, partner_index, _ = role_indices
     identical_pair_daughters = (
@@ -89,6 +99,29 @@ class ResonanceAmplitude:
     lineshape: object = RelativisticBreitWigner()
     angular: object = CovariantAngular()
 
+    def _kinematics(
+        self,
+        data: Mapping[str, Array],
+        daughter_key: str,
+        partner_key: str,
+        bachelor_key: str,
+        context: ResonanceContext,
+    ):
+        resonance_key = _invariant_key(daughter_key, partner_key)
+        daughter_bachelor_key = _invariant_key(daughter_key, bachelor_key)
+        if resonance_key in data and daughter_bachelor_key in data:
+            return covariant_kinematics_from_invariants(
+                data[resonance_key],
+                data[daughter_bachelor_key],
+                parent_mass=context.parent_mass,
+                daughter_mass=context.daughter_masses[0],
+                partner_mass=context.daughter_masses[1],
+                bachelor_mass=context.bachelor_mass,
+            )
+        return covariant_kinematics(
+            data[daughter_key], data[partner_key], data[bachelor_key]
+        )
+
     def _evaluate_pairing(
         self,
         data: Mapping[str, Array],
@@ -97,10 +130,14 @@ class ResonanceAmplitude:
         bachelor_key: str,
         parameters: Mapping[str, object] | None,
     ) -> Array:
-        kin = covariant_kinematics(
-            data[daughter_key], data[partner_key], data[bachelor_key]
-        )
         context = self.context.resolve(parameters)
+        kin = self._kinematics(
+            data,
+            daughter_key,
+            partner_key,
+            bachelor_key,
+            context,
+        )
         lineshape = resolve_value(self.lineshape, parameters)
         angular_model = resolve_value(self.angular, parameters)
         l = int(context.spin)
@@ -116,8 +153,6 @@ class ResonanceAmplitude:
         x_res = blatt_weisskopf_from_momenta(
             kin.q, q0, l, context.resonance_radius
         )
-        # Laura++'s default parent form factor uses the bachelor momentum in the
-        # resonance rest frame (p), not p* in the parent rest frame.
         x_parent = blatt_weisskopf_from_momenta(
             kin.p, p0, l, context.parent_radius
         )
