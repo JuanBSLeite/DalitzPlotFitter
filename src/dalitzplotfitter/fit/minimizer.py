@@ -13,6 +13,26 @@ from .parameters import Parameter
 
 
 @dataclass(frozen=True)
+class GradientCheckResult:
+    """Comparison between JAX and central finite-difference gradients."""
+
+    names: tuple[str, ...]
+    point: dict[str, float]
+    jax_gradient: np.ndarray
+    finite_difference_gradient: np.ndarray
+    absolute_error: np.ndarray
+    relative_error: np.ndarray
+
+    @property
+    def max_absolute_error(self) -> float:
+        return float(np.max(self.absolute_error))
+
+    @property
+    def max_relative_error(self) -> float:
+        return float(np.max(self.relative_error))
+
+
+@dataclass(frozen=True)
 class MultiStartResult:
     """Collection of independent minimizations and the best valid minimum."""
 
@@ -33,15 +53,14 @@ class Minimizer:
     """Minimize a mapping-based JAX objective with iminuit.
 
     ``errordef=0.5`` is the Minuit convention for a negative log-likelihood.
-    ``tolerance`` is passed to ``Minuit.tol`` and controls the EDM convergence
-    target explicitly. Preliminary multistart trials use Minuit strategy 1;
-    the selected minimum and ordinary single fits use the careful strategy 2
-    before HESSE so strongly correlated parameters receive a final refinement.
+    ``tolerance`` is passed directly to ``Minuit.tol``; the default ``0.1``
+    matches iminuit's standard setting and avoids requesting EDM precision below
+    practical floating-point accuracy.
 
     Verbosity levels are:
 
     - ``verbose=0``: silent;
-    - ``verbose=1``: fitter-level progress and one summary per multistart trial;
+    - ``verbose=1``: fitter-level progress and summaries;
     - ``verbose>=2``: the same progress plus iminuit's internal print output.
     """
 
@@ -51,7 +70,7 @@ class Minimizer:
         parameters: Sequence[Parameter],
         *,
         errordef: float = 0.5,
-        tolerance: float = 1e-10,
+        tolerance: float = 0.1,
         verbose: int = 0,
     ):
         if errordef <= 0:
@@ -140,6 +159,78 @@ class Minimizer:
             raise ValueError("ncall must be a positive integer or None")
         return ncall
 
+    def check_gradient(
+        self,
+        values: Mapping[str, float] | None = None,
+        *,
+        step_scale: float = 1e-5,
+        relative_floor: float = 1e-12,
+        print_table: bool = True,
+    ) -> GradientCheckResult:
+        """Compare JAX gradients with central finite differences.
+
+        ``values`` supplies the point to test. Missing free parameters use their
+        configured default values. The finite-difference step for parameter ``i``
+        is ``step_scale * max(abs(x_i), 1)``.
+        """
+
+        if step_scale <= 0:
+            raise ValueError("step_scale must be positive")
+        if relative_floor <= 0:
+            raise ValueError("relative_floor must be positive")
+
+        free, names, fcn, grad = self._backend()
+        supplied = self._validate_start_values(values)
+        point = np.asarray(
+            [float(supplied.get(parameter.name, parameter.value)) for parameter in free],
+            dtype=float,
+        )
+
+        jax_gradient = np.asarray(grad(*point), dtype=float)
+        finite_difference = np.empty_like(point)
+
+        for i, value in enumerate(point):
+            step = step_scale * max(abs(float(value)), 1.0)
+            plus = point.copy()
+            minus = point.copy()
+            plus[i] += step
+            minus[i] -= step
+            finite_difference[i] = (fcn(*plus) - fcn(*minus)) / (2.0 * step)
+
+        absolute_error = np.abs(jax_gradient - finite_difference)
+        scale = np.maximum(
+            np.maximum(np.abs(jax_gradient), np.abs(finite_difference)),
+            relative_floor,
+        )
+        relative_error = absolute_error / scale
+
+        result = GradientCheckResult(
+            names=names,
+            point={name: float(point[i]) for i, name in enumerate(names)},
+            jax_gradient=jax_gradient,
+            finite_difference_gradient=finite_difference,
+            absolute_error=absolute_error,
+            relative_error=relative_error,
+        )
+
+        if print_table:
+            print(
+                f"{'parameter':18s} {'JAX':>14s} {'finite diff':>14s} "
+                f"{'abs err':>12s} {'rel err':>12s}"
+            )
+            for i, name in enumerate(names):
+                print(
+                    f"{name:18s} {jax_gradient[i]:14.6e} "
+                    f"{finite_difference[i]:14.6e} {absolute_error[i]:12.3e} "
+                    f"{relative_error[i]:12.3e}"
+                )
+            print(
+                f"max abs error = {result.max_absolute_error:.3e}\n"
+                f"max rel error = {result.max_relative_error:.3e}"
+            )
+
+        return result
+
     def _run(
         self,
         free,
@@ -174,9 +265,6 @@ class Minimizer:
             minuit.simplex()
         minuit.migrad(ncall=ncall)
         if run_hesse:
-            # Re-run MIGRAD from its own minimum with the careful strategy before
-            # computing covariance. The same ncall limit applies independently
-            # to this refinement pass.
             minuit.migrad(ncall=ncall)
             minuit.hesse()
         return minuit
@@ -188,18 +276,13 @@ class Minimizer:
         simplex: bool = False,
         ncall: int | None = None,
     ):
-        """Run one carefully refined MIGRAD/HESSE minimization.
-
-        ``ncall`` is forwarded to each MIGRAD pass. ``None`` preserves iminuit's
-        default call budget. When an integer is supplied, it is the maximum call
-        budget for each MIGRAD invocation, not a global budget across both passes.
-        """
+        """Run one carefully refined MIGRAD/HESSE minimization."""
 
         ncall = self._validate_ncall(ncall)
         free, names, fcn, grad = self._backend()
         self._log(
             f"single fit with {len(free)} free parameters "
-            f"(simplex={simplex}, ncall={ncall})"
+            f"(simplex={simplex}, ncall={ncall}, tolerance={self.tolerance})"
         )
         result = self._run(
             free,
@@ -260,12 +343,7 @@ class Minimizer:
         include_default: bool = False,
         simplex: bool = False,
     ) -> MultiStartResult:
-        """Run independent starts and select the valid solution with lowest NLL.
-
-        All starts share a single compiled JAX value/gradient backend. Preliminary
-        starts use strategy 1 and no HESSE. The best finite valid minimum is then
-        rerun with strategy 2 and HESSE. No truth information is used.
-        """
+        """Run independent starts and select the valid solution with lowest NLL."""
 
         if n_starts < 1:
             raise ValueError("n_starts must be at least 1")
