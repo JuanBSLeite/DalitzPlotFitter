@@ -53,9 +53,9 @@ class Minimizer:
     """Minimize a mapping-based JAX objective with iminuit.
 
     ``errordef=0.5`` is the Minuit convention for a negative log-likelihood.
-    ``tolerance`` is passed directly to ``Minuit.tol``; the default ``0.1``
-    matches iminuit's standard setting and avoids requesting EDM precision below
-    practical floating-point accuracy.
+    ``tolerance`` is passed directly to ``Minuit.tol``. The default ``1e-4``
+    provides a stricter convergence target than iminuit's generic default while
+    remaining numerically practical for the amplitude-fit likelihoods used here.
 
     Verbosity levels are:
 
@@ -70,7 +70,7 @@ class Minimizer:
         parameters: Sequence[Parameter],
         *,
         errordef: float = 0.5,
-        tolerance: float = 0.1,
+        tolerance: float = 1e-4,
         verbose: int = 0,
     ):
         if errordef <= 0:
