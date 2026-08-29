@@ -185,10 +185,92 @@ The remaining numerical approximation is deterministic quadrature/discretization
 800 x 800.
 ```
 
+## Dynamics-aware adaptive refinement
+
+For very narrow structures, a globally regular equal-area grid may spend too few points in the invariant-mass direction near a kinematic boundary. `AdaptiveDalitzGrid` provides an experimental hierarchical refinement scheme for this situation.
+
+```python
+from dalitzplotfitter import AdaptiveDalitzGrid
+
+adaptive = AdaptiveDalitzGrid(
+    channel.parent_mass,
+    channel.daughter_masses,
+    base_resolution=48,
+    max_depth=5,
+    tolerance=0.08,
+)
+
+result = adaptive.build((dynamics_probe,))
+norm = result.sample
+```
+
+The algorithm remains in the same auxiliary `(u,v)` coordinates as `DalitzGrid`, so the physical Jacobian is still the constant `A_DP`. A leaf cell with auxiliary size `du * dv` represents physical area
+
+```text
+A_cell = A_DP * du * dv.
+```
+
+Because the package estimator is `mean(weights * f)`, a sample with `N_leaf` adaptive cells stores
+
+```text
+weight_i = N_leaf * A_cell_i.
+```
+
+This gives
+
+```text
+mean(weights * f) = sum_i A_cell_i * f_i.
+```
+
+Thus unequal adaptive cells integrate with the same `PhaseSpaceSample` convention already used elsewhere in the package.
+
+### Generic refinement criterion
+
+The adaptive grid does not assume a Breit-Wigner or require parameters named `mass` and `width`. Each probe is simply a callable
+
+```python
+dynamics_probe(data) -> array
+```
+
+on Dalitz points. Complex probes are converted internally to `abs(probe)**2` for the refinement estimator. Each cell is evaluated at its centre and at the four would-be child midpoints. Refinement is triggered by the larger of
+
+```text
+local variation across those samples
+centre estimate versus four-child midpoint estimate
+```
+
+relative to a local scale. Multiple probes may be supplied, and a cell is refined if any probe requires it. This allows the same machinery to be used for narrow resonances, dispersive amplitudes, K-matrix components, splines, tabulated amplitudes, or future user-defined dynamics.
+
+### Discovery-scale limitation
+
+Adaptive refinement cannot discover an arbitrarily narrow feature that falls between all probe points of the initial grid. `base_resolution` therefore remains a physically important control parameter. It defines the scale on which narrow structures are first discovered; recursive refinement controls how accurately they are resolved after discovery.
+
+For this reason, convergence studies should vary both
+
+```text
+base_resolution
+max_depth / tolerance
+```
+
+rather than only the final number of leaf cells.
+
+### Narrow-phi diagnostic
+
+`notebooks/05_adaptive_grid_phi_B2KKK.ipynb` tests the adaptive scheme on
+
+```text
+B+ -> K- K+ K+
+phi(1020) -> K+ K-
+```
+
+where the phi is narrow and close to the `K+K-` threshold. The notebook compares local point density and the convergence of the raw `|F_phi|^2` integral against regular equal-area grids.
+
 ## Current examples
 
 `notebooks/02_fit_dynamic_parameters.ipynb` and `notebooks/03_lineshape_parameter_diagnostics.ipynb` use `DalitzGrid`; because the class itself now implements the equal-area contour mapping, those notebooks automatically use exactly `N**2` physical integration points.
 
+`notebooks/04_normalization_grid_diagnostics.ipynb` visualizes the equal-area mapping and quadrature weights. `notebooks/05_adaptive_grid_phi_B2KKK.ipynb` explores the experimental dynamics-aware adaptive grid.
+
 The pseudo-data candidate pool is still independently generated phase space. Its proposal weights are used only when drawing pseudo-data from that pool. Both the truth intensity used for generation and the fitted likelihood are normalized with the same deterministic Dalitz grid.
 
-The model-owned Monte Carlo normalization remains available and has not been replaced as the `DecayModel` default, so the grid study remains isolated from other changes to the fitting architecture.
+The model-owned Monte Carlo normalization remains available and has not been replaced as the `DecayModel` default, so the grid studies remain isolated from other changes to the fitting architecture.
