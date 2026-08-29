@@ -1,5 +1,6 @@
 """Kinematic utilities for three-body amplitudes."""
 
+from .adaptive_dalitz_grid import AdaptiveDalitzGrid, AdaptiveDalitzGridResult
 from .covariant import (
     CovariantKinematics,
     boost_to_rest_frame,
@@ -13,6 +14,8 @@ from .sample import PhaseSpaceSample
 from .vectors import invariant_mass_squared
 
 __all__ = [
+    "AdaptiveDalitzGrid",
+    "AdaptiveDalitzGridResult",
     "CovariantKinematics",
     "DalitzGrid",
     "PhaseSpaceMC",
