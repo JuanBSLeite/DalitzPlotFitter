@@ -132,6 +132,14 @@ class Minimizer:
                 )
         return values
 
+    @staticmethod
+    def _validate_ncall(ncall: int | None) -> int | None:
+        if ncall is None:
+            return None
+        if isinstance(ncall, bool) or not isinstance(ncall, int) or ncall <= 0:
+            raise ValueError("ncall must be a positive integer or None")
+        return ncall
+
     def _run(
         self,
         free,
@@ -142,9 +150,11 @@ class Minimizer:
         start_values: Mapping[str, float] | None,
         run_hesse: bool,
         simplex: bool,
+        ncall: int | None = None,
     ):
         from iminuit import Minuit
 
+        ncall = self._validate_ncall(ncall)
         supplied = self._validate_start_values(start_values)
         start = tuple(
             float(supplied.get(parameter.name, parameter.value))
@@ -162,12 +172,12 @@ class Minimizer:
                 minuit.errors[parameter.name] = parameter.step
         if simplex:
             minuit.simplex()
-        minuit.migrad()
+        minuit.migrad(ncall=ncall)
         if run_hesse:
             # Re-run MIGRAD from its own minimum with the careful strategy before
-            # computing covariance. This is cheap compared with the multistart
-            # scan and gives correlated amplitude fits a deterministic refinement.
-            minuit.migrad()
+            # computing covariance. The same ncall limit applies independently
+            # to this refinement pass.
+            minuit.migrad(ncall=ncall)
             minuit.hesse()
         return minuit
 
@@ -176,13 +186,20 @@ class Minimizer:
         start_values: Mapping[str, float] | None = None,
         *,
         simplex: bool = False,
+        ncall: int | None = None,
     ):
-        """Run one carefully refined MIGRAD/HESSE minimization."""
+        """Run one carefully refined MIGRAD/HESSE minimization.
 
+        ``ncall`` is forwarded to each MIGRAD pass. ``None`` preserves iminuit's
+        default call budget. When an integer is supplied, it is the maximum call
+        budget for each MIGRAD invocation, not a global budget across both passes.
+        """
+
+        ncall = self._validate_ncall(ncall)
         free, names, fcn, grad = self._backend()
         self._log(
             f"single fit with {len(free)} free parameters "
-            f"(simplex={simplex})"
+            f"(simplex={simplex}, ncall={ncall})"
         )
         result = self._run(
             free,
@@ -192,6 +209,7 @@ class Minimizer:
             start_values=start_values,
             run_hesse=True,
             simplex=simplex,
+            ncall=ncall,
         )
         self._log(f"single fit finished: {self._summary(result)}")
         return result
