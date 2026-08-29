@@ -17,6 +17,8 @@ from .dynamics import (
 )
 from .fit import Minimizer, MultiStartResult, Parameter, ParameterKind
 from .kinematics import (
+    AdaptiveDalitzGrid,
+    AdaptiveDalitzGridResult,
     CovariantKinematics,
     DalitzGrid,
     PhaseSpaceMC,
@@ -29,6 +31,8 @@ from .kinematics import (
 from .sampling import weighted_resample
 
 __all__ = [
+    "AdaptiveDalitzGrid",
+    "AdaptiveDalitzGridResult",
     "AmplitudeComponent",
     "CoherentAmplitudeModel",
     "ConstantAmplitude",
