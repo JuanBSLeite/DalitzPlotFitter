@@ -19,6 +19,7 @@ from .fit import Minimizer, MultiStartResult, Parameter, ParameterKind
 from .kinematics import (
     CovariantKinematics,
     DalitzGrid,
+    DalitzMC,
     PhaseSpaceMC,
     PhaseSpaceSample,
     boost_to_rest_frame,
@@ -35,6 +36,7 @@ __all__ = [
     "CovariantAngular",
     "CovariantKinematics",
     "DalitzGrid",
+    "DalitzMC",
     "DecayChannel",
     "DecayModel",
     "Minimizer",
