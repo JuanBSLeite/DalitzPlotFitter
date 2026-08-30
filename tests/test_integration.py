@@ -1,21 +1,21 @@
 import jax.numpy as jnp
 
 from dalitzplotfitter.integration import (
-    MonteCarloIntegrator,
+    GridIntegrator,
     matrix_normalization,
     normalization_matrix,
 )
 from dalitzplotfitter.kinematics import PhaseSpaceSample
 
 
-def test_monte_carlo_integrator_is_deterministic_for_fixed_sample():
+def test_grid_integrator_is_deterministic_for_fixed_sample():
     sample = PhaseSpaceSample(
         s12=jnp.linspace(0.1, 1.0, 4096),
         s13=jnp.linspace(0.2, 1.1, 4096),
         s23=jnp.linspace(0.3, 1.2, 4096),
-        weights=jnp.linspace(0.5, 1.5, 4096),
+        weights=jnp.full((4096,), 1.25),
     )
-    integrator = MonteCarloIntegrator(sample)
+    integrator = GridIntegrator(sample)
 
     def function(data):
         return 1.0 + 0.2 * data["s12"]
