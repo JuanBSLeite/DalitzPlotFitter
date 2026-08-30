@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from dalitzplotfitter import (
+    DalitzGrid,
     DecayChannel,
     DecayModel,
     Minimizer,
@@ -62,7 +63,16 @@ def _dynamic_rho_model(*, coefficient_free: bool = True):
             ),
             NonResonant(RealImag(1.0, 0.0)),
         ],
+        normalization_resolution=64,
     )
+
+
+def _grid(model, resolution):
+    return DalitzGrid(
+        model.channel.parent_mass,
+        model.channel.daughter_masses,
+        resolution=resolution,
+    ).sample()
 
 
 def _nll_from_cache(cache, n_data):
@@ -78,7 +88,7 @@ def test_dynamic_cache_gradient_matches_finite_difference():
 
     model = _dynamic_rho_model(coefficient_free=True)
     data = model.generate_phase_space(192, seed=101)
-    norm = model.generate_phase_space(2048, seed=102)
+    norm = _grid(model, 48)
     cache = model.prepare_cache(data, norm)
     nll = _nll_from_cache(cache, data.size)
 
@@ -108,16 +118,10 @@ def test_dynamic_cache_gradient_matches_finite_difference():
 
 
 def test_asimov_dynamic_truth_is_stationary_with_cache():
-    """With identical integration support, the truth must be a stationary point.
-
-    The weighted phase-space sample defines a discrete Asimov distribution. Using
-    the same points for the model normalization removes pseudo-data fluctuations
-    and Monte-Carlo integration mismatch. A non-zero gradient here would expose a
-    bug in the dynamic-parameter/cache path.
-    """
+    """With identical deterministic support, truth must be stationary."""
 
     model = _dynamic_rho_model(coefficient_free=True)
-    sample = model.generate_phase_space(4096, seed=201)
+    sample = _grid(model, 64)
     cache = model.prepare_cache(sample, sample)
     truth = {
         "rho.mass": 0.775,
@@ -147,7 +151,7 @@ def test_asimov_mass_width_fit_recovers_truth_from_displaced_starts():
     """Mass and width must be recoverable when the resonance is identifiable."""
 
     model = _dynamic_rho_model(coefficient_free=False)
-    sample = model.generate_phase_space(8192, seed=301)
+    sample = _grid(model, 90)
     cache = model.prepare_cache(sample, sample)
     truth = {"rho.mass": 0.775, "rho.width": 0.149}
 
