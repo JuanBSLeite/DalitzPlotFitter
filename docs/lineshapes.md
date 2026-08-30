@@ -140,4 +140,4 @@ All amplitude-component and coherent-PDF normalization uses the deterministic eq
 
 ## Reference
 
-J. Back et al., *Laura++: a Dalitz plot fitter*, Computer Physics Communications 231 (2018) 198-242, arXiv:1711.09854. The GS and Flatte equations and the Flatte preset systems are taken from Appendix A. citeturn338539search0turn658613search26
+J. Back et al., *Laura++: a Dalitz plot fitter*, Computer Physics Communications 231 (2018) 198-242, arXiv:1711.09854. The GS and Flatte equations and the Flatte preset systems are taken from Appendix A.
