@@ -44,134 +44,190 @@ def _invariant_key(first_key: str, second_key: str) -> str:
             frozenset((1, 2)): "s23",
         }[pair]
     except KeyError as exc:
-        raise ValueError("invalid particle-key pair") from exc
+        raise ValueError("could not resolve invariant-mass key") from exc
 
 
-def _pair_mass(data: Mapping[str, Array], first_key: str, second_key: str) -> Array:
-    key = _invariant_key(first_key, second_key)
-    if key in data:
-        return jnp.sqrt(jnp.maximum(jnp.asarray(data[key]), 0.0))
-    first = jnp.asarray(data[first_key])
-    second = jnp.asarray(data[second_key])
-    pair = first + second
-    mass2 = pair[..., 0] ** 2 - jnp.sum(pair[..., 1:] ** 2, axis=-1)
-    return jnp.sqrt(jnp.maximum(mass2, 0.0))
+def _kinematics_prefix(
+    daughter_key: str,
+    partner_key: str,
+    bachelor_key: str,
+) -> str:
+    return f"__kin_{daughter_key}_{partner_key}_{bachelor_key}"
 
 
-def _kinematics(data, daughter_key, partner_key, bachelor_key, context):
-    if all(key in data for key in (daughter_key, partner_key, bachelor_key)):
-        return covariant_kinematics(
-            data[daughter_key],
-            data[partner_key],
-            data[bachelor_key],
-        )
-    return covariant_kinematics_from_invariants(
-        data[_invariant_key(daughter_key, partner_key)],
-        data[_invariant_key(daughter_key, bachelor_key)],
-        data[_invariant_key(partner_key, bachelor_key)],
-        daughter_mass=context.daughter_masses[0],
-        partner_mass=context.daughter_masses[1],
-        bachelor_mass=context.bachelor_mass,
+def _identical_permutations(
+    final_state: tuple[str, str, str],
+) -> tuple[tuple[int, int, int], ...]:
+    return tuple(
+        perm
+        for perm in permutations(range(3))
+        if all(final_state[i] == final_state[perm[i]] for i in range(3))
     )
+
+
+def _physical_pairings(
+    final_state: tuple[str, str, str],
+    role_indices: tuple[int, int, int],
+    spin: int,
+) -> tuple[tuple[str, str, str], ...]:
+    daughter_index, partner_index, _ = role_indices
+    identical_pair_daughters = (
+        final_state[daughter_index] == final_state[partner_index]
+    )
+    if identical_pair_daughters and spin % 2:
+        raise ValueError(
+            "an odd-spin resonance cannot decay to two identical spinless bosons"
+        )
+
+    unique: dict[tuple[int, int, int], tuple[str, str, str]] = {}
+    for perm in _identical_permutations(final_state):
+        mapped = tuple(perm[index] for index in role_indices)
+        if identical_pair_daughters:
+            first, second, bachelor = mapped
+            canonical = (*sorted((first, second)), bachelor)
+        else:
+            canonical = mapped
+        unique.setdefault(
+            canonical,
+            tuple(f"p{index + 1}" for index in canonical),
+        )
+    return tuple(unique.values())
 
 
 @dataclass(frozen=True)
 class ResonanceAmplitude:
-    """One resonance amplitude including lineshape, barriers and angular term."""
+    """Complete resonance amplitude assembled from interchangeable plugins."""
 
     context: ResonanceContext
-    daughter_key: str
-    partner_key: str
-    bachelor_key: str
-    final_state: tuple[int, int, int]
+    daughter_key: str = "p1"
+    partner_key: str = "p2"
+    bachelor_key: str = "p3"
+    final_state: tuple[str, str, str] | None = None
     lineshape: object = RelativisticBreitWigner()
     angular: object = CovariantAngular()
 
-    @property
-    def parameters(self):
-        from dalitzplotfitter.fit import Parameter
-
-        found = {}
-        for value in (
-            self.context.pole_mass,
-            self.context.pole_width,
-            self.context.resonance_radius,
-            self.context.parent_radius,
-            self.lineshape,
-            self.angular,
-        ):
-            if isinstance(value, Parameter):
-                found[value.name] = value
-            parameters = getattr(value, "parameters", None)
-            if parameters is not None and not callable(parameters):
-                try:
-                    for parameter in parameters.values() if isinstance(parameters, dict) else parameters:
-                        if isinstance(parameter, Parameter):
-                            found[parameter.name] = parameter
-                except TypeError:
-                    pass
-        return found
-
-    def _single(self, data, context, daughter_key, partner_key, bachelor_key):
-        kin = _kinematics(data, daughter_key, partner_key, bachelor_key, context)
-        mass = _pair_mass(data, daughter_key, partner_key)
-        m1, m2 = context.daughter_masses
-        q = breakup_momentum(mass, m1, m2)
-        q0 = breakup_momentum(effective_pole_mass(context), m1, m2)
-        p = bachelor_momentum_resonance_frame(
-            context.parent_mass, mass, context.bachelor_mass
-        )
-        p0 = bachelor_momentum_resonance_frame(
-            context.parent_mass, effective_pole_mass(context), context.bachelor_mass
-        )
-        resonance_barrier = blatt_weisskopf_from_momenta(
-            q, q0, context.spin, context.resonance_radius
-        )
-        parent_barrier = blatt_weisskopf_from_momenta(
-            p, p0, context.spin, context.parent_radius
-        )
-        return (
-            self.lineshape(mass, context)
-            * resonance_barrier
-            * parent_barrier
-            * self.angular(kin, context.spin)
+    def _pairings(self) -> tuple[tuple[str, str, str], ...]:
+        base_keys = (self.daughter_key, self.partner_key, self.bachelor_key)
+        if self.final_state is None:
+            return (base_keys,)
+        if len(self.final_state) != 3:
+            raise ValueError("final_state must contain exactly three particle labels")
+        role_indices = tuple(_key_index(key) for key in base_keys)
+        return _physical_pairings(
+            self.final_state,
+            role_indices,
+            int(self.context.spin),
         )
 
-    def __call__(self, data: Mapping[str, Array], parameters=None):
-        context = resolve_value(self.context, parameters)
-        lineshape = resolve_value(self.lineshape, parameters)
-        angular = resolve_value(self.angular, parameters)
-        base = ResonanceAmplitude(
-            context=context,
-            daughter_key=self.daughter_key,
-            partner_key=self.partner_key,
-            bachelor_key=self.bachelor_key,
-            final_state=self.final_state,
-            lineshape=lineshape,
-            angular=angular,
+    def _kinematics(
+        self,
+        data: Mapping[str, Array],
+        daughter_key: str,
+        partner_key: str,
+        bachelor_key: str,
+        context: ResonanceContext,
+    ) -> CovariantKinematics:
+        prefix = _kinematics_prefix(daughter_key, partner_key, bachelor_key)
+        prepared_keys = tuple(
+            f"{prefix}_{name}"
+            for name in ("mass", "pstar", "p", "q", "costheta")
         )
-        total = base._single(
+        if all(key in data for key in prepared_keys):
+            return CovariantKinematics(
+                resonance_mass=data[prepared_keys[0]],
+                p_star=data[prepared_keys[1]],
+                p=data[prepared_keys[2]],
+                q=data[prepared_keys[3]],
+                cos_theta=data[prepared_keys[4]],
+            )
+
+        resonance_key = _invariant_key(daughter_key, partner_key)
+        daughter_bachelor_key = _invariant_key(daughter_key, bachelor_key)
+        if resonance_key in data and daughter_bachelor_key in data:
+            return covariant_kinematics_from_invariants(
+                data[resonance_key],
+                data[daughter_bachelor_key],
+                parent_mass=context.parent_mass,
+                daughter_mass=context.daughter_masses[0],
+                partner_mass=context.daughter_masses[1],
+                bachelor_mass=context.bachelor_mass,
+            )
+        return covariant_kinematics(
+            data[daughter_key], data[partner_key], data[bachelor_key]
+        )
+
+    def prepare_data(self, data: Mapping[str, Array]) -> dict[str, Array]:
+        """Attach parameter-independent kinematics for fast repeated evaluation."""
+
+        prepared = dict(data)
+        context = self.context.resolve(None)
+        for daughter_key, partner_key, bachelor_key in self._pairings():
+            prefix = _kinematics_prefix(daughter_key, partner_key, bachelor_key)
+            if f"{prefix}_mass" in prepared:
+                continue
+            kin = self._kinematics(
+                prepared,
+                daughter_key,
+                partner_key,
+                bachelor_key,
+                context,
+            )
+            prepared.update(
+                {
+                    f"{prefix}_mass": kin.resonance_mass,
+                    f"{prefix}_pstar": kin.p_star,
+                    f"{prefix}_p": kin.p,
+                    f"{prefix}_q": kin.q,
+                    f"{prefix}_costheta": kin.cos_theta,
+                }
+            )
+        return prepared
+
+    def _evaluate_pairing(
+        self,
+        data: Mapping[str, Array],
+        daughter_key: str,
+        partner_key: str,
+        bachelor_key: str,
+        parameters: Mapping[str, object] | None,
+    ) -> Array:
+        context = self.context.resolve(parameters)
+        kin = self._kinematics(
             data,
+            daughter_key,
+            partner_key,
+            bachelor_key,
             context,
-            self.daughter_key,
-            self.partner_key,
-            self.bachelor_key,
         )
+        lineshape = resolve_value(self.lineshape, parameters)
+        angular_model = resolve_value(self.angular, parameters)
+        l = int(context.spin)
+        m1, m2 = context.daughter_masses
 
-        key_order = (self.daughter_key, self.partner_key, self.bachelor_key)
-        id_order = tuple(self.final_state[_key_index(key)] for key in key_order)
-        seen = {key_order}
-        for perm in permutations(range(3)):
-            permuted_ids = tuple(self.final_state[index] for index in perm)
-            if permuted_ids != self.final_state:
-                continue
-            mapping = {"p1": f"p{perm[0] + 1}", "p2": f"p{perm[1] + 1}", "p3": f"p{perm[2] + 1}"}
-            permuted = tuple(mapping[key] for key in key_order)
-            if permuted in seen:
-                continue
-            permuted_id_order = tuple(self.final_state[_key_index(key)] for key in permuted)
-            if permuted_id_order != id_order:
-                continue
-            seen.add(permuted)
-            total = total + base._single(data, context, *permuted)
-        return total
+        pole_mass_for_momenta = effective_pole_mass(context)
+        q0 = breakup_momentum(pole_mass_for_momenta, m1, m2)
+        p0 = bachelor_momentum_resonance_frame(
+            context.parent_mass,
+            pole_mass_for_momenta,
+            context.bachelor_mass,
+        )
+        x_res = blatt_weisskopf_from_momenta(
+            kin.q, q0, l, context.resonance_radius
+        )
+        x_parent = blatt_weisskopf_from_momenta(
+            kin.p, p0, l, context.parent_radius
+        )
+        resonance = lineshape(kin.resonance_mass, context)
+        angular = angular_model(kin, context)
+        return resonance * x_parent * x_res * angular
+
+    def __call__(
+        self,
+        data: Mapping[str, Array],
+        parameters: Mapping[str, object] | None = None,
+    ) -> Array:
+        values = [
+            self._evaluate_pairing(data, *keys, parameters)
+            for keys in self._pairings()
+        ]
+        return sum(values, start=jnp.zeros_like(values[0]))
