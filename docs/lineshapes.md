@@ -87,14 +87,20 @@ The scattering constants are fixed by default while the process-dependent `betas
 
 ## QMI / QMIPWA S-wave
 
-`QMI` implements a quasi-model-independent scalar amplitude specified directly at invariant-mass knots. The default convention follows the LHCb `D+ -> pi- pi+ pi+` QMIPWA: magnitude and phase are free at each knot and are linearly interpolated separately,
+`QMI` implements a quasi-model-independent scalar amplitude specified at fixed two-body mass knots. The convention follows the LHCb `D_s+ -> pi- pi+ pi+` QMIPWA: magnitude and phase are specified at each knot and are linearly interpolated separately as functions of
 
 ```text
-A_S(m_k) = a_k exp(i delta_k)
-A_S(m)   = a(m) exp(i delta(m)).
+s = m(pi pi)^2.
 ```
 
-`knots` are fixed mass positions in GeV. Entries of `magnitudes` and `phases` may be numerical constants or fit `Parameter` objects. Phases are expressed in radians and should be supplied as a continuous/unwrapped sequence; the interpolation does not impose a `[-pi, pi)` branch cut.
+Thus
+
+```text
+A_S(s_k) = a_k exp(i delta_k)
+A_S(s)   = a(s) exp(i delta(s)).
+```
+
+The public `knots` argument is still given as masses in GeV, matching the published tables; internally `QMI` squares the masses and performs the interpolation in `s`. Entries of `magnitudes` and `phases` may be numerical constants or fit `Parameter` objects. Phases are expressed in radians and should be supplied as a continuous/unwrapped sequence; the interpolation does not impose a `[-pi, pi)` branch cut.
 
 Example:
 
@@ -118,7 +124,7 @@ Resonance(
 
 For a pure QMI component the common `Resonance.mass` and `width` fields are placeholders; the shape is entirely defined by the knot values. At least one magnitude/phase convention must be fixed in a fit to remove the overall scale/phase ambiguity of the QMI amplitude. Magnitude parameters should normally be constrained to non-negative values.
 
-The published LHCb `D+ -> pi- pi+ pi+` QMIPWA uses 50 non-uniform mass knots; `QMI` itself is generic and supports any strictly increasing knot sequence with at least two points.
+`notebooks/10_qmi_validation.ipynb` contains all 50 central values from Table 9 of the published LHCb `D_s+ -> pi- pi+ pi+` analysis. The phases are stored exactly as published in degrees and are unwrapped only before conversion to the continuous interpolation used by `QMI`. The same notebook builds the corresponding 98-parameter fit declaration by fixing one reference magnitude and phase.
 
 ## Component composition and normalization
 
@@ -134,7 +140,7 @@ Identical final-state particles are symmetrized automatically. All amplitude-com
 
 - `notebooks/08_lineshape_validation_gs_flatte.ipynb`: Flatte, Gounaris-Sakurai, Pole and LASS.
 - `notebooks/09_kmatrix_validation.ipynb`: K-matrix, coupled-channel unitarity, Dalitz density and toy MC.
-- `notebooks/10_qmi_validation.ipynb`: QMI interpolation, Argand trajectory, toy MC and a single randomized knot-parameter closure fit.
+- `notebooks/10_qmi_validation.ipynb`: published 50-point `D_s+ -> pi- pi+ pi+` QMI S-wave, interpolation in `s`, Argand trajectory, deterministic Dalitz density, 100k-event toy MC and the full 98-parameter fit declaration.
 
 ## References
 
@@ -142,4 +148,4 @@ J. Back et al., *Laura++: a Dalitz plot fitter*, Computer Physics Communications
 
 V. V. Anisovich and A. V. Sarantsev, *K-matrix analysis of the (IJ^PC = 00++)-wave in the mass region below 1900 MeV*, Eur. Phys. J. A 16 (2003) 229.
 
-LHCb Collaboration, *Amplitude analysis of the D+ -> pi- pi+ pi+ decay and measurement of the pi- pi+ S-wave amplitude*, JHEP 06 (2023) 044.
+LHCb Collaboration, *Amplitude analysis of the D_s+ -> pi- pi+ pi+ decay*, arXiv:2209.09840.
