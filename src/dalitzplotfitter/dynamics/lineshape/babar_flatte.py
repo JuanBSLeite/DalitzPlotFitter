@@ -1,4 +1,4 @@
-"""BaBar mass-coupling Flatte convention used for f0(980)."""
+"""BaBar Flatte convention used for f0(980)."""
 
 from __future__ import annotations
 
@@ -11,37 +11,46 @@ from ..context import ResonanceContext
 
 @dataclass(frozen=True)
 class BaBarFlatte:
-    """Flatte form used in BaBar B± -> K± pi∓ pi± (hep-ex/0507004).
+    """Flatte form used in BaBar B± -> K± pi∓ pi± (arXiv:0803.4451).
 
-    The paper defines
+    The paper uses
 
-    Gamma_pi(m) = g_pi * sqrt(m^2 - 4 m_pi^2)
-    Gamma_K(m)  = g_K  * sqrt(m^2 - 4 m_K^2)
+    ``Gamma_pipi = g_pi * [1/3 rho(pi0 pi0) + 2/3 rho(pi+ pi-)]``
+    ``Gamma_KK   = g_K  * [1/2 rho(K+ K-) + 1/2 rho(K0 K0)]``
 
-    with analytic continuation below threshold, and uses the usual
-    ``1 / (m0^2 - m^2 - i m0 Gamma(m))`` denominator.
+    with ``rho(h h) = sqrt(1 - 4 m_h^2 / m^2)`` analytically continued below
+    threshold. The defaults are the BES couplings used by BaBar,
+    ``g_pi = 0.165 GeV`` and ``g_K = 4.21*g_pi``.
     """
 
-    g_pi: float = 0.11
-    g_k: float = 0.36
-    pion_mass: float = 0.13957039
-    kaon_mass: float = 0.493677
+    g_pi: float = 0.165
+    g_k: float = 4.21 * 0.165
+    mpi0: float = 0.1349768
+    mpip: float = 0.13957039
+    mkp: float = 0.493677
+    mk0: float = 0.497611
 
     def __post_init__(self) -> None:
         if self.g_pi < 0.0 or self.g_k < 0.0:
             raise ValueError("BaBarFlatte couplings must be non-negative")
-        if self.pion_mass <= 0.0 or self.kaon_mass <= 0.0:
+        if min(self.mpi0, self.mpip, self.mkp, self.mk0) <= 0.0:
             raise ValueError("BaBarFlatte daughter masses must be positive")
 
     @staticmethod
-    def _threshold_root(mass, daughter_mass):
+    def _rho(mass, daughter_mass):
         m = jnp.asarray(mass)
-        argument = (m**2 - 4.0 * daughter_mass**2).astype(jnp.complex128)
+        argument = (1.0 - 4.0 * daughter_mass**2 / m**2).astype(jnp.complex128)
         return jnp.sqrt(argument)
 
     def widths(self, mass):
-        gamma_pi = self.g_pi * self._threshold_root(mass, self.pion_mass)
-        gamma_k = self.g_k * self._threshold_root(mass, self.kaon_mass)
+        gamma_pi = self.g_pi * (
+            (1.0 / 3.0) * self._rho(mass, self.mpi0)
+            + (2.0 / 3.0) * self._rho(mass, self.mpip)
+        )
+        gamma_k = self.g_k * (
+            0.5 * self._rho(mass, self.mkp)
+            + 0.5 * self._rho(mass, self.mk0)
+        )
         return gamma_pi, gamma_k
 
     def __call__(self, mass, context: ResonanceContext):
