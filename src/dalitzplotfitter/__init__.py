@@ -21,6 +21,7 @@ from .dynamics import (
     RelativisticBreitWigner,
     ResonanceAmplitude,
     ResonanceContext,
+    physical_bin_mask,
 )
 from .fit import Minimizer, MultiStartResult, Parameter, ParameterKind
 from .kinematics import (
@@ -70,5 +71,6 @@ __all__ = [
     "covariant_kinematics_from_invariants",
     "dalitz_s13_limits",
     "enable_x64",
+    "physical_bin_mask",
     "weighted_resample",
 ]
