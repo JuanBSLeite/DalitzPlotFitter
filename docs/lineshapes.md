@@ -12,15 +12,10 @@ Flatte(...)
 LASS(...)
 KMatrix(...)
 QMI(...)
+QMI2D(...)
 ```
 
-A scalar dynamics plugin is any callable with the interface
-
-```python
-lineshape(mass, context)
-```
-
-and can be supplied through `Resonance(..., lineshape=...)` without changing the model or cache architecture.
+One-dimensional isobar dynamics use the ordinary `lineshape(mass, context)` interface through `Resonance`. A genuinely two-dimensional Dalitz amplitude such as `QMI2D` is attached through `DalitzAmplitude` because it depends simultaneously on two invariant-mass-squared coordinates.
 
 ## Relativistic Breit-Wigner
 
@@ -120,37 +115,75 @@ qmi = QMI(
     phases=(d0, d1, d2, d3, d4),
     interpolation="cubic",
 )
+```
 
-Resonance(
-    "pipi_S_qmi",
-    pair=(0, 1),
-    coefficient=RealImag(1.0, 0.0),
-    mass=1.0,
-    width=0.0,
-    spin=0,
-    lineshape=qmi,
+`notebooks/10_qmi_validation.ipynb` contains all 50 central values from Table 9 of the published LHCb `D_s+ -> pi- pi+ pi+` analysis.
+
+## QMI2D Dalitz amplitude
+
+`QMI2D` is the direct two-dimensional extension of the QMI idea. Every Dalitz cell carries one complex amplitude
+
+```text
+A_ij = a_ij exp(i phi_ij).
+```
+
+The axes are given directly in Dalitz invariants (`s12` and `s13`) through bin edges. Magnitudes and phases may contain ordinary numbers or dynamical `Parameter` objects, so every cell can be floated in a fit.
+
+Three evaluation modes are available:
+
+```python
+QMI2D(..., interpolation="none")
+QMI2D(..., interpolation="linear")
+QMI2D(..., interpolation="cubic")
+```
+
+- `none` is piecewise constant: every event receives exactly the complex number assigned to its bin.
+- `linear` treats the cell values as located at bin centers and interpolates magnitude and phase bilinearly.
+- `cubic` performs a local tensor-product bicubic Catmull-Rom interpolation, again separately for magnitude and phase.
+
+All three implementations are JAX-native and therefore compatible with automatic differentiation and minimization.
+
+For channels with two identical particles, `folded=True` evaluates the field at
+
+```text
+s_low  = min(s12, s13)
+s_high = max(s12, s13)
+```
+
+which imposes the exchange symmetry directly on the two-dimensional field. This is the natural default for studies of `D_s+ -> pi- pi+ pi+` when `s12` and `s13` correspond to the two `pi+ pi-` combinations.
+
+A QMI2D component is attached directly to the coherent amplitude model:
+
+```python
+field = QMI2D(
+    s12_edges=s_edges,
+    s13_edges=s_edges,
+    magnitudes=magnitudes,
+    phases=phases,
+    interpolation="cubic",
+    folded=True,
+)
+
+model = DecayModel(
+    channel,
+    [DalitzAmplitude("qmi2d", field, RealImag(1.0, 0.0))],
 )
 ```
 
-For a pure QMI component the common `Resonance.mass` and `width` fields are placeholders; the shape is entirely defined by the knot values. At least one magnitude/phase convention must be fixed in a fit to remove the overall scale/phase ambiguity of the QMI amplitude. Magnitude parameters should normally be constrained to non-negative values.
-
-`notebooks/10_qmi_validation.ipynb` contains all 50 central values from Table 9 of the published LHCb `D_s+ -> pi- pi+ pi+` analysis. The phases are stored exactly as published in degrees and are unwrapped only before conversion to the continuous interpolation used by `QMI`. The same notebook builds the corresponding 98-parameter fit declaration by fixing one reference magnitude and phase.
+The global complex normalization/phase ambiguity remains present, just as for a 1D QMI, and a fit must fix an appropriate reference convention. A completely free two-dimensional field can also develop poorly constrained or null directions; closure tests and Hessian/correlation diagnostics are therefore essential before using it on data.
 
 ## Component composition and normalization
 
-`ResonanceAmplitude` multiplies
+`ResonanceAmplitude` multiplies one-dimensional isobar lineshapes by their barrier and angular terms. `DalitzAmplitude` bypasses the isobar construction and evaluates a full Dalitz-dependent complex function directly.
 
-```text
-lineshape * parent Blatt-Weisskopf * resonance Blatt-Weisskopf * angular factor.
-```
-
-Identical final-state particles are symmetrized automatically. All amplitude-component and coherent-PDF normalization uses deterministic `DalitzGrid`; `PhaseSpaceMC` is retained only for toy/proposal generation.
+All amplitude-component and coherent-PDF normalization uses deterministic `DalitzGrid`; `PhaseSpaceMC` is retained only for toy/proposal generation.
 
 ## Validation notebooks
 
 - `notebooks/08_lineshape_validation_gs_flatte.ipynb`: Flatte, Gounaris-Sakurai, Pole and LASS.
 - `notebooks/09_kmatrix_validation.ipynb`: K-matrix, coupled-channel unitarity, Dalitz density and toy MC.
-- `notebooks/10_qmi_validation.ipynb`: published 50-point `D_s+ -> pi- pi+ pi+` QMI S-wave, interpolation in `s`, Argand trajectory, deterministic Dalitz density, 100k-event toy MC and the full 98-parameter fit declaration.
+- `notebooks/10_qmi_validation.ipynb`: published 50-point `D_s+ -> pi- pi+ pi+` QMI S-wave.
+- `notebooks/11_qmi2d_validation.ipynb`: 2D complex Dalitz field with no, linear and cubic interpolation.
 
 ## References
 
