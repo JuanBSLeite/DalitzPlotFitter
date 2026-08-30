@@ -3,6 +3,8 @@
 from .angular import CovariantAngular, covariant_spin_factor
 from .context import ResonanceContext
 from .lineshapes import (
+    Flatte,
+    GounarisSakurai,
     RelativisticBreitWigner,
     bachelor_momentum_resonance_frame,
     blatt_weisskopf_from_momenta,
@@ -15,6 +17,8 @@ from .resonance import ResonanceAmplitude
 
 __all__ = [
     "CovariantAngular",
+    "Flatte",
+    "GounarisSakurai",
     "RelativisticBreitWigner",
     "ResonanceAmplitude",
     "ResonanceContext",
