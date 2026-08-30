@@ -27,8 +27,7 @@ def _model(channel, components, **kwargs):
     return DecayModel(
         channel,
         components,
-        normalization_size=2048,
-        normalization_seed=2027,
+        normalization_resolution=45,
         **kwargs,
     )
 
@@ -72,22 +71,23 @@ def test_unphysical_decay_channel_is_rejected():
         DecayChannel("pi0", ("pi0", "pi0", "pi0"))
 
 
-def test_decay_model_defaults_to_component_normalization_and_one_million_events():
+def test_decay_model_defaults_to_component_normalization_and_million_point_grid():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     model = DecayModel(channel, [NonResonant(RealImag(1.0, 0.0))])
     assert model.normalize_components is True
-    assert model.normalization_size == 1_000_000
+    assert model.normalization_resolution == 1000
     assert model._normalization_sample is None
 
 
-def test_internal_normalization_sample_is_lazy_and_reused():
+def test_internal_normalization_grid_is_lazy_and_reused():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     model = _model(channel, [NonResonant(RealImag(1.0, 0.0))])
     assert model._normalization_sample is None
     first = model.normalization_sample
     second = model.normalization_sample
     assert first is second
-    assert first.size == 2048
+    assert first.size == 45**2
+    assert bool(jnp.all(first.weights == first.weights[0]))
 
 
 def test_component_normalization_is_unit_diagonal_by_default():
@@ -305,7 +305,7 @@ def test_prepared_cache_matches_direct_model_for_floating_dynamics():
         assert jnp.allclose(cached_norm, direct_norm, rtol=1e-11, atol=1e-12)
 
 
-def test_decay_model_builds_normalized_pdf_with_internal_sample():
+def test_decay_model_builds_normalized_pdf_with_internal_grid():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     model = _model(channel, [NonResonant(RealImag(1.0, 0.0))])
     pdf = model.pdf()
