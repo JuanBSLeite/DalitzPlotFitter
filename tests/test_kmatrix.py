@@ -74,6 +74,21 @@ def test_kmatrix_is_stable_exactly_at_bare_poles():
     assert bool(jnp.all(jnp.isfinite(jnp.imag(amplitude))))
 
 
+def test_kmatrix_five_channel_s_matrix_is_unitary_when_all_channels_open():
+    model = KMatrix()
+    threshold = 0.547862 + 0.95778
+    masses = jnp.linspace(threshold + 1e-4, 1.72, 150)
+    s_matrix = model.s_matrix(masses)
+    sdag_s = jnp.einsum(
+        "...ji,...jk->...ik",
+        jnp.conj(s_matrix),
+        s_matrix,
+    )
+    identity = jnp.eye(5, dtype=jnp.complex128)
+    residual = sdag_s - identity
+    assert float(jnp.max(jnp.abs(residual))) < 5e-9
+
+
 def test_kmatrix_returns_pipi_channel_and_rejects_non_scalar_context():
     model = KMatrix()
     context = _context()
