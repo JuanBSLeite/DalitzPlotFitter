@@ -28,7 +28,6 @@ _S0_SCATT = -3.92637
 _S0_PROD = -3.0
 _S_A = 1.0
 _S_A0 = -0.15
-_M0_SQ = 1.0
 
 _MPI = 0.13957039
 _MK = 0.493677
@@ -44,7 +43,7 @@ def _complex_value(value):
 
 
 def _two_body_rho(s, mass1, mass2):
-    """Two-body phase space with analytic continuation below threshold."""
+    """Laura++ two-body phase-space factor with continuation below threshold."""
 
     s = jnp.asarray(s)
     threshold2 = (mass1 + mass2) ** 2
@@ -88,8 +87,20 @@ def _phase_space_vector(s):
     )
 
 
+def _slowly_varying_factor(s, s0):
+    """Laura++ factor (1 - s0/s) / (s - s0)."""
+
+    return (1.0 - s0 / s) / (s - s0)
+
+
+def _adler_factor(s):
+    """Laura++ Adler-zero factor (1-sA0/s)(s-sA*m_pi^2/2)."""
+
+    return (1.0 - _S_A0 / s) * (s - 0.5 * _S_A * _MPI**2)
+
+
 def _scattering_matrix(s):
-    """Five-pole Anisovich-Sarantsev K(s) with Laura++ Table A.4 constants."""
+    """Five-pole Anisovich-Sarantsev K(s) with Laura++ constants."""
 
     s = jnp.asarray(s)
     denominators = _POLE_MASSES**2 - s[..., None]
@@ -103,14 +114,8 @@ def _scattering_matrix(s):
     f_scatt = jnp.zeros((5, 5), dtype=s.dtype)
     f_scatt = f_scatt.at[0, :].set(_F_SCATT_ROW)
     f_scatt = f_scatt.at[:, 0].set(_F_SCATT_ROW)
-    smooth = f_scatt * ((_M0_SQ - _S0_SCATT) / (s[..., None, None] - _S0_SCATT))
-
-    adler = (
-        (_M0_SQ - _S_A0)
-        / (s - _S_A0)
-        * (s - 0.5 * _S_A * _MPI**2)
-    )
-    return (pole_terms + smooth) * adler[..., None, None]
+    smooth = f_scatt * _slowly_varying_factor(s[..., None, None], _S0_SCATT)
+    return (pole_terms + smooth) * _adler_factor(s)[..., None, None]
 
 
 @dataclass(frozen=True)
@@ -118,7 +123,7 @@ class KMatrix:
     """Laura++ five-pole/five-channel pi-pi S-wave production amplitude.
 
     The scattering matrix is fixed to the Anisovich-Sarantsev parameters used by
-    Laura++.  Process-dependent production parameters are the five complex pole
+    Laura++. Process-dependent production parameters are the five complex pole
     coefficients ``betas`` and five complex slowly-varying production terms
     ``f_prod``. They may be numerical complex values or ``RealImag`` objects
     containing fit ``Parameter`` instances.
@@ -169,7 +174,7 @@ class KMatrix:
             _POLE_COUPLINGS,
             1.0 / pole_denominators,
         )
-        smooth = f_prod * ((_M0_SQ - s0_prod) / (s[..., None] - s0_prod))
+        smooth = f_prod * _slowly_varying_factor(s[..., None], s0_prod)
         return pole + smooth
 
     def amplitude_vector(self, mass):
@@ -178,7 +183,7 @@ class KMatrix:
         rho = self.phase_space(mass)
         production = self.production_vector(mass)
 
-        # K rho means multiplication of every K column by rho_j.
+        # K rho multiplies each K column j by rho_j.
         kernel = jnp.eye(5, dtype=jnp.complex128) - 1j * k_matrix * rho[..., None, :]
         return jnp.linalg.solve(kernel, production[..., :, None])[..., 0]
 
