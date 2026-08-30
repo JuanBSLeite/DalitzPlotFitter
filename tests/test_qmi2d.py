@@ -8,6 +8,7 @@ from dalitzplotfitter import (
     QMI2D,
     RealImag,
     enable_x64,
+    physical_bin_mask,
 )
 
 
@@ -75,6 +76,39 @@ def test_qmi2d_folded_is_symmetric_under_s12_s13_exchange():
     first = model(_data([0.2], [1.2]))
     second = model(_data([1.2], [0.2]))
     assert bool(jnp.allclose(first, second, atol=1e-12))
+
+
+def test_physical_bin_mask_keeps_endpoint_bins_and_rejects_external_cells():
+    channel = DecayChannel("D_s+", ("pi-", "pi+", "pi+"))
+    m1, m2, m3 = channel.daughter_masses
+    smin = (m1 + m2) ** 2
+    smax = (channel.parent_mass - m3) ** 2
+    edges = tuple(float(v) for v in jnp.linspace(smin, smax, 9))
+    mask = physical_bin_mask(
+        edges,
+        edges,
+        mother_mass=channel.parent_mass,
+        masses=channel.daughter_masses,
+        folded=True,
+        samples_per_bin=257,
+    )
+    assert any(mask[-1])
+    assert any(row[-1] for row in mask)
+    assert not mask[-1][-1]
+
+
+def test_qmi2d_active_mask_zeroes_inactive_piecewise_bins():
+    model = QMI2D(
+        s12_edges=(0.0, 1.0, 2.0),
+        s13_edges=(0.0, 1.0, 2.0),
+        magnitudes=((1.0, 2.0), (3.0, 4.0)),
+        phases=((0.0, 0.1), (0.2, 0.3)),
+        interpolation="none",
+        active_mask=((True, True), (False, True)),
+    )
+    mag, phase = model.interpolated_magnitude_phase(_data([1.2], [0.2]))
+    assert float(mag[0]) == 0.0
+    assert float(phase[0]) == 0.0
 
 
 def test_qmi2d_parameters_are_collected_and_change_decay_intensity():
