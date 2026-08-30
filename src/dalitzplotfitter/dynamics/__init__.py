@@ -16,6 +16,7 @@ from .lineshapes import (
 )
 from .pole_lass import LASS, Pole
 from .qmi import QMI
+from .qmi2d import QMI2D
 from .resonance import ResonanceAmplitude
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "LASS",
     "Pole",
     "QMI",
+    "QMI2D",
     "RelativisticBreitWigner",
     "ResonanceAmplitude",
     "ResonanceContext",
