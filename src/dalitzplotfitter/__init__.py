@@ -30,10 +30,14 @@ from .kinematics import (
     DalitzGrid,
     PhaseSpaceMC,
     PhaseSpaceSample,
+    SquareDalitzGrid,
     boost_to_rest_frame,
     covariant_kinematics,
     covariant_kinematics_from_invariants,
     dalitz_s13_limits,
+    invariants_to_square_dalitz,
+    square_dalitz_jacobian,
+    square_dalitz_to_invariants,
 )
 from .sampling import weighted_resample
 
@@ -69,11 +73,15 @@ __all__ = [
     "Resonance",
     "ResonanceAmplitude",
     "ResonanceContext",
+    "SquareDalitzGrid",
     "boost_to_rest_frame",
     "covariant_kinematics",
     "covariant_kinematics_from_invariants",
     "dalitz_s13_limits",
     "enable_x64",
+    "invariants_to_square_dalitz",
     "physical_bin_mask",
+    "square_dalitz_jacobian",
+    "square_dalitz_to_invariants",
     "weighted_resample",
 ]
