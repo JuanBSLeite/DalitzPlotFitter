@@ -28,14 +28,20 @@ def _context():
     )
 
 
-def test_qmi_returns_exact_complex_values_at_knots():
-    knots = (0.30, 0.60, 0.90)
-    magnitudes = (1.0, 2.0, 3.0)
-    phases = (0.0, 0.5, 1.0)
-    model = QMI(knots=knots, magnitudes=magnitudes, phases=phases)
-    values = model(jnp.asarray(knots), _context())
+def test_qmi_returns_exact_complex_values_at_knots_for_both_interpolations():
+    knots = (0.30, 0.60, 0.90, 1.20)
+    magnitudes = (1.0, 2.0, 1.4, 3.0)
+    phases = (0.0, 0.5, 0.8, 1.0)
     expected = jnp.asarray(magnitudes) * jnp.exp(1j * jnp.asarray(phases))
-    assert bool(jnp.allclose(values, expected, rtol=0.0, atol=1e-12))
+    for interpolation in ("linear", "cubic"):
+        model = QMI(
+            knots=knots,
+            magnitudes=magnitudes,
+            phases=phases,
+            interpolation=interpolation,
+        )
+        values = model(jnp.asarray(knots), _context())
+        assert bool(jnp.allclose(values, expected, rtol=0.0, atol=1e-11))
 
 
 def test_qmi_interpolates_magnitude_and_phase_linearly_in_s():
@@ -43,6 +49,7 @@ def test_qmi_interpolates_magnitude_and_phase_linearly_in_s():
         knots=(0.4, 0.8),
         magnitudes=(1.0, 3.0),
         phases=(0.2, 1.0),
+        interpolation="linear",
     )
     mass = jnp.sqrt(0.5 * (0.4**2 + 0.8**2))
     magnitude, phase = model.interpolated_magnitude_phase(mass)
@@ -50,18 +57,47 @@ def test_qmi_interpolates_magnitude_and_phase_linearly_in_s():
     assert abs(float(phase) - 0.6) < 1e-12
 
 
-def test_qmi_clamps_to_endpoint_values_outside_knot_range():
-    model = QMI(
-        knots=(0.4, 0.8),
-        magnitudes=(1.0, 3.0),
-        phases=(0.2, 1.0),
-    )
-    low_mag, low_phase = model.interpolated_magnitude_phase(jnp.asarray(0.2))
-    high_mag, high_phase = model.interpolated_magnitude_phase(jnp.asarray(1.0))
-    assert abs(float(low_mag) - 1.0) < 1e-12
-    assert abs(float(low_phase) - 0.2) < 1e-12
-    assert abs(float(high_mag) - 3.0) < 1e-12
-    assert abs(float(high_phase) - 1.0) < 1e-12
+def test_qmi_cubic_is_smooth_and_differs_from_linear_between_knots():
+    knots = (0.3, 0.6, 0.9, 1.2)
+    magnitudes = (1.0, 2.2, 0.9, 1.8)
+    phases = (0.0, 0.7, 1.3, 1.8)
+    mass = jnp.asarray(0.75)
+    linear = QMI(knots, magnitudes, phases, interpolation="linear")
+    cubic = QMI(knots, magnitudes, phases, interpolation="cubic")
+    linear_mag, linear_phase = linear.interpolated_magnitude_phase(mass)
+    cubic_mag, cubic_phase = cubic.interpolated_magnitude_phase(mass)
+    assert abs(float(cubic_mag - linear_mag)) > 1e-6
+    assert abs(float(cubic_phase - linear_phase)) > 1e-6
+
+
+def test_qmi_clamps_to_endpoint_values_outside_knot_range_for_both_modes():
+    for interpolation in ("linear", "cubic"):
+        model = QMI(
+            knots=(0.4, 0.6, 0.8),
+            magnitudes=(1.0, 2.0, 3.0),
+            phases=(0.2, 0.5, 1.0),
+            interpolation=interpolation,
+        )
+        low_mag, low_phase = model.interpolated_magnitude_phase(jnp.asarray(0.2))
+        high_mag, high_phase = model.interpolated_magnitude_phase(jnp.asarray(1.0))
+        assert abs(float(low_mag) - 1.0) < 1e-11
+        assert abs(float(low_phase) - 0.2) < 1e-11
+        assert abs(float(high_mag) - 3.0) < 1e-11
+        assert abs(float(high_phase) - 1.0) < 1e-11
+
+
+def test_qmi_rejects_invalid_interpolation():
+    try:
+        QMI(
+            knots=(0.4, 0.6, 0.8),
+            magnitudes=(1.0, 1.0, 1.0),
+            phases=(0.0, 0.0, 0.0),
+            interpolation="quadratic",
+        )
+    except ValueError as exc:
+        assert "linear" in str(exc) and "cubic" in str(exc)
+    else:
+        raise AssertionError("QMI accepted an unsupported interpolation mode")
 
 
 def test_qmi_rejects_non_scalar_context():
@@ -98,9 +134,10 @@ def test_qmi_knot_parameters_are_collected_and_resolved_by_decay_model():
         owner=owner,
     )
     qmi = QMI(
-        knots=(0.30, 0.60),
-        magnitudes=(a0, 1.5),
-        phases=(d0, 0.4),
+        knots=(0.30, 0.60, 0.90),
+        magnitudes=(a0, 1.5, 1.2),
+        phases=(d0, 0.4, 0.8),
+        interpolation="cubic",
     )
     decay = DecayModel(
         DecayChannel("D_s+", ("pi-", "pi+", "pi+")),
