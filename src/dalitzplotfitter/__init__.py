@@ -10,6 +10,7 @@ from .coefficients import CPRealImag, RealImag
 from .config import enable_x64
 from .decay import DalitzAmplitude, DecayChannel, DecayModel, NonResonant, Resonance
 from .dynamics import (
+    BaBarFlatte,
     CovariantAngular,
     Flatte,
     GounarisSakurai,
@@ -38,6 +39,7 @@ from .sampling import weighted_resample
 
 __all__ = [
     "AmplitudeComponent",
+    "BaBarFlatte",
     "CPRealImag",
     "CoherentAmplitudeModel",
     "ConstantAmplitude",
