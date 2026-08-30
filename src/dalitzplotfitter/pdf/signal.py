@@ -9,7 +9,7 @@ import jax.numpy as jnp
 from jax import Array
 
 from dalitzplotfitter.efficiency import UnityEfficiency
-from dalitzplotfitter.integration import MonteCarloIntegrator
+from dalitzplotfitter.integration import GridIntegrator
 
 Parameters = Mapping[str, Array | float]
 ParametricIntensity = Callable[[dict[str, Array], Parameters], Array]
@@ -20,7 +20,7 @@ class SignalPDF:
     """Efficiency-corrected normalized signal density."""
 
     intensity: ParametricIntensity
-    integrator: MonteCarloIntegrator
+    integrator: GridIntegrator
     efficiency: object = UnityEfficiency()
     floor: float = 1e-300
 
