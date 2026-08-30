@@ -1,8 +1,9 @@
 """Quasi-model-independent S-wave parameterisation.
 
-The default convention follows the LHCb D+ -> pi- pi+ pi+ QMIPWA:
-individual S-wave magnitudes and phases are specified at mass knots and
-interpolated linearly as functions of the two-body invariant mass.
+The default convention follows the LHCb QMIPWA construction used for
+D_s+ -> pi- pi+ pi+: individual S-wave magnitudes and phases are specified at
+fixed pi-pi mass points, while the linear splines are evaluated as functions of
+s = m(pi pi)^2.
 """
 
 from __future__ import annotations
@@ -18,27 +19,15 @@ from .context import ResonanceContext
 class QMI:
     """Quasi-model-independent scalar amplitude defined at mass knots.
 
-    Parameters
-    ----------
-    knots:
-        Strictly increasing two-body invariant masses in GeV.
-    magnitudes:
-        S-wave magnitudes at the knots. Entries may be numerical constants or
-        fit ``Parameter`` objects.
-    phases:
-        S-wave phases at the knots, in radians. Entries may be numerical
-        constants or fit ``Parameter`` objects.
+    ``knots`` are supplied as two-body invariant masses in GeV for convenience,
+    matching the published LHCb tables. Internally, magnitude and phase are
+    linearly interpolated in ``s = m**2``:
 
-    Notes
-    -----
-    The amplitude is
+    ``A(s) = a(s) exp(i delta(s))``.
 
-    ``A(m) = a(m) exp(i delta(m))``
-
-    where ``a`` and ``delta`` are interpolated linearly between neighbouring
-    knots. Outside the knot range the nearest endpoint value is used. In a
-    physical Dalitz model the first and last knots should normally cover the
-    complete kinematic mass range of the selected pair.
+    Entries of ``magnitudes`` and ``phases`` may be numerical constants or fit
+    ``Parameter`` objects. Phases are in radians and should be supplied as a
+    continuous/unwrapped sequence.
     """
 
     knots: tuple[float, ...]
@@ -64,11 +53,13 @@ class QMI:
 
     def interpolated_magnitude_phase(self, mass):
         mass = jnp.asarray(mass)
-        knots = jnp.asarray(self.knots, dtype=mass.dtype)
+        knot_masses = jnp.asarray(self.knots, dtype=mass.dtype)
+        knot_s = knot_masses**2
+        s = mass**2
         magnitudes = jnp.asarray(self.magnitudes, dtype=mass.dtype)
         phases = jnp.asarray(self.phases, dtype=mass.dtype)
-        magnitude = jnp.interp(mass, knots, magnitudes)
-        phase = jnp.interp(mass, knots, phases)
+        magnitude = jnp.interp(s, knot_s, magnitudes)
+        phase = jnp.interp(s, knot_s, phases)
         return magnitude, phase
 
     def __call__(self, mass, context: ResonanceContext):
