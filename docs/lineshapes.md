@@ -1,47 +1,16 @@
 # Resonance dynamics and angular terms
 
-DalitzPlotFitter implements resonance dynamics directly in JAX. Laura++ is one of the principal references used to define and validate the current conventions, but the public API uses neutral physics names rather than reference-specific class names.
+DalitzPlotFitter implements resonance dynamics directly in JAX. Laura++ is one of the principal references used to define and validate the conventions.
 
-## Model flow
+## Available lineshapes
 
-```text
-DecayChannel + component declarations
-  -> particle masses / widths / spins
-  -> ResonanceContext
-  -> interchangeable lineshape R(m)
-  -> Blatt-Weisskopf factors
-  -> interchangeable angular model T_L
-  -> automatic identical-particle symmetrization
-  -> complete component F_i(x)
-  -> RealImag coefficient
-  -> coherent amplitude
-  -> normalized SignalPDF
+The public lineshapes are:
+
+```python
+RelativisticBreitWigner()
+GounarisSakurai()
+Flatte(...)
 ```
-
-## Particle properties
-
-The high-level `DecayChannel` and `Resonance` API uses the Scikit-HEP `particle` package for standard masses, widths and spins. Values are converted from the database units to GeV before entering the numerical model.
-
-Analysis-specific values are explicit overrides. This is important for historical amplitude models in which the fitted pole parameters do not coincide with current reference values.
-
-## ResonanceContext
-
-`DecayModel` converts the decay channel and resonance declaration into a `ResonanceContext` containing the physical quantities needed by dynamics plugins:
-
-```text
-parent mass
-resonance-daughter masses
-bachelor mass
-spin
-pole mass
-pole width
-parent radius
-resonance radius
-```
-
-Users normally do not construct this object manually.
-
-## Interchangeable lineshapes
 
 A lineshape is any callable with the interface
 
@@ -49,63 +18,11 @@ A lineshape is any callable with the interface
 lineshape(mass, context)
 ```
 
-The default is
-
-```python
-RelativisticBreitWigner()
-```
-
-so these are equivalent:
-
-```python
-Resonance(
-    "rho(770)0",
-    pair=(0, 1),
-    coefficient=RealImag(1.0, 0.0),
-)
-```
-
-and
-
-```python
-Resonance(
-    "rho(770)0",
-    pair=(0, 1),
-    coefficient=RealImag(1.0, 0.0),
-    lineshape=RelativisticBreitWigner(),
-)
-```
-
-Future dynamics such as Gounaris-Sakurai, Flatte, LASS or K-matrix plug into the same field without changing `DecayModel`.
-
-## Covariant angular formalism
-
-The default angular model is `CovariantAngular()`. For
-
-```text
-P -> R b
-R -> d1 d2
-```
-
-define `p*` as the bachelor momentum in the parent rest frame, `p` as the bachelor momentum in the resonance rest frame, `q` as the selected resonance-daughter momentum in the resonance rest frame, and `theta` as the angle between that daughter and the bachelor in the resonance rest frame.
-
-`covariant_spin_factor()` implements the current convention for `L=0..4`:
-
-```text
-T0 = 1
-T1 = -2 (p* q) sqrt(1 + p^2/mP^2) cos(theta)
-T2 = (4/3) (p* q)^2 (3/2 + p^2/mP^2) [3 cos^2(theta) - 1]
-T3 = -(24/15) (p* q)^3 sqrt(1 + p^2/mP^2)
-     (5/2 + p^2/mP^2) [5 cos^3(theta) - 3 cos(theta)]
-T4 = (16/35) (p* q)^4 [8 p^4/mP^4 + 40 p^2/mP^2 + 35]
-     [35 cos^4(theta) - 30 cos^2(theta) + 3]
-```
-
-The angular model is also interchangeable. `Resonance(..., angular=...)` can replace the default without coupling the choice to the lineshape.
+and can be supplied through `Resonance(..., lineshape=...)` without changing the model or cache architecture.
 
 ## Relativistic Breit-Wigner
 
-The default Breit-Wigner lineshape is
+The default is
 
 ```text
 R(m) = 1 / (m0^2 - m^2 - i m0 Gamma(m))
@@ -117,59 +34,110 @@ with
 Gamma(m) = Gamma0 (q/q0)^(2L+1) (m0/m) X_L(q r)^2.
 ```
 
-`RelativisticBreitWigner` uses only `mass` and the fields it needs from `ResonanceContext`.
+The Blatt-Weisskopf factors support `L=0..4`.
 
-## High-level resonance declaration
+## Gounaris-Sakurai
 
-Users should normally construct models through `DecayModel`:
+`GounarisSakurai` follows Laura++ Appendix A, Eqs. (38)-(43), for rho-like vector states:
+
+```text
+R(m) = [1 + D Gamma0/m0] /
+       [m0^2 - m^2 + f(m) - i m0 Gamma(m)].
+```
+
+The dispersive correction is
+
+```text
+f(m) = Gamma0 m0^2/q0^3 *
+       {q^2 [h(m)-h(m0)] + (m0^2-m^2) q0^2 dh/dm^2|m0},
+
+h(m) = (2/pi) (q/m) log[(m+2q)/(2 m_pi)].
+```
+
+`GounarisSakurai` requires a spin-1 `ResonanceContext`. The pion mass entering the analytic GS function is taken as the arithmetic mean of the two resonance-daughter pion masses, which also permits charged rho decays with the small charged/neutral pion mass difference.
+
+Example:
 
 ```python
-channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
-component = Resonance(
+Resonance(
     "rho(770)0",
     pair=(0, 1),
     coefficient=RealImag(1.0, 0.0),
+    lineshape=GounarisSakurai(),
 )
-model = DecayModel(channel, [component])
 ```
 
-The model builder determines parent mass, resonance-daughter masses, bachelor mass, momentum keys and identical-particle permutations automatically.
+## Flatte
 
-## Identical particles
+`Flatte` follows the coupled two-channel form in Laura++ Appendix A, Eqs. (44)-(46):
+
+```text
+R(m) = 1 / [(m0^2-m^2) - i m0 (Gamma1(m)+Gamma2(m))].
+```
+
+For each channel the width is a coupling times the Laura++ isospin-weighted phase-space factors. Below a specific two-body threshold the square root is analytically continued,
+
+```text
+sqrt(1 - m_threshold^2/m^2) -> i sqrt(m_threshold^2/m^2 - 1),
+```
+
+so the closed channel contributes to the real part of the denominator and produces the expected threshold cusp.
+
+The optional Adler-zero factor is
+
+```text
+f_A = (m^2-s_A)/(m0^2-s_A).
+```
+
+Laura++ restricts this model to the systems tabulated in its Table A.2. DalitzPlotFitter provides matching presets:
+
+```python
+Flatte.f0_980()
+Flatte.k0star_1430_neutral()
+Flatte.k0star_1430_charged()
+Flatte.a0_980_neutral()
+Flatte.a0_980_charged()
+```
+
+The preset channel masses, coupling ratios and Adler-zero constants follow that table. The resulting dataclass remains editable, so analyses can construct `Flatte(...)` directly when they need alternative measured couplings.
+
+Example:
+
+```python
+Resonance(
+    "f0_980",
+    pair=(0, 1),
+    coefficient=RealImag(x, y),
+    mass=0.965,
+    width=0.0,
+    spin=0,
+    lineshape=Flatte.f0_980(),
+)
+```
+
+For a Flatte component the ordinary `Resonance.width` is not the physical width parameter of the lineshape; the imaginary part is determined by the channel couplings. A numerical non-negative width is still supplied because `ResonanceContext` has a common interface for all lineshapes.
+
+## Component composition
 
 For
 
 ```text
-D+ -> pi- pi+ pi+
+P -> R b
+R -> d1 d2
 ```
 
-a resonance declared with nominal pair `(0,1)` automatically evaluates
+`ResonanceAmplitude` multiplies
 
 ```text
-F = F[(12)3] + F[(13)2].
+lineshape * parent Blatt-Weisskopf * resonance Blatt-Weisskopf * angular factor.
 ```
 
-Only exchanges of identical final-state labels are added. A constant non-resonant term is not duplicated.
+The default angular model is `CovariantAngular()`, and identical final-state particles are symmetrized automatically.
 
-## Monte Carlo normalization
+## Deterministic normalization
 
-`phasespace` supplies raw phase-space weights. For a coefficient-only model,
+All amplitude-component and coherent-PDF normalization uses the deterministic equal-area `DalitzGrid`. `PhaseSpaceMC` is retained only for toy/proposal generation.
 
-```text
-M_ij = (1/N_MC) sum_k w_PS,k F_i*(x_k) F_j(x_k)
-N(c) = c^dagger M c.
-```
+## Reference
 
-The reference normalization sample is 1,000,000 weighted events. Pseudo-data are generated from a larger weighted pool with
-
-```text
-w_target,k = w_PS,k |A(x_k)|^2
-```
-
-and converted to ordinary unweighted events with `weighted_resample()`.
-
-## Validation references
-
-The implementation is checked against analytic limits and established amplitude-analysis conventions. Laura++ is currently a principal reference for Breit-Wigner, Blatt-Weisskopf and covariant angular definitions:
-
-J. Back et al., *Laura++: a Dalitz plot fitter*, Computer Physics Communications 231 (2018) 198-242, arXiv:1711.09854.
+J. Back et al., *Laura++: a Dalitz plot fitter*, Computer Physics Communications 231 (2018) 198-242, arXiv:1711.09854. The GS and Flatte equations and the Flatte preset systems are taken from Appendix A. citeturn338539search0turn658613search26
