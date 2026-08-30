@@ -6,7 +6,7 @@ from .amplitude import (
     ConstantAmplitude,
     PreparedAmplitudeCache,
 )
-from .coefficients import RealImag
+from .coefficients import CPRealImag, RealImag
 from .config import enable_x64
 from .decay import DalitzAmplitude, DecayChannel, DecayModel, NonResonant, Resonance
 from .dynamics import (
@@ -38,6 +38,7 @@ from .sampling import weighted_resample
 
 __all__ = [
     "AmplitudeComponent",
+    "CPRealImag",
     "CoherentAmplitudeModel",
     "ConstantAmplitude",
     "CovariantAngular",
