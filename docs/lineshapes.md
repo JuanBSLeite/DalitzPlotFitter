@@ -8,8 +8,10 @@ The public lineshapes are:
 
 ```python
 RelativisticBreitWigner()
+Pole()
 GounarisSakurai()
 Flatte(...)
+LASS(...)
 ```
 
 A lineshape is any callable with the interface
@@ -36,9 +38,35 @@ Gamma(m) = Gamma0 (q/q0)^(2L+1) (m0/m) X_L(q r)^2.
 
 The Blatt-Weisskopf factors support `L=0..4`.
 
+## Simple Pole
+
+`Pole` exposes the simple fixed-width Breit-Wigner form listed as `BW` in Laura++ Appendix A, Eq. (37):
+
+```text
+R(m) = 1 / (m - m0 - i Gamma0/2).
+```
+
+This is distinct from `RelativisticBreitWigner`: it has no running width and no momentum dependence inside the propagator. The class is named `Pole` in DalitzPlotFitter to make the fixed complex-pole interpretation explicit.
+
+Example:
+
+```python
+Resonance(
+    "broad_scalar",
+    pair=(0, 1),
+    coefficient=RealImag(x, y),
+    mass=0.478,
+    width=0.324,
+    spin=0,
+    lineshape=Pole(),
+)
+```
+
+This should not be confused with the dedicated Laura++ `Sigma`/`Kappa` parameterisation of Eqs. (47)-(48), which is a different mass-dependent scalar model and is not implemented yet.
+
 ## Gounaris-Sakurai
 
-`GounarisSakurai` follows Laura++ Appendix A, Eqs. (38)-(43), for rho-like vector states:
+`GounarisSakurai` follows Laura++ Appendix A, Eqs. (39)-(43), for rho-like vector states:
 
 ```text
 R(m) = [1 + D Gamma0/m0] /
@@ -54,7 +82,7 @@ f(m) = Gamma0 m0^2/q0^3 *
 h(m) = (2/pi) (q/m) log[(m+2q)/(2 m_pi)].
 ```
 
-`GounarisSakurai` requires a spin-1 `ResonanceContext`. The pion mass entering the analytic GS function is taken as the arithmetic mean of the two resonance-daughter pion masses, which also permits charged rho decays with the small charged/neutral pion mass difference.
+`GounarisSakurai` requires a spin-1 `ResonanceContext`. The pion mass entering the analytic GS function is taken as the arithmetic mean of the two resonance-daughter pion masses.
 
 Example:
 
@@ -89,7 +117,7 @@ The optional Adler-zero factor is
 f_A = (m^2-s_A)/(m0^2-s_A).
 ```
 
-Laura++ restricts this model to the systems tabulated in its Table A.2. DalitzPlotFitter provides matching presets:
+DalitzPlotFitter provides Laura++ Table A.2 presets:
 
 ```python
 Flatte.f0_980()
@@ -98,8 +126,6 @@ Flatte.k0star_1430_charged()
 Flatte.a0_980_neutral()
 Flatte.a0_980_charged()
 ```
-
-The preset channel masses, coupling ratios and Adler-zero constants follow that table. The resulting dataclass remains editable, so analyses can construct `Flatte(...)` directly when they need alternative measured couplings.
 
 Example:
 
@@ -115,7 +141,57 @@ Resonance(
 )
 ```
 
-For a Flatte component the ordinary `Resonance.width` is not the physical width parameter of the lineshape; the imaginary part is determined by the channel couplings. A numerical non-negative width is still supplied because `ResonanceContext` has a common interface for all lineshapes.
+For a Flatte component the ordinary `Resonance.width` is not the physical width parameter of the lineshape; the imaginary part is determined by the channel couplings.
+
+## LASS K-pi S-wave
+
+`LASS` follows Laura++ Appendix A, Eqs. (50)-(51):
+
+```text
+R(m) = m / [q cot(delta_B) - i q]
+     + exp(2 i delta_B)
+       [m0 Gamma0 (m0/q0)] /
+       [(m0^2-m^2) - i m0 Gamma0 (q/m)(m0/q0)],
+
+cot(delta_B) = 1/(a q) + r q/2.
+```
+
+The default effective-range values are the commonly used LASS measurements
+
+```text
+a = 2.07 GeV^-1
+r = 3.32 GeV^-1.
+```
+
+The slowly varying non-resonant part can be cut off with `cutoff`. The resonant term is not removed by that cutoff.
+
+The Laura++ decomposition is available through the `mode` option:
+
+```python
+LASS(mode="full")          # Laura++ LASS
+LASS(mode="resonant")      # Laura++ LASS_BW
+LASS(mode="nonresonant")   # Laura++ LASS_NR
+```
+
+or directly with
+
+```python
+nonresonant, resonant = LASS().terms(mass, context)
+```
+
+Example:
+
+```python
+Resonance(
+    "Kpi_S",
+    pair=(0, 1),
+    coefficient=RealImag(x, y),
+    mass=1.425,
+    width=0.270,
+    spin=0,
+    lineshape=LASS(scattering_length=2.07, effective_range=3.32, cutoff=1.7),
+)
+```
 
 ## Component composition
 
@@ -138,6 +214,10 @@ The default angular model is `CovariantAngular()`, and identical final-state par
 
 All amplitude-component and coherent-PDF normalization uses the deterministic equal-area `DalitzGrid`. `PhaseSpaceMC` is retained only for toy/proposal generation.
 
+## Validation notebook
+
+`notebooks/08_lineshape_validation_gs_flatte.ipynb` contains isolated Flatte, Gounaris-Sakurai, Pole and LASS models, deterministic Dalitz-grid densities and 100k-event toy-MC samples for visual validation.
+
 ## Reference
 
-J. Back et al., *Laura++: a Dalitz plot fitter*, Computer Physics Communications 231 (2018) 198-242, arXiv:1711.09854. The GS and Flatte equations and the Flatte preset systems are taken from Appendix A.
+J. Back et al., *Laura++: a Dalitz plot fitter*, Computer Physics Communications 231 (2018) 198-242, arXiv:1711.09854. The Pole/BW, GS, Flatte and LASS equations are taken from Appendix A.
