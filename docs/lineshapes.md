@@ -134,6 +134,7 @@ Identical final-state particles are symmetrized automatically. All amplitude-com
 
 - `notebooks/08_lineshape_validation_gs_flatte.ipynb`: Flatte, Gounaris-Sakurai, Pole and LASS.
 - `notebooks/09_kmatrix_validation.ipynb`: K-matrix, coupled-channel unitarity, Dalitz density and toy MC.
+- `notebooks/10_qmi_validation.ipynb`: QMI interpolation, Argand trajectory, toy MC and a single randomized knot-parameter closure fit.
 
 ## References
 
