@@ -25,10 +25,17 @@ def test_kmatrix_scattering_matrix_is_symmetric():
     masses = jnp.asarray([0.35, 0.80, 1.00, 1.30, 1.70])
     matrix = model.scattering_matrix(masses)
     assert matrix.shape == (5, 5, 5)
-    assert bool(jnp.allclose(matrix, jnp.swapaxes(matrix, -1, -2), rtol=0.0, atol=1e-12))
+    assert bool(
+        jnp.allclose(
+            matrix,
+            jnp.swapaxes(matrix, -1, -2),
+            rtol=0.0,
+            atol=1e-12,
+        )
+    )
 
 
-def test_kmatrix_phase_space_has_five_channels_and_analytic_continuation():
+def test_kmatrix_phase_space_has_five_channels_and_continuation():
     model = KMatrix()
     rho = model.phase_space(jnp.asarray(0.80))
     assert rho.shape == (5,)
@@ -38,7 +45,7 @@ def test_kmatrix_phase_space_has_five_channels_and_analytic_continuation():
     assert float(jnp.imag(rho[1])) > 0.0
 
 
-def test_kmatrix_pvector_and_amplitude_are_finite_away_from_bare_poles():
+def test_kmatrix_pvector_and_amplitude_are_finite():
     model = KMatrix(
         betas=(
             RealImag(1.0, 0.0),
@@ -53,6 +60,16 @@ def test_kmatrix_pvector_and_amplitude_are_finite_away_from_bare_poles():
     amplitude = model.amplitude_vector(masses)
     assert production.shape == (6, 5)
     assert amplitude.shape == (6, 5)
+    assert bool(jnp.all(jnp.isfinite(jnp.real(amplitude))))
+    assert bool(jnp.all(jnp.isfinite(jnp.imag(amplitude))))
+
+
+def test_kmatrix_is_stable_exactly_at_bare_poles():
+    model = KMatrix(
+        betas=(1.0 + 0.2j, 0.3j, -0.2 + 0.1j, 0.1j, 0.05 + 0.02j)
+    )
+    masses = jnp.asarray([0.65100, 1.20360, 1.55817, 1.21000, 1.82206])
+    amplitude = model.amplitude_vector(masses)
     assert bool(jnp.all(jnp.isfinite(jnp.real(amplitude))))
     assert bool(jnp.all(jnp.isfinite(jnp.imag(amplitude))))
 
@@ -81,7 +98,7 @@ def test_kmatrix_returns_pipi_channel_and_rejects_non_scalar_context():
         raise AssertionError("KMatrix accepted a non-scalar context")
 
 
-def test_kmatrix_production_coefficients_change_amplitude_linearly_before_rescattering():
+def test_kmatrix_production_coefficients_are_linear():
     masses = jnp.asarray([0.50, 0.90, 1.30])
     first = KMatrix(betas=(1.0j, 0.0j, 0.0j, 0.0j, 0.0j))
     doubled = KMatrix(betas=(2.0j, 0.0j, 0.0j, 0.0j, 0.0j))
