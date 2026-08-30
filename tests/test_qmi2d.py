@@ -92,7 +92,9 @@ def test_physical_bin_mask_keeps_endpoint_bins_and_rejects_external_cells():
         folded=True,
         samples_per_bin=257,
     )
-    assert any(mask[-1])
+    # In folded coordinates x=s_low and y=s_high. The physical region reaches
+    # the high-s endpoint in the final y column, while the final x row need not
+    # be populated because both pair masses cannot simultaneously approach smax.
     assert any(row[-1] for row in mask)
     assert not mask[-1][-1]
 
