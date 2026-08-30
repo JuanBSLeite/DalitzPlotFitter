@@ -8,7 +8,7 @@ from .amplitude import (
 )
 from .coefficients import RealImag
 from .config import enable_x64
-from .decay import DecayChannel, DecayModel, NonResonant, Resonance
+from .decay import DalitzAmplitude, DecayChannel, DecayModel, NonResonant, Resonance
 from .dynamics import (
     CovariantAngular,
     Flatte,
@@ -17,6 +17,7 @@ from .dynamics import (
     LASS,
     Pole,
     QMI,
+    QMI2D,
     RelativisticBreitWigner,
     ResonanceAmplitude,
     ResonanceContext,
@@ -40,6 +41,7 @@ __all__ = [
     "ConstantAmplitude",
     "CovariantAngular",
     "CovariantKinematics",
+    "DalitzAmplitude",
     "DalitzGrid",
     "DecayChannel",
     "DecayModel",
@@ -57,6 +59,7 @@ __all__ = [
     "Pole",
     "PreparedAmplitudeCache",
     "QMI",
+    "QMI2D",
     "RealImag",
     "RelativisticBreitWigner",
     "Resonance",
