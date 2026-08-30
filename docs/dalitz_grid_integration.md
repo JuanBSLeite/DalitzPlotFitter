@@ -1,8 +1,47 @@
 # Deterministic equal-area Dalitz-grid integration
 
-DalitzPlotFitter provides `DalitzGrid` as a deterministic alternative to Monte Carlo normalization for three-body amplitudes.
+DalitzPlotFitter supports two normalization strategies for three-body amplitudes:
 
-The integration is performed directly in
+1. **uniform phase-space Monte Carlo**, through `PhaseSpaceMC` / the model-owned normalization sample;
+2. **deterministic equal-area Dalitz grid**, through `DalitzGrid`.
+
+No adaptive quadrature is part of the supported API.
+
+## Monte Carlo normalization
+
+The default model-owned normalization sample is generated with the pure-JAX three-body phase-space generator. The package estimator uses
+
+```text
+mean(weights * f)
+```
+
+with event-dependent phase-space weights returned by `PhaseSpaceMC`.
+
+Typical use:
+
+```python
+model = DecayModel(
+    channel,
+    components,
+    normalization_size=1_000_000,
+    normalization_seed=2027,
+)
+
+norm = model.normalization_sample
+```
+
+For coherent normalization,
+
+```text
+M_ij ~= mean(w_PS * conj(F_i) F_j)
+N = c^dagger M c.
+```
+
+This is the default normalization path of `DecayModel`.
+
+## Equal-area Dalitz-grid normalization
+
+`DalitzGrid` is the deterministic alternative. The integration is performed directly in
 
 ```text
 s12 = m12^2
@@ -15,7 +54,7 @@ where, apart from an overall channel-dependent constant that cancels in normaliz
 dPhi3 proportional to ds12 ds13.
 ```
 
-## Equal-area contour-adapted construction
+Typical use:
 
 ```python
 from dalitzplotfitter import DalitzGrid
@@ -27,9 +66,11 @@ norm = DalitzGrid(
 ).sample()
 ```
 
-A resolution of `N` now returns exactly `N**2` physical points. There is no bounding rectangle and no rejection/mask step.
+A resolution of `N` returns exactly `N**2` physical points. There is no bounding rectangle and no rejection/mask step.
 
-At fixed `s12`, define the physical width
+## Equal-area contour-adapted construction
+
+At fixed `s12`, define
 
 ```text
 W(s12) = s13_max(s12) - s13_min(s12).
@@ -53,7 +94,7 @@ The total Dalitz area is
 A_DP = integral W(s12) ds12.
 ```
 
-We define an auxiliary coordinate
+Define
 
 ```text
 u(s12) = [integral from s12_min to s12 W(s) ds] / A_DP.
@@ -66,33 +107,33 @@ u_i = (i + 1/2)/N
 v_j = (j + 1/2)/N.
 ```
 
-The cumulative-area relation is inverted numerically to obtain `s12(u_i)`. The second coordinate is then
+The cumulative-area relation is inverted numerically to obtain `s12(u_i)`, then
 
 ```text
-s13(u,v) = s13_min(s12) + v * W(s12).
+s13(u,v) = s13_min(s12) + v * W(s12),
 ```
 
-Finally,
+and
 
 ```text
 s23 = M^2 + m1^2 + m2^2 + m3^2 - s12 - s13.
 ```
 
-All generated grid points are strictly inside the physical Dalitz boundary.
+All grid points lie inside the physical Dalitz boundary.
 
 ## Constant Jacobian and equal areas
 
-The mapping is constructed so that
+The mapping satisfies
 
 ```text
 ds12/du = A_DP / W(s12)
-partial s13/partial v = W(s12).
+partial s13/partial v = W(s12),
 ```
 
-Therefore
+therefore
 
 ```text
-|J| = A_DP,
+|J| = A_DP
 ```
 
 and
@@ -101,21 +142,19 @@ and
 ds12 ds13 = A_DP du dv.
 ```
 
-Every cell of the regular `u,v` grid therefore corresponds to the same physical Dalitz area
+Every cell represents the same physical area
 
 ```text
 A_DP / N^2.
 ```
 
-There is no importance sampling and no event-dependent phase-space weight.
-
-The package cache/integration convention is
+The package estimator remains
 
 ```text
 mean(weights * f).
 ```
 
-Therefore every grid point stores the same constant value
+Every grid point therefore stores the same constant weight
 
 ```text
 weight = A_DP,
@@ -131,16 +170,16 @@ mean(weight * f) = A_DP * mean(f)
 For one amplitude component,
 
 ```text
-I_i ~= A_DP * mean(|F_i|^2).
+I_i ~= A_DP * mean(|F_i|^2),
 ```
 
-For the interference matrix,
+and for the interference matrix,
 
 ```text
 M_ij ~= A_DP * mean(conj(F_i) F_j).
 ```
 
-The coherent normalization remains
+The coherent normalization is
 
 ```text
 N = c^dagger M c.
@@ -150,127 +189,26 @@ N = c^dagger M c.
 
 `DalitzGrid` tabulates `W(s12)` on a dense one-dimensional support, integrates it with the trapezoidal rule, and uses linear interpolation to invert cumulative area. The default support is at least 4097 points and grows with the requested two-dimensional resolution.
 
-For dedicated convergence studies this support can be controlled explicitly with
+For convergence studies:
 
 ```python
 DalitzGrid(..., resolution=800, boundary_resolution=20001)
 ```
 
-The one-dimensional boundary table is deterministic and is independent of the `N x N` midpoint grid used to evaluate amplitudes.
+The one-dimensional boundary table is deterministic and independent of the `N x N` midpoint grid used to evaluate amplitudes.
 
-## Why use this grid for fit diagnostics?
+## Choosing the normalization method
 
-For fixed `N`, normalization is completely deterministic. The method removes
+Use **Monte Carlo normalization** when you want the model default, straightforward scaling to large samples, or a stochastic integration sample generated directly in JAX.
 
-```text
-random normalization-sample fluctuations
-importance-sampling weights
-rejected grid cells
-```
+Use **DalitzGrid normalization** when you want a deterministic closure test, direct quadrature-convergence studies, or to remove normalization-sample fluctuations from a fit diagnostic.
 
-from the likelihood normalization.
-
-This is useful for diagnosing the full chain
-
-```text
-Parameter -> amplitude -> component normalization
-          -> interference matrix -> JAX gradient -> Minuit.
-```
-
-The remaining numerical approximation is deterministic quadrature/discretization. Convergence should be checked by comparing, for example,
-
-```text
-300 x 300
-500 x 500
-800 x 800.
-```
-
-## Dynamics-aware adaptive refinement
-
-For very narrow structures, a globally regular equal-area grid may spend too few points in the invariant-mass direction near a kinematic boundary. `AdaptiveDalitzGrid` provides an experimental hierarchical refinement scheme for this situation.
-
-```python
-from dalitzplotfitter import AdaptiveDalitzGrid
-
-adaptive = AdaptiveDalitzGrid(
-    channel.parent_mass,
-    channel.daughter_masses,
-    base_resolution=48,
-    max_depth=5,
-    tolerance=0.08,
-)
-
-result = adaptive.build((dynamics_probe,))
-norm = result.sample
-```
-
-The algorithm remains in the same auxiliary `(u,v)` coordinates as `DalitzGrid`, so the physical Jacobian is still the constant `A_DP`. A leaf cell with auxiliary size `du * dv` represents physical area
-
-```text
-A_cell = A_DP * du * dv.
-```
-
-Because the package estimator is `mean(weights * f)`, a sample with `N_leaf` adaptive cells stores
-
-```text
-weight_i = N_leaf * A_cell_i.
-```
-
-This gives
-
-```text
-mean(weights * f) = sum_i A_cell_i * f_i.
-```
-
-Thus unequal adaptive cells integrate with the same `PhaseSpaceSample` convention already used elsewhere in the package.
-
-### Generic refinement criterion
-
-The adaptive grid does not assume a Breit-Wigner or require parameters named `mass` and `width`. Each probe is simply a callable
-
-```python
-dynamics_probe(data) -> array
-```
-
-on Dalitz points. Complex probes are converted internally to `abs(probe)**2` for the refinement estimator. Each cell is evaluated at its centre and at the four would-be child midpoints. Refinement is triggered by the larger of
-
-```text
-local variation across those samples
-centre estimate versus four-child midpoint estimate
-```
-
-relative to a local scale. Multiple probes may be supplied, and a cell is refined if any probe requires it. This allows the same machinery to be used for narrow resonances, dispersive amplitudes, K-matrix components, splines, tabulated amplitudes, or future user-defined dynamics.
-
-### Discovery-scale limitation
-
-Adaptive refinement cannot discover an arbitrarily narrow feature that falls between all probe points of the initial grid. `base_resolution` therefore remains a physically important control parameter. It defines the scale on which narrow structures are first discovered; recursive refinement controls how accurately they are resolved after discovery.
-
-For this reason, convergence studies should vary both
-
-```text
-base_resolution
-max_depth / tolerance
-```
-
-rather than only the final number of leaf cells.
-
-### Narrow-phi diagnostic
-
-`notebooks/05_adaptive_grid_phi_B2KKK.ipynb` tests the adaptive scheme on
-
-```text
-B+ -> K- K+ K+
-phi(1020) -> K+ K-
-```
-
-where the phi is narrow and close to the `K+K-` threshold. The notebook compares local point density and the convergence of the raw `|F_phi|^2` integral against regular equal-area grids.
+For either method, convergence should be checked explicitly by increasing the MC sample size or the grid resolution.
 
 ## Current examples
 
-`notebooks/02_fit_dynamic_parameters.ipynb` and `notebooks/03_lineshape_parameter_diagnostics.ipynb` use `DalitzGrid`; because the class itself now implements the equal-area contour mapping, those notebooks automatically use exactly `N**2` physical integration points.
+`notebooks/02_fit_dynamic_parameters.ipynb` uses `DalitzGrid` for a deterministic coefficient-closure test.
 
-`notebooks/04_normalization_grid_diagnostics.ipynb` visualizes the equal-area mapping and quadrature weights. `notebooks/05_adaptive_grid_phi_B2KKK.ipynb` explores the experimental dynamics-aware adaptive grid.
+`notebooks/03_lineshape_parameter_diagnostics.ipynb` and `notebooks/04_normalization_grid_diagnostics.ipynb` provide additional grid and normalization diagnostics.
 
-The pseudo-data candidate pool is still independently generated phase space. Its proposal weights are used only when drawing pseudo-data from that pool. Both the truth intensity used for generation and the fitted likelihood are normalized with the same deterministic Dalitz grid.
-
-The model-owned Monte Carlo normalization remains available and has not been replaced as the `DecayModel` default, so the grid studies remain isolated from other changes to the fitting architecture.
+The model-owned Monte Carlo normalization remains available through `DecayModel.normalization_sample` and is the default normalization path of the high-level model.
