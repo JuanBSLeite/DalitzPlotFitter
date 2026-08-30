@@ -2,6 +2,7 @@
 
 from .angular import CovariantAngular, covariant_spin_factor
 from .context import ResonanceContext
+from .kmatrix import KMatrix
 from .lineshapes import (
     Flatte,
     GounarisSakurai,
@@ -20,6 +21,7 @@ __all__ = [
     "CovariantAngular",
     "Flatte",
     "GounarisSakurai",
+    "KMatrix",
     "LASS",
     "Pole",
     "RelativisticBreitWigner",
