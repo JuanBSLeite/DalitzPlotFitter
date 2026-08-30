@@ -1,47 +1,12 @@
 # Deterministic equal-area Dalitz-grid integration
 
-DalitzPlotFitter supports two normalization strategies for three-body amplitudes:
+DalitzPlotFitter uses **only deterministic equal-area `DalitzGrid` quadrature** for amplitude and PDF normalization. Monte Carlo remains available for event/toy generation through `PhaseSpaceMC`, but it is not a normalization method.
 
-1. **uniform phase-space Monte Carlo**, through `PhaseSpaceMC` / the model-owned normalization sample;
-2. **deterministic equal-area Dalitz grid**, through `DalitzGrid`.
+No adaptive or Monte Carlo quadrature is part of the supported normalization API.
 
-No adaptive quadrature is part of the supported API.
+## Grid normalization
 
-## Monte Carlo normalization
-
-The default model-owned normalization sample is generated with the pure-JAX three-body phase-space generator. The package estimator uses
-
-```text
-mean(weights * f)
-```
-
-with event-dependent phase-space weights returned by `PhaseSpaceMC`.
-
-Typical use:
-
-```python
-model = DecayModel(
-    channel,
-    components,
-    normalization_size=1_000_000,
-    normalization_seed=2027,
-)
-
-norm = model.normalization_sample
-```
-
-For coherent normalization,
-
-```text
-M_ij ~= mean(w_PS * conj(F_i) F_j)
-N = c^dagger M c.
-```
-
-This is the default normalization path of `DecayModel`.
-
-## Equal-area Dalitz-grid normalization
-
-`DalitzGrid` is the deterministic alternative. The integration is performed directly in
+The integration is performed directly in
 
 ```text
 s12 = m12^2
@@ -62,11 +27,23 @@ from dalitzplotfitter import DalitzGrid
 norm = DalitzGrid(
     channel.parent_mass,
     channel.daughter_masses,
-    resolution=800,
+    resolution=1000,
 ).sample()
 ```
 
-A resolution of `N` returns exactly `N**2` physical points. There is no bounding rectangle and no rejection/mask step.
+A resolution `N` returns exactly `N**2` physical points. There is no bounding rectangle and no rejection/mask step.
+
+`DecayModel` uses the same method internally. The default is
+
+```python
+model = DecayModel(
+    channel,
+    components,
+    normalization_resolution=1000,
+)
+```
+
+which corresponds to exactly one million deterministic integration points.
 
 ## Equal-area contour-adapted construction
 
@@ -148,13 +125,13 @@ Every cell represents the same physical area
 A_DP / N^2.
 ```
 
-The package estimator remains
+The package estimator is
 
 ```text
 mean(weights * f).
 ```
 
-Every grid point therefore stores the same constant weight
+Every grid point stores the same constant weight
 
 ```text
 weight = A_DP,
@@ -192,23 +169,26 @@ N = c^dagger M c.
 For convergence studies:
 
 ```python
-DalitzGrid(..., resolution=800, boundary_resolution=20001)
+DalitzGrid(..., resolution=1000, boundary_resolution=20001)
 ```
 
 The one-dimensional boundary table is deterministic and independent of the `N x N` midpoint grid used to evaluate amplitudes.
 
-## Choosing the normalization method
+## Convergence
 
-Use **Monte Carlo normalization** when you want the model default, straightforward scaling to large samples, or a stochastic integration sample generated directly in JAX.
+Normalization convergence should be studied by increasing `resolution`, for example
 
-Use **DalitzGrid normalization** when you want a deterministic closure test, direct quadrature-convergence studies, or to remove normalization-sample fluctuations from a fit diagnostic.
+```text
+400 -> 600 -> 800 -> 1000 -> 1200
+```
 
-For either method, convergence should be checked explicitly by increasing the MC sample size or the grid resolution.
+and comparing raw component integrals, interference terms, total normalization and fitted parameters.
 
 ## Current examples
 
-`notebooks/02_fit_dynamic_parameters.ipynb` uses `DalitzGrid` for a deterministic coefficient-closure test.
+- `notebooks/02_fit_dynamic_parameters.ipynb`: coefficient closure with deterministic grid normalization;
+- `notebooks/03_lineshape_parameter_diagnostics.ipynb`: lineshape diagnostics;
+- `notebooks/04_normalization_grid_diagnostics.ipynb`: grid-convergence diagnostics;
+- `notebooks/07_e791_rho1450_mass_width_closure.ipynb`: coefficient plus mass/width closure.
 
-`notebooks/03_lineshape_parameter_diagnostics.ipynb` and `notebooks/04_normalization_grid_diagnostics.ipynb` provide additional grid and normalization diagnostics.
-
-The model-owned Monte Carlo normalization remains available through `DecayModel.normalization_sample` and is the default normalization path of the high-level model.
+`PhaseSpaceMC` is retained only for generating event pools and pseudo-data.
