@@ -1,9 +1,4 @@
-"""Pole and LASS lineshapes.
-
-The LASS implementation follows the form collected in Appendix A of Laura++.
-The Pole model represents a scalar resonance directly through a complex pole in
-``s`` with ``sqrt(s_pole) = m0 - i Gamma0/2``.
-"""
+"""Pole and LASS lineshapes following Laura++ conventions."""
 
 from __future__ import annotations
 
@@ -17,46 +12,42 @@ from .lineshapes import breakup_momentum, effective_pole_mass
 
 @dataclass(frozen=True)
 class Pole:
-    """Simple complex-pole lineshape in the invariant mass squared.
+    """Simple fixed-width pole in ``m`` (Laura++ Eq. 37).
 
-    The pole is parameterized as
+    The Laura++ simple Breit-Wigner can be interpreted as a pole at
 
-    ``sqrt(s_pole) = m0 - i Gamma0/2``
+    ``m = m0 + i Gamma0/2``
 
-    and the mass term is
+    for the sign convention used by DalitzPlotFitter,
 
-    ``R(m) = 1 / (m^2 - s_pole)``.
+    ``R(m) = 1 / (m - m0 - i Gamma0/2)``.
 
-    This is useful for very broad scalar states where a conventional running-
-    width Breit-Wigner is not the desired parameterization.
+    Unlike ``RelativisticBreitWigner``, this form has no running width or
+    momentum-dependent barrier term inside the propagator.
     """
 
     def __call__(self, mass, context: ResonanceContext):
-        if int(context.spin) != 0:
-            raise ValueError("Pole is intended for scalar (spin-0) states")
         m = jnp.asarray(mass)
-        pole_mass = jnp.asarray(context.pole_mass)
-        pole_width = jnp.asarray(context.pole_width)
-        sqrt_s_pole = pole_mass - 0.5j * pole_width
-        s_pole = sqrt_s_pole**2
-        return 1.0 / (m**2 - s_pole)
+        m0 = jnp.asarray(context.pole_mass)
+        gamma0 = jnp.asarray(context.pole_width)
+        return 1.0 / (m - m0 - 0.5j * gamma0)
 
 
 @dataclass(frozen=True)
 class LASS:
-    """Laura++-style elastic K-pi S-wave (effective range + K0*(1430)).
+    """Laura++ K-pi S-wave: effective range + K0*(1430) resonance.
 
-    The full amplitude is the coherent sum
+    The full amplitude follows Laura++ Eq. (50),
 
-    ``R = R_NR + exp(2 i delta_B) R_BW``
+    ``R = m/(q cot(delta_B) - i q) + exp(2 i delta_B) R_BW``,
 
-    with
+    with Eq. (51),
 
     ``cot(delta_B) = 1/(a q) + r q / 2``.
 
     ``mode`` can be ``"full"``, ``"resonant"`` or ``"nonresonant"``, matching
-    the Laura++ LASS, LASS_BW and LASS_NR choices.  ``cutoff`` suppresses only
-    the effective-range nonresonant term above the requested invariant mass.
+    Laura++ ``LASS``, ``LASS_BW`` and ``LASS_NR``. ``cutoff`` suppresses only
+    the slowly varying effective-range term above the requested mass.
     """
 
     scattering_length: float = 2.07
@@ -97,13 +88,16 @@ class LASS:
             1.0 / (self.scattering_length * safe_q)
             + 0.5 * self.effective_range * safe_q
         )
-        elastic = 1.0 / (cot_delta_b - 1j)
-        phase2 = (cot_delta_b + 1j) / (cot_delta_b - 1j)
 
-        nonresonant = (m / safe_q) * elastic
+        # m / (q cot(delta_B) - i q)
+        nonresonant = m / (safe_q * (cot_delta_b - 1j))
         if self.cutoff is not None:
             nonresonant = jnp.where(m <= self.cutoff, nonresonant, 0.0j)
 
+        # exp(2 i delta_B) = (cot(delta_B)+i)/(cot(delta_B)-i)
+        phase2 = (cot_delta_b + 1j) / (cot_delta_b - 1j)
+
+        # Second term of Laura++ Eq. (50).
         numerator = m0 * gamma0 * (m0 / safe_q0)
         denominator = (
             m0**2
