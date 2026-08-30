@@ -1,6 +1,13 @@
 import jax.numpy as jnp
 
-from dalitzplotfitter import Flatte, GounarisSakurai, ResonanceContext, enable_x64
+from dalitzplotfitter import (
+    Flatte,
+    GounarisSakurai,
+    LASS,
+    Pole,
+    ResonanceContext,
+    enable_x64,
+)
 
 
 enable_x64()
@@ -20,7 +27,7 @@ def _rho_context():
     )
 
 
-def _scalar_context(m0=0.965):
+def _scalar_context(m0=0.965, width=0.0):
     mpi = 0.13957039
     return ResonanceContext(
         parent_mass=1.86965,
@@ -28,7 +35,20 @@ def _scalar_context(m0=0.965):
         bachelor_mass=mpi,
         spin=0,
         pole_mass=m0,
-        pole_width=0.0,
+        pole_width=width,
+        resonance_radius=3.0,
+        parent_radius=3.0,
+    )
+
+
+def _kpi_context():
+    return ResonanceContext(
+        parent_mass=1.86965,
+        daughter_masses=(0.493677, 0.13957039),
+        bachelor_mass=0.13957039,
+        spin=0,
+        pole_mass=1.425,
+        pole_width=0.270,
         resonance_radius=3.0,
         parent_radius=3.0,
     )
@@ -57,8 +77,6 @@ def test_f0_flatte_has_analytic_kaon_threshold_continuation():
     context = _scalar_context()
     flatte = Flatte.f0_980()
 
-    # Between pi-pi and K-K thresholds the pion width is real while the kaon
-    # width is purely imaginary, producing the characteristic dispersive cusp.
     gamma_pi, gamma_k = flatte.widths(jnp.asarray(0.97), context)
     assert abs(float(jnp.imag(gamma_pi))) < 1e-12
     assert float(jnp.real(gamma_pi)) > 0.0
@@ -84,3 +102,36 @@ def test_flatte_presets_match_laura_table_coupling_ratios():
     a0 = Flatte.a0_980_neutral()
     assert abs(float(f0.g2 / f0.g1) - 4.21) < 1e-12
     assert abs(float(a0.g2 / a0.g1) - 1.03) < 1e-12
+
+
+def test_pole_matches_laura_simple_bw_at_nominal_mass():
+    context = _scalar_context(m0=0.8, width=0.2)
+    value = Pole()(jnp.asarray(0.8), context)
+    expected = 1.0 / (-0.5j * 0.2)
+    assert abs(complex(value) - expected) < 1e-12
+
+
+def test_lass_full_is_sum_of_nonresonant_and_resonant_terms():
+    context = _kpi_context()
+    mass = jnp.asarray(1.25)
+    full = LASS()(mass, context)
+    nonresonant, resonant = LASS().terms(mass, context)
+    assert abs(complex(full - nonresonant - resonant)) < 1e-12
+
+
+def test_lass_modes_select_individual_terms():
+    context = _kpi_context()
+    mass = jnp.asarray(1.25)
+    nonresonant, resonant = LASS().terms(mass, context)
+    assert abs(complex(LASS(mode="nonresonant")(mass, context) - nonresonant)) < 1e-12
+    assert abs(complex(LASS(mode="resonant")(mass, context) - resonant)) < 1e-12
+
+
+def test_lass_cutoff_only_removes_nonresonant_term():
+    context = _kpi_context()
+    mass = jnp.asarray(1.85)
+    model = LASS(cutoff=1.8)
+    nonresonant, resonant = model.terms(mass, context)
+    assert abs(complex(nonresonant)) < 1e-12
+    assert abs(complex(resonant)) > 0.0
+    assert abs(complex(model(mass, context) - resonant)) < 1e-12
