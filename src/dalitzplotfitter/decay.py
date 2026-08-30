@@ -21,8 +21,8 @@ from dalitzplotfitter.dynamics import (
     ResonanceContext,
 )
 from dalitzplotfitter.fit import Parameter, ParameterKind
-from dalitzplotfitter.integration import MonteCarloIntegrator
-from dalitzplotfitter.kinematics import PhaseSpaceMC, PhaseSpaceSample
+from dalitzplotfitter.integration import GridIntegrator
+from dalitzplotfitter.kinematics import DalitzGrid, PhaseSpaceMC, PhaseSpaceSample
 from dalitzplotfitter.pdf import SignalPDF
 
 
@@ -193,18 +193,19 @@ class NonResonant:
 
 @dataclass(frozen=True, init=False)
 class DecayModel:
-    """Build a coherent three-body amplitude with a stable normalization convention.
+    """Build a coherent three-body amplitude with deterministic grid normalization.
 
-    By default every dynamical component is normalized to unit phase-space
-    integral. A weighted phase-space sample used for those integrals is generated
-    lazily on first use and then reused for the lifetime of the model.
+    By default every dynamical component is normalized to unit Dalitz integral.
+    A deterministic equal-area ``DalitzGrid`` sample is generated lazily on first
+    use and then reused for the lifetime of the model. ``PhaseSpaceMC`` remains
+    available only for event/toy generation and is not used for normalization.
     """
 
     channel: DecayChannel
     components: tuple[Resonance | NonResonant, ...]
     normalize_components: bool
-    normalization_size: int
-    normalization_seed: int | None
+    normalization_resolution: int
+    normalization_boundary_resolution: int | None
     _normalization_sample: PhaseSpaceSample | None
 
     def __init__(
@@ -213,16 +214,27 @@ class DecayModel:
         components: Iterable[Resonance | NonResonant],
         *,
         normalize_components: bool = True,
-        normalization_size: int = 1_000_000,
-        normalization_seed: int | None = 2027,
+        normalization_resolution: int = 1000,
+        normalization_boundary_resolution: int | None = None,
     ) -> None:
-        if normalization_size <= 0:
-            raise ValueError("normalization_size must be positive")
+        if normalization_resolution < 2:
+            raise ValueError("normalization_resolution must be at least 2")
+        if (
+            normalization_boundary_resolution is not None
+            and normalization_boundary_resolution < 4
+        ):
+            raise ValueError("normalization_boundary_resolution must be at least 4")
         object.__setattr__(self, "channel", channel)
         object.__setattr__(self, "components", tuple(components))
         object.__setattr__(self, "normalize_components", bool(normalize_components))
-        object.__setattr__(self, "normalization_size", int(normalization_size))
-        object.__setattr__(self, "normalization_seed", normalization_seed)
+        object.__setattr__(
+            self, "normalization_resolution", int(normalization_resolution)
+        )
+        object.__setattr__(
+            self,
+            "normalization_boundary_resolution",
+            normalization_boundary_resolution,
+        )
         object.__setattr__(self, "_normalization_sample", None)
         if not self.components:
             raise ValueError("DecayModel requires at least one amplitude component")
@@ -275,14 +287,16 @@ class DecayModel:
 
     @property
     def normalization_sample(self) -> PhaseSpaceSample:
-        """Internal weighted MC sample used for component/PDF normalization."""
+        """Internal deterministic Dalitz-grid sample used for normalization."""
 
         sample = self._normalization_sample
         if sample is None:
-            sample = self.generate_phase_space(
-                self.normalization_size,
-                seed=self.normalization_seed,
-            )
+            sample = DalitzGrid(
+                self.channel.parent_mass,
+                self.channel.daughter_masses,
+                resolution=self.normalization_resolution,
+                boundary_resolution=self.normalization_boundary_resolution,
+            ).sample()
             object.__setattr__(self, "_normalization_sample", sample)
         return sample
 
@@ -340,6 +354,8 @@ class DecayModel:
         *,
         seed: int | None = None,
     ) -> PhaseSpaceSample:
+        """Generate weighted phase-space events for toys/proposals, not normalization."""
+
         return PhaseSpaceMC(
             self.channel.parent_mass,
             self.channel.daughter_masses,
@@ -382,7 +398,7 @@ class DecayModel:
             kwargs["efficiency"] = efficiency
         return SignalPDF(
             intensity=intensity,
-            integrator=MonteCarloIntegrator(sample),
+            integrator=GridIntegrator(sample),
             **kwargs,
         )
 
@@ -394,7 +410,7 @@ class DecayModel:
         efficiency_normalization=None,
         normalize_components: bool | None = None,
     ) -> PreparedAmplitudeCache:
-        """Prepare the optimized likelihood cache using the model convention."""
+        """Prepare the optimized likelihood cache using deterministic normalization."""
 
         sample = self.normalization_sample if normalization_sample is None else normalization_sample
         normalize = self.normalize_components if normalize_components is None else bool(normalize_components)
