@@ -20,6 +20,7 @@ from dalitzplotfitter.dynamics import (
     ResonanceAmplitude,
     ResonanceContext,
 )
+from dalitzplotfitter.dynamics.context import resolve_value
 from dalitzplotfitter.fit import Parameter, ParameterKind
 from dalitzplotfitter.integration import GridIntegrator
 from dalitzplotfitter.kinematics import DalitzGrid, PhaseSpaceMC, PhaseSpaceSample
@@ -171,16 +172,8 @@ class Resonance:
             _validate_positive_quantity(self.mass, f"{self.name}.mass", allow_zero=False)
         if self.width is not None:
             _validate_positive_quantity(self.width, f"{self.name}.width", allow_zero=True)
-        _validate_positive_quantity(
-            self.resonance_radius,
-            f"{self.name}.resonance_radius",
-            allow_zero=True,
-        )
-        _validate_positive_quantity(
-            self.parent_radius,
-            f"{self.name}.parent_radius",
-            allow_zero=True,
-        )
+        _validate_positive_quantity(self.resonance_radius, f"{self.name}.resonance_radius", allow_zero=True)
+        _validate_positive_quantity(self.parent_radius, f"{self.name}.parent_radius", allow_zero=True)
         if self.spin is not None and (self.spin < 0 or int(self.spin) != self.spin):
             raise ValueError("resonance spin must be a non-negative integer")
 
@@ -191,18 +184,34 @@ class NonResonant:
     name: str = "NR"
 
 
-@dataclass(frozen=True, init=False)
-class DecayModel:
-    """Build a coherent three-body amplitude with deterministic grid normalization.
+@dataclass(frozen=True)
+class DalitzAmplitude:
+    """Direct amplitude depending on two Dalitz coordinates.
 
-    By default every dynamical component is normalized to unit Dalitz integral.
-    A deterministic equal-area ``DalitzGrid`` sample is generated lazily on first
-    use and then reused for the lifetime of the model. ``PhaseSpaceMC`` remains
-    available only for event/toy generation and is not used for normalization.
+    This declaration is intended for dynamics such as ``QMI2D`` that are not a
+    one-dimensional isobar lineshape and therefore act directly on the event's
+    Dalitz invariants.
     """
 
+    name: str
+    dynamics: object
+    coefficient: object
+
+
+@dataclass(frozen=True)
+class _ResolvedDirectDynamics:
+    dynamics: object
+
+    def __call__(self, data, parameters=None):
+        return resolve_value(self.dynamics, parameters)(data)
+
+
+@dataclass(frozen=True, init=False)
+class DecayModel:
+    """Build a coherent three-body amplitude with deterministic grid normalization."""
+
     channel: DecayChannel
-    components: tuple[Resonance | NonResonant, ...]
+    components: tuple[Resonance | NonResonant | DalitzAmplitude, ...]
     normalize_components: bool
     normalization_resolution: int
     normalization_boundary_resolution: int | None
@@ -211,7 +220,7 @@ class DecayModel:
     def __init__(
         self,
         channel: DecayChannel,
-        components: Iterable[Resonance | NonResonant],
+        components: Iterable[Resonance | NonResonant | DalitzAmplitude],
         *,
         normalize_components: bool = True,
         normalization_resolution: int = 1000,
@@ -219,22 +228,13 @@ class DecayModel:
     ) -> None:
         if normalization_resolution < 2:
             raise ValueError("normalization_resolution must be at least 2")
-        if (
-            normalization_boundary_resolution is not None
-            and normalization_boundary_resolution < 4
-        ):
+        if normalization_boundary_resolution is not None and normalization_boundary_resolution < 4:
             raise ValueError("normalization_boundary_resolution must be at least 4")
         object.__setattr__(self, "channel", channel)
         object.__setattr__(self, "components", tuple(components))
         object.__setattr__(self, "normalize_components", bool(normalize_components))
-        object.__setattr__(
-            self, "normalization_resolution", int(normalization_resolution)
-        )
-        object.__setattr__(
-            self,
-            "normalization_boundary_resolution",
-            normalization_boundary_resolution,
-        )
+        object.__setattr__(self, "normalization_resolution", int(normalization_resolution))
+        object.__setattr__(self, "normalization_boundary_resolution", normalization_boundary_resolution)
         object.__setattr__(self, "_normalization_sample", None)
         if not self.components:
             raise ValueError("DecayModel requires at least one amplitude component")
@@ -249,9 +249,7 @@ class DecayModel:
         for component in self.components:
             for parameter in _collect_parameters(component):
                 if parameter.name in names and names[parameter.name] != parameter:
-                    raise ValueError(
-                        f"Conflicting definitions for parameter {parameter.name!r}"
-                    )
+                    raise ValueError(f"Conflicting definitions for parameter {parameter.name!r}")
                 names[parameter.name] = parameter
                 if parameter.kind is ParameterKind.DYNAMICS:
                     if parameter.owner != component.name:
@@ -268,11 +266,7 @@ class DecayModel:
                             f"backend key {backend_key!r} for component {component.name!r}"
                         )
                     dynamics_slots[slot] = parameter
-                if (
-                    parameter.kind is ParameterKind.COEFFICIENT
-                    and parameter.owner is not None
-                    and parameter.owner != component.name
-                ):
+                if parameter.kind is ParameterKind.COEFFICIENT and parameter.owner is not None and parameter.owner != component.name:
                     raise ValueError(
                         f"Coefficient parameter {parameter.name!r} must have owner={component.name!r}"
                     )
@@ -287,8 +281,6 @@ class DecayModel:
 
     @property
     def normalization_sample(self) -> PhaseSpaceSample:
-        """Internal deterministic Dalitz-grid sample used for normalization."""
-
         sample = self._normalization_sample
         if sample is None:
             sample = DalitzGrid(
@@ -304,11 +296,9 @@ class DecayModel:
         i, j = component.pair
         bachelor = next(index for index in range(3) if index not in component.pair)
         masses = self.channel.daughter_masses
-
         mass0 = component.mass if component.mass is not None else _mass_gev(component.name)
         width0 = component.width if component.width is not None else _width_gev(component.name)
         spin = component.spin if component.spin is not None else _spin(component.name)
-
         context = ResonanceContext(
             parent_mass=self.channel.parent_mass,
             daughter_masses=(masses[i], masses[j]),
@@ -337,10 +327,12 @@ class DecayModel:
             if isinstance(component, Resonance):
                 built.append(self._build_resonance(component))
             elif isinstance(component, NonResonant):
+                built.append(AmplitudeComponent(component.name, ConstantAmplitude(), component.coefficient))
+            elif isinstance(component, DalitzAmplitude):
                 built.append(
                     AmplitudeComponent(
                         component.name,
-                        ConstantAmplitude(),
+                        _ResolvedDirectDynamics(component.dynamics),
                         component.coefficient,
                     )
                 )
@@ -348,18 +340,8 @@ class DecayModel:
                 raise TypeError(f"Unsupported amplitude component: {type(component)!r}")
         return CoherentAmplitudeModel(tuple(built))
 
-    def generate_phase_space(
-        self,
-        size: int,
-        *,
-        seed: int | None = None,
-    ) -> PhaseSpaceSample:
-        """Generate weighted phase-space events for toys/proposals, not normalization."""
-
-        return PhaseSpaceMC(
-            self.channel.parent_mass,
-            self.channel.daughter_masses,
-        ).generate(size, seed=seed)
+    def generate_phase_space(self, size: int, *, seed: int | None = None) -> PhaseSpaceSample:
+        return PhaseSpaceMC(self.channel.parent_mass, self.channel.daughter_masses).generate(size, seed=seed)
 
     def _component_scale(self, component: AmplitudeComponent, values=None):
         if not self.normalize_components:
@@ -382,25 +364,14 @@ class DecayModel:
         amplitude = self.amplitude(data, values)
         return jnp.real(amplitude * jnp.conj(amplitude))
 
-    def pdf(
-        self,
-        normalization_sample: PhaseSpaceSample | None = None,
-        *,
-        efficiency=None,
-    ) -> SignalPDF:
+    def pdf(self, normalization_sample: PhaseSpaceSample | None = None, *, efficiency=None) -> SignalPDF:
         sample = self.normalization_sample if normalization_sample is None else normalization_sample
-
         def intensity(data, parameters):
             return self.intensity(data, parameters)
-
         kwargs = {}
         if efficiency is not None:
             kwargs["efficiency"] = efficiency
-        return SignalPDF(
-            intensity=intensity,
-            integrator=GridIntegrator(sample),
-            **kwargs,
-        )
+        return SignalPDF(intensity=intensity, integrator=GridIntegrator(sample), **kwargs)
 
     def prepare_cache(
         self,
@@ -410,8 +381,6 @@ class DecayModel:
         efficiency_normalization=None,
         normalize_components: bool | None = None,
     ) -> PreparedAmplitudeCache:
-        """Prepare the optimized likelihood cache using deterministic normalization."""
-
         sample = self.normalization_sample if normalization_sample is None else normalization_sample
         normalize = self.normalize_components if normalize_components is None else bool(normalize_components)
         return PreparedAmplitudeCache.prepare(

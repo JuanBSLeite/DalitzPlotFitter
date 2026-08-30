@@ -17,7 +17,7 @@ from dalitzplotfitter.kinematics import (
 
 from .angular import CovariantAngular
 from .context import ResonanceContext, resolve_value
-from .lineshapes import (
+from .lineshape import (
     RelativisticBreitWigner,
     bachelor_momentum_resonance_frame,
     blatt_weisskopf_from_momenta,

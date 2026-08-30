@@ -8,12 +8,20 @@ from .amplitude import (
 )
 from .coefficients import RealImag
 from .config import enable_x64
-from .decay import DecayChannel, DecayModel, NonResonant, Resonance
+from .decay import DalitzAmplitude, DecayChannel, DecayModel, NonResonant, Resonance
 from .dynamics import (
     CovariantAngular,
+    Flatte,
+    GounarisSakurai,
+    KMatrix,
+    LASS,
+    Pole,
+    QMI,
+    QMI2D,
     RelativisticBreitWigner,
     ResonanceAmplitude,
     ResonanceContext,
+    physical_bin_mask,
 )
 from .fit import Minimizer, MultiStartResult, Parameter, ParameterKind
 from .kinematics import (
@@ -34,9 +42,14 @@ __all__ = [
     "ConstantAmplitude",
     "CovariantAngular",
     "CovariantKinematics",
+    "DalitzAmplitude",
     "DalitzGrid",
     "DecayChannel",
     "DecayModel",
+    "Flatte",
+    "GounarisSakurai",
+    "KMatrix",
+    "LASS",
     "Minimizer",
     "MultiStartResult",
     "NonResonant",
@@ -44,7 +57,10 @@ __all__ = [
     "ParameterKind",
     "PhaseSpaceMC",
     "PhaseSpaceSample",
+    "Pole",
     "PreparedAmplitudeCache",
+    "QMI",
+    "QMI2D",
     "RealImag",
     "RelativisticBreitWigner",
     "Resonance",
@@ -55,5 +71,6 @@ __all__ = [
     "covariant_kinematics_from_invariants",
     "dalitz_s13_limits",
     "enable_x64",
+    "physical_bin_mask",
     "weighted_resample",
 ]

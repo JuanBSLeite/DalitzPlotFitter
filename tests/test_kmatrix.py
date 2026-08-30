@@ -1,0 +1,122 @@
+import jax.numpy as jnp
+
+from dalitzplotfitter import KMatrix, RealImag, ResonanceContext, enable_x64
+
+
+enable_x64()
+
+
+def _context():
+    mpi = 0.13957039
+    return ResonanceContext(
+        parent_mass=1.86965,
+        daughter_masses=(mpi, mpi),
+        bachelor_mass=mpi,
+        spin=0,
+        pole_mass=1.0,
+        pole_width=0.0,
+        resonance_radius=3.0,
+        parent_radius=3.0,
+    )
+
+
+def test_kmatrix_scattering_matrix_is_symmetric():
+    model = KMatrix()
+    masses = jnp.asarray([0.35, 0.80, 1.00, 1.30, 1.70])
+    matrix = model.scattering_matrix(masses)
+    assert matrix.shape == (5, 5, 5)
+    assert bool(
+        jnp.allclose(
+            matrix,
+            jnp.swapaxes(matrix, -1, -2),
+            rtol=0.0,
+            atol=1e-12,
+        )
+    )
+
+
+def test_kmatrix_phase_space_has_five_channels_and_continuation():
+    model = KMatrix()
+    rho = model.phase_space(jnp.asarray(0.80))
+    assert rho.shape == (5,)
+    assert abs(float(jnp.imag(rho[0]))) < 1e-12
+    assert float(jnp.real(rho[0])) > 0.0
+    assert abs(float(jnp.real(rho[1]))) < 1e-12
+    assert float(jnp.imag(rho[1])) > 0.0
+
+
+def test_kmatrix_pvector_and_amplitude_are_finite():
+    model = KMatrix(
+        betas=(
+            RealImag(1.0, 0.0),
+            RealImag(0.2, -0.1),
+            0.0j,
+            0.0j,
+            0.0j,
+        )
+    )
+    masses = jnp.asarray([0.31, 0.50, 0.90, 1.10, 1.40, 1.75])
+    production = model.production_vector(masses)
+    amplitude = model.amplitude_vector(masses)
+    assert production.shape == (6, 5)
+    assert amplitude.shape == (6, 5)
+    assert bool(jnp.all(jnp.isfinite(jnp.real(amplitude))))
+    assert bool(jnp.all(jnp.isfinite(jnp.imag(amplitude))))
+
+
+def test_kmatrix_is_stable_exactly_at_bare_poles():
+    model = KMatrix(
+        betas=(1.0 + 0.2j, 0.3j, -0.2 + 0.1j, 0.1j, 0.05 + 0.02j)
+    )
+    masses = jnp.asarray([0.65100, 1.20360, 1.55817, 1.21000, 1.82206])
+    amplitude = model.amplitude_vector(masses)
+    assert bool(jnp.all(jnp.isfinite(jnp.real(amplitude))))
+    assert bool(jnp.all(jnp.isfinite(jnp.imag(amplitude))))
+
+
+def test_kmatrix_five_channel_s_matrix_is_unitary_when_all_channels_open():
+    model = KMatrix()
+    threshold = 0.547862 + 0.95778
+    masses = jnp.linspace(threshold + 1e-4, 1.72, 150)
+    s_matrix = model.s_matrix(masses)
+    sdag_s = jnp.einsum(
+        "...ji,...jk->...ik",
+        jnp.conj(s_matrix),
+        s_matrix,
+    )
+    identity = jnp.eye(5, dtype=jnp.complex128)
+    residual = sdag_s - identity
+    assert float(jnp.max(jnp.abs(residual))) < 5e-9
+
+
+def test_kmatrix_returns_pipi_channel_and_rejects_non_scalar_context():
+    model = KMatrix()
+    context = _context()
+    mass = jnp.asarray(0.90)
+    vector = model.amplitude_vector(mass)
+    value = model(mass, context)
+    assert abs(complex(value - vector[0])) < 1e-12
+
+    bad = ResonanceContext(
+        parent_mass=context.parent_mass,
+        daughter_masses=context.daughter_masses,
+        bachelor_mass=context.bachelor_mass,
+        spin=1,
+        pole_mass=context.pole_mass,
+        pole_width=context.pole_width,
+    )
+    try:
+        model(mass, bad)
+    except ValueError as exc:
+        assert "scalar" in str(exc)
+    else:
+        raise AssertionError("KMatrix accepted a non-scalar context")
+
+
+def test_kmatrix_production_coefficients_are_linear():
+    masses = jnp.asarray([0.50, 0.90, 1.30])
+    first = KMatrix(betas=(1.0j, 0.0j, 0.0j, 0.0j, 0.0j))
+    doubled = KMatrix(betas=(2.0j, 0.0j, 0.0j, 0.0j, 0.0j))
+    a1 = first.amplitude_vector(masses)
+    a2 = doubled.amplitude_vector(masses)
+    assert bool(jnp.allclose(a2, 2.0 * a1, rtol=1e-11, atol=1e-11))
