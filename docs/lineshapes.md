@@ -4,7 +4,7 @@ DalitzPlotFitter implements resonance dynamics directly in JAX. Laura++ is one o
 
 ## Available lineshapes
 
-The public lineshapes are:
+The public dynamics models are:
 
 ```python
 RelativisticBreitWigner()
@@ -12,15 +12,16 @@ Pole()
 GounarisSakurai()
 Flatte(...)
 LASS(...)
+KMatrix(...)
 ```
 
-A lineshape is any callable with the interface
+A scalar dynamics plugin is any callable with the interface
 
 ```python
 lineshape(mass, context)
 ```
 
-and can be supplied through `Resonance(..., lineshape=...)` without changing the model or cache architecture.
+and can be supplied through `Resonance(..., lineshape=...)` without changing the model or cache architecture. `KMatrix` uses the same interface externally, but internally evaluates a coupled five-channel matrix amplitude.
 
 ## Relativistic Breit-Wigner
 
@@ -82,18 +83,7 @@ f(m) = Gamma0 m0^2/q0^3 *
 h(m) = (2/pi) (q/m) log[(m+2q)/(2 m_pi)].
 ```
 
-`GounarisSakurai` requires a spin-1 `ResonanceContext`. The pion mass entering the analytic GS function is taken as the arithmetic mean of the two resonance-daughter pion masses.
-
-Example:
-
-```python
-Resonance(
-    "rho(770)0",
-    pair=(0, 1),
-    coefficient=RealImag(1.0, 0.0),
-    lineshape=GounarisSakurai(),
-)
-```
+`GounarisSakurai` requires a spin-1 `ResonanceContext`.
 
 ## Flatte
 
@@ -127,22 +117,6 @@ Flatte.a0_980_neutral()
 Flatte.a0_980_charged()
 ```
 
-Example:
-
-```python
-Resonance(
-    "f0_980",
-    pair=(0, 1),
-    coefficient=RealImag(x, y),
-    mass=0.965,
-    width=0.0,
-    spin=0,
-    lineshape=Flatte.f0_980(),
-)
-```
-
-For a Flatte component the ordinary `Resonance.width` is not the physical width parameter of the lineshape; the imaginary part is determined by the channel couplings.
-
 ## LASS K-pi S-wave
 
 `LASS` follows Laura++ Appendix A, Eqs. (50)-(51):
@@ -156,42 +130,95 @@ R(m) = m / [q cot(delta_B) - i q]
 cot(delta_B) = 1/(a q) + r q/2.
 ```
 
-The default effective-range values are the commonly used LASS measurements
+The default effective-range values are
 
 ```text
 a = 2.07 GeV^-1
 r = 3.32 GeV^-1.
 ```
 
-The slowly varying non-resonant part can be cut off with `cutoff`. The resonant term is not removed by that cutoff.
-
-The Laura++ decomposition is available through the `mode` option:
+The Laura++ decomposition is available through
 
 ```python
-LASS(mode="full")          # Laura++ LASS
-LASS(mode="resonant")      # Laura++ LASS_BW
-LASS(mode="nonresonant")   # Laura++ LASS_NR
+LASS(mode="full")
+LASS(mode="resonant")
+LASS(mode="nonresonant")
 ```
 
-or directly with
+## Five-channel K-matrix pi-pi S-wave
 
-```python
-nonresonant, resonant = LASS().terms(mass, context)
+`KMatrix` implements the standard five-pole, five-channel Anisovich-Sarantsev model used by Laura++ for the scalar pi-pi system. The channel order is
+
+```text
+1: pi pi
+2: K Kbar
+3: 4 pi
+4: eta eta
+5: eta eta'
 ```
+
+The scattering matrix is
+
+```text
+K_ij(s) = [ sum_alpha g_i^alpha g_j^alpha/(m_alpha^2-s)
+          + f_ij^scatt (1-s0_scatt/s)/(s-s0_scatt) ] f_A0(s)
+```
+
+with Adler factor
+
+```text
+f_A0(s) = (1-s_A0/s) (s-s_A m_pi^2/2).
+```
+
+The production vector has the same pole structure,
+
+```text
+P_j(s) = sum_alpha beta_alpha g_j^alpha/(m_alpha^2-s)
+       + f_1j^prod (1-s0_prod/s)/(s-s0_prod),
+```
+
+and the physical coupled-channel amplitude is
+
+```text
+F = (I - i K rho)^(-1) P.
+```
+
+`KMatrix(...)` returns the pi-pi component `F_1` through the ordinary lineshape interface. The five bare masses, the 25 pole couplings, `f_scatt`, `s0_scatt`, `s_A0`, and `s_A` are fixed to the standard scattering solution. Process-dependent production parameters are supplied through the five complex `betas` and five complex `f_prod` values.
+
+For a fitter model, these production quantities can be `RealImag` objects whose real and imaginary parts are `Parameter` instances. They are then collected by `DecayModel.parameters` and can be minimized like other fit parameters, while the scattering constants remain fixed by default.
 
 Example:
 
 ```python
+kmatrix = KMatrix(
+    betas=(
+        RealImag(beta1_re, beta1_im),
+        RealImag(beta2_re, beta2_im),
+        0j,
+        0j,
+        0j,
+    ),
+    f_prod=(
+        RealImag(f11_re, f11_im),
+        0j,
+        0j,
+        0j,
+        0j,
+    ),
+)
+
 Resonance(
-    "Kpi_S",
+    "pipi_S_kmatrix",
     pair=(0, 1),
-    coefficient=RealImag(x, y),
-    mass=1.425,
-    width=0.270,
+    coefficient=RealImag(1.0, 0.0),
+    mass=1.0,
+    width=0.0,
     spin=0,
-    lineshape=LASS(scattering_length=2.07, effective_range=3.32, cutoff=1.7),
+    lineshape=kmatrix,
 )
 ```
+
+The `mass` and `width` fields in that declaration are placeholders required by the common `ResonanceContext`; the K-matrix uses its own fixed pole table. Because the component is scalar, the external Blatt-Weisskopf and angular factors are unity.
 
 ## Component composition
 
@@ -214,10 +241,14 @@ The default angular model is `CovariantAngular()`, and identical final-state par
 
 All amplitude-component and coherent-PDF normalization uses the deterministic equal-area `DalitzGrid`. `PhaseSpaceMC` is retained only for toy/proposal generation.
 
-## Validation notebook
+## Validation notebooks
 
-`notebooks/08_lineshape_validation_gs_flatte.ipynb` contains isolated Flatte, Gounaris-Sakurai, Pole and LASS models, deterministic Dalitz-grid densities and 100k-event toy-MC samples for visual validation.
+`notebooks/08_lineshape_validation_gs_flatte.ipynb` contains isolated Flatte, Gounaris-Sakurai, Pole and LASS models.
 
-## Reference
+`notebooks/09_kmatrix_validation.ipynb` shows the five K-matrix phase-space channels, the first row of `K(s)`, the P-vector, the rescattered pi-pi amplitude, a deterministic Dalitz-grid model and a 100k-event toy MC.
 
-J. Back et al., *Laura++: a Dalitz plot fitter*, Computer Physics Communications 231 (2018) 198-242, arXiv:1711.09854. The Pole/BW, GS, Flatte and LASS equations are taken from Appendix A.
+## References
+
+J. Back et al., *Laura++: a Dalitz plot fitter*, Computer Physics Communications 231 (2018) 198-242, arXiv:1711.09854.
+
+V. V. Anisovich and A. V. Sarantsev, *K-matrix analysis of the (IJ^PC = 00++)-wave in the mass region below 1900 MeV*, Eur. Phys. J. A 16 (2003) 229.
