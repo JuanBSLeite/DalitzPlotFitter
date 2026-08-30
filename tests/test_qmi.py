@@ -19,7 +19,7 @@ enable_x64()
 def _context():
     mpi = 0.13957039
     return ResonanceContext(
-        parent_mass=1.86965,
+        parent_mass=1.96834,
         daughter_masses=(mpi, mpi),
         bachelor_mass=mpi,
         spin=0,
@@ -38,13 +38,14 @@ def test_qmi_returns_exact_complex_values_at_knots():
     assert bool(jnp.allclose(values, expected, rtol=0.0, atol=1e-12))
 
 
-def test_qmi_interpolates_magnitude_and_phase_linearly():
+def test_qmi_interpolates_magnitude_and_phase_linearly_in_s():
     model = QMI(
         knots=(0.4, 0.8),
         magnitudes=(1.0, 3.0),
         phases=(0.2, 1.0),
     )
-    magnitude, phase = model.interpolated_magnitude_phase(jnp.asarray(0.6))
+    mass = jnp.sqrt(0.5 * (0.4**2 + 0.8**2))
+    magnitude, phase = model.interpolated_magnitude_phase(mass)
     assert abs(float(magnitude) - 2.0) < 1e-12
     assert abs(float(phase) - 0.6) < 1e-12
 
@@ -102,7 +103,7 @@ def test_qmi_knot_parameters_are_collected_and_resolved_by_decay_model():
         phases=(d0, 0.4),
     )
     decay = DecayModel(
-        DecayChannel("D+", ("pi-", "pi+", "pi+")),
+        DecayChannel("D_s+", ("pi-", "pi+", "pi+")),
         [
             Resonance(
                 owner,
