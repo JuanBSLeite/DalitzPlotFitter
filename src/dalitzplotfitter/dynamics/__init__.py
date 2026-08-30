@@ -13,12 +13,15 @@ from .lineshapes import (
     energy_dependent_width,
     kallen,
 )
+from .pole_lass import LASS, Pole
 from .resonance import ResonanceAmplitude
 
 __all__ = [
     "CovariantAngular",
     "Flatte",
     "GounarisSakurai",
+    "LASS",
+    "Pole",
     "RelativisticBreitWigner",
     "ResonanceAmplitude",
     "ResonanceContext",
