@@ -16,7 +16,7 @@ from .lineshapes import (
 )
 from .pole_lass import LASS, Pole
 from .qmi import QMI
-from .qmi2d import QMI2D
+from .qmi2d import QMI2D, physical_bin_mask
 from .resonance import ResonanceAmplitude
 
 __all__ = [
@@ -38,4 +38,5 @@ __all__ = [
     "effective_pole_mass",
     "energy_dependent_width",
     "kallen",
+    "physical_bin_mask",
 ]
