@@ -43,4 +43,25 @@ When only coefficient parameters float, the existing amplitude cache is fully re
 
 At least one complex amplitude convention must still be fixed, exactly as in an ordinary amplitude fit. For example, a reference component can be fixed to `1 + 0i`; otherwise the overall complex scale/phase produces degeneracies.
 
-`notebooks/12_cp_coefficients_closure.ipynb` demonstrates a complete generation-and-fit closure test with known non-zero `dx` and `dy`, independent positive/negative toys, cached likelihoods, one randomized start, and a simultaneous Minuit fit.
+## LHCb-inspired B+ -> K+ pi+ pi- benchmark
+
+`notebooks/12_cp_coefficients_closure.ipynb` uses the same Cartesian CP convention as the 2026 LHCb amplitude analysis of `B+ -> K+ pi+ pi-` (arXiv:2608.12612, 2608.12613 and 2608.12614).
+
+The first benchmark is deliberately a truncated non-S-wave model containing:
+
+- `K*(892)0`, fixed to `1 + 0i` as the common reference;
+- `rho(770)0`;
+- `K2*(1430)0`;
+- `f2(1270)`;
+- `rho3(1690)0`.
+
+For every non-reference component, the notebook reconstructs charge-dependent complex coefficients from the published Isobar-model central values of fit fraction, quasi-two-body CP asymmetry, average strong phase, and `delta_minus - delta_plus`. The reconstructed `c_plus` and `c_minus` are then converted into `x`, `y`, `dx`, and `dy` and used as the truth parameters.
+
+The notebook generates independent `B+` and `B-` pseudo-data samples, performs one simultaneous fit with one randomized start, and compares both the Cartesian parameters and the reconstructed physical observables
+
+```text
+A_CP = (|c_minus|^2 - |c_plus|^2) / (|c_minus|^2 + |c_plus|^2)
+Delta phi = arg(c_minus / c_plus).
+```
+
+This benchmark is intended as a fitter closure test, not as an exact reproduction of the full LHCb experimental likelihood. The published model also contains several additional resonances and substantial `K pi` and `pi pi` S-wave contributions. Those will be added only after the non-S-wave CP closure is stable.
