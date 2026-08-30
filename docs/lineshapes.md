@@ -127,7 +127,7 @@ qmi = QMI(
 A_ij = a_ij exp(i phi_ij).
 ```
 
-The axes are given directly in Dalitz invariants (`s12` and `s13`) through bin edges. Magnitudes and phases may contain ordinary numbers or dynamical `Parameter` objects, so every cell can be floated in a fit.
+The axes are given directly in Dalitz invariants (`s12` and `s13`) through bin edges. Magnitudes and phases may contain ordinary numbers or dynamical `Parameter` objects, so every active cell can be floated in a fit.
 
 Three evaluation modes are available:
 
@@ -143,6 +143,44 @@ QMI2D(..., interpolation="cubic")
 
 All three implementations are JAX-native and therefore compatible with automatic differentiation and minimization.
 
+### Physical Dalitz-bin mask
+
+For a real three-body decay, the rectangular `s12 x s13` grid contains cells that never intersect the physical Dalitz region. `physical_bin_mask(...)` marks only cells with physical support using the exact analytic Dalitz boundary. The bin edges themselves should be built from the exact kinematic endpoints,
+
+```text
+s12_min = (m1 + m2)^2
+s12_max = (M - m3)^2
+```
+
+rather than from the minimum/maximum of midpoint integration samples. This is important at the endpoint: `DalitzGrid` uses midpoint quadrature, so its largest sampled `s12` lies below the true `s12_max`, even though a physical boundary bin must still extend all the way to `s12_max`.
+
+Example:
+
+```python
+smin = (m1 + m2)**2
+smax = (M - m3)**2
+edges = np.linspace(smin, smax, 9)
+
+mask = physical_bin_mask(
+    tuple(edges), tuple(edges),
+    mother_mass=M,
+    masses=(m1, m2, m3),
+    folded=True,
+)
+
+field = QMI2D(
+    s12_edges=tuple(edges),
+    s13_edges=tuple(edges),
+    magnitudes=magnitudes,
+    phases=phases,
+    active_mask=mask,
+    interpolation="cubic",
+    folded=True,
+)
+```
+
+For `interpolation="none"`, inactive cells evaluate to zero. For linear/cubic interpolation, inactive rectangular cells act only as ghost support filled from the nearest active cell; they are not intended to carry independent physics parameters.
+
 For channels with two identical particles, `folded=True` evaluates the field at
 
 ```text
@@ -155,15 +193,6 @@ which imposes the exchange symmetry directly on the two-dimensional field. This 
 A QMI2D component is attached directly to the coherent amplitude model:
 
 ```python
-field = QMI2D(
-    s12_edges=s_edges,
-    s13_edges=s_edges,
-    magnitudes=magnitudes,
-    phases=phases,
-    interpolation="cubic",
-    folded=True,
-)
-
 model = DecayModel(
     channel,
     [DalitzAmplitude("qmi2d", field, RealImag(1.0, 0.0))],
@@ -183,7 +212,7 @@ All amplitude-component and coherent-PDF normalization uses deterministic `Dalit
 - `notebooks/08_lineshape_validation_gs_flatte.ipynb`: Flatte, Gounaris-Sakurai, Pole and LASS.
 - `notebooks/09_kmatrix_validation.ipynb`: K-matrix, coupled-channel unitarity, Dalitz density and toy MC.
 - `notebooks/10_qmi_validation.ipynb`: published 50-point `D_s+ -> pi- pi+ pi+` QMI S-wave.
-- `notebooks/11_qmi2d_validation.ipynb`: 2D complex Dalitz field with no, linear and cubic interpolation.
+- `notebooks/11_qmi2d_validation.ipynb`: exact kinematic endpoints, physical/folded active-bin map, and 2D complex field with no, linear and cubic interpolation.
 
 ## References
 
