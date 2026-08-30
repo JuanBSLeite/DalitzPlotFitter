@@ -43,12 +43,17 @@ def _complex_value(value):
 
 
 def _two_body_rho(s, mass1, mass2):
+    """Laura++ two-body phase-space factor with continuation below threshold."""
+
     s = jnp.asarray(s)
-    argument = 1.0 - (mass1 + mass2) ** 2 / s
+    threshold2 = (mass1 + mass2) ** 2
+    argument = 1.0 - threshold2 / s
     return jnp.sqrt(argument.astype(jnp.complex128))
 
 
 def _four_pi_rho(s):
+    """Anisovich-Sarantsev four-pion phase-space approximation used by Laura++."""
+
     s = jnp.asarray(s)
     low = (
         1.2274
@@ -65,6 +70,11 @@ def _four_pi_rho(s):
 
 
 def _phase_space_vector(s):
+    """Diagonal rho entries in Laura++ channel order.
+
+    Channels are pi-pi, K-Kbar, 4pi, eta-eta, eta-eta'.
+    """
+
     return jnp.stack(
         [
             _two_body_rho(s, _MPI, _MPI),
@@ -78,29 +88,48 @@ def _phase_space_vector(s):
 
 
 def _slowly_varying_factor(s, s0):
+    """Laura++ factor (1 - s0/s) / (s - s0)."""
+
     return (1.0 - s0 / s) / (s - s0)
 
 
 def _adler_factor(s):
+    """Laura++ Adler-zero factor (1-sA0/s)(s-sA*m_pi^2/2)."""
+
     return (1.0 - _S_A0 / s) * (s - 0.5 * _S_A * _MPI**2)
 
 
-def _safe_pole_denominators(s):
+def _stable_inverse_denominators(s):
+    """Bare-pole inverse denominators with a machine-scale regulator.
+
+    K and P diverge separately at a bare pole while the rescattered physical
+    amplitude has a finite limiting value. The regulator only acts when a
+    floating-point sample lands exactly on a bare-pole location.
+    """
+
     denominators = _POLE_MASSES**2 - s[..., None]
-    eps = jnp.asarray(1e-12, dtype=denominators.dtype)
-    signs = jnp.where(denominators < 0.0, -1.0, 1.0)
-    return jnp.where(jnp.abs(denominators) < eps, signs * eps, denominators)
+    eps = jnp.finfo(s.dtype).eps
+    scale = jnp.maximum(1.0, jnp.abs(_POLE_MASSES**2))
+    regularized = jnp.where(
+        jnp.abs(denominators) <= eps * scale,
+        jnp.where(denominators < 0.0, -eps * scale, eps * scale),
+        denominators,
+    )
+    return 1.0 / regularized
 
 
 def _scattering_matrix(s):
+    """Five-pole Anisovich-Sarantsev K(s) with Laura++ constants."""
+
     s = jnp.asarray(s)
-    denominators = _safe_pole_denominators(s)
+    inverse_denominators = _stable_inverse_denominators(s)
     pole_terms = jnp.einsum(
         "...a,au,av->...uv",
-        1.0 / denominators,
+        inverse_denominators,
         _POLE_COUPLINGS,
         _POLE_COUPLINGS,
     )
+
     f_scatt = jnp.zeros((5, 5), dtype=s.dtype)
     f_scatt = f_scatt.at[0, :].set(_F_SCATT_ROW)
     f_scatt = f_scatt.at[:, 0].set(_F_SCATT_ROW)
@@ -110,7 +139,18 @@ def _scattering_matrix(s):
 
 @dataclass(frozen=True)
 class KMatrix:
-    """Laura++ five-pole/five-channel pi-pi S-wave production amplitude."""
+    """Laura++ five-pole/five-channel pi-pi S-wave production amplitude.
+
+    The scattering matrix is fixed to the Anisovich-Sarantsev parameters used by
+    Laura++. Process-dependent production parameters are the five complex pole
+    coefficients ``betas`` and five complex slowly-varying production terms
+    ``f_prod``. They may be numerical complex values or ``RealImag`` objects
+    containing fit ``Parameter`` instances.
+
+    The returned scalar is channel 1 (pi-pi) of
+
+    ``F = (I - i K rho)^(-1) P``.
+    """
 
     betas: tuple[object, object, object, object, object] = (
         1.0 + 0.0j,
@@ -140,16 +180,42 @@ class KMatrix:
     def scattering_matrix(self, mass):
         return _scattering_matrix(jnp.asarray(mass) ** 2)
 
+    def scattering_amplitude(self, mass):
+        """Coupled-channel T matrix: T = (I - i K rho)^(-1) K."""
+
+        mass = jnp.asarray(mass)
+        k_matrix = self.scattering_matrix(mass).astype(jnp.complex128)
+        rho = self.phase_space(mass)
+        kernel = jnp.eye(5, dtype=jnp.complex128) - 1j * k_matrix * rho[..., None, :]
+        return jnp.linalg.solve(kernel, k_matrix)
+
+    def s_matrix(self, mass):
+        """Scattering S matrix in the standard phase-space-normalized basis.
+
+        For energies where all included channels are open, rho is real and
+        positive and this construction obeys S^dagger S = I up to numerical
+        precision when K is real symmetric.
+        """
+
+        mass = jnp.asarray(mass)
+        rho = self.phase_space(mass)
+        sqrt_rho = jnp.sqrt(rho)
+        t_matrix = self.scattering_amplitude(mass)
+        dressed = sqrt_rho[..., :, None] * t_matrix * sqrt_rho[..., None, :]
+        return jnp.eye(5, dtype=jnp.complex128) + 2j * dressed
+
     def production_vector(self, mass):
         s = jnp.asarray(mass) ** 2
         beta = jnp.stack([_complex_value(value) for value in self.betas])
         f_prod = jnp.stack([_complex_value(value) for value in self.f_prod])
         s0_prod = jnp.asarray(self.s0_prod)
+
+        inverse_denominators = _stable_inverse_denominators(s)
         pole = jnp.einsum(
             "a,aj,...a->...j",
             beta,
             _POLE_COUPLINGS,
-            1.0 / _safe_pole_denominators(s),
+            inverse_denominators,
         )
         smooth = f_prod * _slowly_varying_factor(s[..., None], s0_prod)
         return pole + smooth
@@ -159,6 +225,8 @@ class KMatrix:
         k_matrix = self.scattering_matrix(mass).astype(jnp.complex128)
         rho = self.phase_space(mass)
         production = self.production_vector(mass)
+
+        # K rho multiplies each K column j by rho_j.
         kernel = jnp.eye(5, dtype=jnp.complex128) - 1j * k_matrix * rho[..., None, :]
         return jnp.linalg.solve(kernel, production[..., :, None])[..., 0]
 
