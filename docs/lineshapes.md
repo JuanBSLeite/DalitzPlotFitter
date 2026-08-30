@@ -87,7 +87,7 @@ The scattering constants are fixed by default while the process-dependent `betas
 
 ## QMI / QMIPWA S-wave
 
-`QMI` implements a quasi-model-independent scalar amplitude specified at fixed two-body mass knots. The convention follows the LHCb `D_s+ -> pi- pi+ pi+` QMIPWA: magnitude and phase are specified at each knot and are linearly interpolated separately as functions of
+`QMI` implements a quasi-model-independent scalar amplitude specified at fixed two-body mass knots. The interpolation coordinate is
 
 ```text
 s = m(pi pi)^2.
@@ -100,7 +100,16 @@ A_S(s_k) = a_k exp(i delta_k)
 A_S(s)   = a(s) exp(i delta(s)).
 ```
 
-The public `knots` argument is still given as masses in GeV, matching the published tables; internally `QMI` squares the masses and performs the interpolation in `s`. Entries of `magnitudes` and `phases` may be numerical constants or fit `Parameter` objects. Phases are expressed in radians and should be supplied as a continuous/unwrapped sequence; the interpolation does not impose a `[-pi, pi)` branch cut.
+Magnitude and phase are interpolated separately. Two interpolation modes are available:
+
+```python
+QMI(..., interpolation="linear")  # default; reproduces the published LHCb convention
+QMI(..., interpolation="cubic")   # natural cubic spline in s=m^2
+```
+
+The cubic mode is implemented directly in JAX with natural boundary conditions, so the knot magnitudes and phases remain differentiable fit parameters. Both modes pass exactly through all supplied knots; outside the knot range the nearest endpoint value is used.
+
+The public `knots` argument is given as masses in GeV, matching the published tables; internally `QMI` squares the masses and interpolates in `s`. Entries of `magnitudes` and `phases` may be numerical constants or fit `Parameter` objects. Phases are expressed in radians and should be supplied as a continuous/unwrapped sequence; interpolation does not impose a `[-pi, pi)` branch cut.
 
 Example:
 
@@ -109,6 +118,7 @@ qmi = QMI(
     knots=(0.30, 0.50, 0.70, 0.90, 1.10),
     magnitudes=(a0, a1, a2, a3, a4),
     phases=(d0, d1, d2, d3, d4),
+    interpolation="cubic",
 )
 
 Resonance(
