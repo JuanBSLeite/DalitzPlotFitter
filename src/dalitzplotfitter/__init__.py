@@ -11,6 +11,8 @@ from .config import enable_x64
 from .decay import DecayChannel, DecayModel, NonResonant, Resonance
 from .dynamics import (
     CovariantAngular,
+    Flatte,
+    GounarisSakurai,
     RelativisticBreitWigner,
     ResonanceAmplitude,
     ResonanceContext,
@@ -37,6 +39,8 @@ __all__ = [
     "DalitzGrid",
     "DecayChannel",
     "DecayModel",
+    "Flatte",
+    "GounarisSakurai",
     "Minimizer",
     "MultiStartResult",
     "NonResonant",
