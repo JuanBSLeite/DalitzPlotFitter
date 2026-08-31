@@ -40,7 +40,7 @@ For the implemented convention,
 
 where `q` is the daughter momentum in the `ij` rest frame and `p` is the bachelor momentum in that frame.
 
-## Quadrature
+## Uniform quadrature
 
 Two deterministic quadratures are available:
 
@@ -62,36 +62,48 @@ so the sampling itself is uniform on `[0,1] x [0,1]`; all non-uniformity of the 
 
 The Gauss-Legendre weights are folded into `PhaseSpaceSample.weights` together with the physical Jacobian. They are scaled so that the package-wide convention `mean(weights * f)` remains valid.
 
-## Usage
+## Adaptive Square-Dalitz integration
 
-The standard Square-Dalitz grid is simply
+`AdaptiveSquareDalitzGrid` is intended for models containing narrow or rapidly varying structures. It does **not** use resonance metadata such as mass or width. Refinement is driven directly by the raw amplitude basis.
+
+For each Square-Dalitz cell, the algorithm forms the bilinear matrix-valued integrand
+
+```text
+G_ij(m',theta') = J(m',theta') F_i^*(m',theta') F_j(m',theta')
+```
+
+and compares two local quadrature estimates:
+
+1. one midpoint evaluation for the whole cell;
+2. four midpoint evaluations at the centers of the four quarter cells.
+
+The cell is subdivided if any numerically relevant matrix element changes by more than the requested relative `tolerance`. Consequently the refinement responds both to diagonal structures `|F_i|^2` and to rapidly varying real or imaginary interference terms `F_i^* F_j`.
+
+A mandatory `min_depth` can be used as a guard against an extremely narrow feature falling entirely between the centers of the initial cells. `max_depth` and `max_cells` cap the computational cost.
 
 ```python
-from dalitzplotfitter import SquareDalitzGrid
+from dalitzplotfitter import AdaptiveSquareDalitzGrid
 
-normalization_sample = SquareDalitzGrid(
+adaptive = AdaptiveSquareDalitzGrid(
     model.channel.parent_mass,
     model.channel.daughter_masses,
-    resolution=1000,
-    pair=(0, 2),
-    quadrature="midpoint",
-).sample()
+    pair=(0, 1),
+    base_resolution=20,
+    min_depth=1,
+    max_depth=5,
+    tolerance=0.02,
+).build(model)
 
+normalization_sample = adaptive.sample
 cache = model.prepare_cache(
     data_sample,
     normalization_sample=normalization_sample,
 )
 ```
 
-The same sample may be supplied to `DecayModel.pdf(normalization_sample=...)`.
+`AdaptiveSquareDalitzResult` also stores `leaf_bounds`, `leaf_depths`, `leaf_errors`, `mprime` and `thetaprime`, allowing the adaptive mesh to be plotted and diagnosed.
 
-No amplitude, coefficient, cache, likelihood or minimizer code depends on the coordinate system used to construct the normalization sample. The normalization matrix remains
-
-```text
-M_ij = integral F_i^* F_j dPhi
-```
-
-and a coherent model is normalized as `c^dagger M c`.
+Because the refinement criterion only evaluates the component functions, the method also applies to lineshapes or amplitudes without a meaningful pole mass or width, including LASS, Flatte, K-matrix, QMI and direct two-dimensional Dalitz amplitudes.
 
 ## What must converge in a fit
 
@@ -131,6 +143,16 @@ m_13 = m(K+ pi-).
 
 The Square Dalitz sample is used for component normalization, the charge integrals `I+` and `I-`, and the joint CP likelihood denominator `I+ + I-`.
 
+## Narrow phi(1020) example
+
+`notebooks/14_adaptive_sqdp_phi_kkk.ipynb` constructs a minimal
+
+```text
+B+ -> K- K+ K+
+```
+
+model with a symmetrized `phi(1020)` plus a nonresonant term. It compares uniform midpoint grids with the adaptive grid against a dense Square-Dalitz reference and visualizes where the adaptive cells concentrate.
+
 ## Validation
 
 `tests/test_square_dalitz.py` checks:
@@ -140,4 +162,4 @@ The Square Dalitz sample is used for component normalization, the charge integra
 - Gauss-Legendre constant and smooth-moment integrals;
 - convergence for a narrow Breit-Wigner-like structure at sufficiently high resolution.
 
-The narrow-structure test intentionally compares a 250x250 Gauss grid against a 500x500 reference at tight relative precision. A coarser 120x120 grid is not expected to reach the same tolerance for a K*(892)-like width. These comparisons protect the transformation, Jacobian and quadrature-weight convention from silent errors.
+`tests/test_adaptive_square.py` additionally checks that the adaptive weights reproduce the physical Square-Dalitz measure and that a narrow artificial structure triggers deep local refinement even though its position and width are not supplied to the algorithm.
