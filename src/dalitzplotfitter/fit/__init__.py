@@ -1,5 +1,6 @@
 """Fit configuration and minimization."""
 
+from .bias import genfit_bias_summary, print_genfit_bias_summary
 from .genfit import GaussianFitResult, GenFit, GenFitRecord, GenFitResult
 from .minimizer import Minimizer, MultiStartResult
 from .outliers import (
@@ -26,10 +27,12 @@ __all__ = [
     "Parameter",
     "ParameterKind",
     "RobustGaussianFitResult",
+    "genfit_bias_summary",
     "genfit_distribution",
     "genfit_outlier_selection",
     "genfit_robust_gaussian_fit",
     "genfit_robust_summary",
+    "print_genfit_bias_summary",
     "print_genfit_robust_summary",
     "robust_gaussian_fit",
     "robust_outlier_mask",
