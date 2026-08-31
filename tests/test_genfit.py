@@ -9,6 +9,9 @@ from dalitzplotfitter import (
     Parameter,
     RealImag,
     Resonance,
+    genfit_robust_summary,
+    robust_gaussian_fit,
+    robust_outlier_mask,
 )
 
 
@@ -105,3 +108,40 @@ def test_genfit_is_reproducible_for_fixed_seeds():
         second.values("sigma.x", valid_only=False),
     )
     np.testing.assert_allclose(first.nll, second.nll)
+
+
+def test_robust_outlier_mask_removes_catastrophic_tail():
+    values = np.asarray([-0.2, -0.1, 0.0, 0.1, 0.2, 25.0])
+    selection = robust_outlier_mask(values, threshold=5.0)
+    assert selection.n_outliers == 1
+    assert not selection.mask[-1]
+    assert selection.n_kept == 5
+
+
+def test_robust_gaussian_fit_reports_rejected_entries():
+    values = np.asarray([-0.2, -0.1, 0.0, 0.1, 0.2, 50.0])
+    fit = robust_gaussian_fit(values, threshold=5.0)
+    assert fit.n_entries == 6
+    assert fit.n_kept == 5
+    assert fit.n_outliers == 1
+    assert np.isfinite(fit.mean)
+    assert np.isfinite(fit.sigma)
+
+
+def test_genfit_robust_summary_reports_outlier_columns():
+    study = GenFit(
+        _small_model(),
+        n_fits=3,
+        sample_size=150,
+        grid_resolution=25,
+        pool_size=1_500,
+        seed=321,
+        start_range=(-1.0, 1.0),
+        ncall=3_000,
+        verbose=0,
+    )
+    result = study.run()
+    rows = genfit_robust_summary(result, threshold=5.0)
+    assert [row["name"] for row in rows] == ["sigma.x", "sigma.y", "nll"]
+    assert all("n_outliers" in row for row in rows)
+    assert all("outlier_fraction" in row for row in rows)
