@@ -10,6 +10,7 @@ from dalitzplotfitter import (
     RealImag,
     Resonance,
     genfit_robust_summary,
+    print_genfit_robust_summary,
     robust_gaussian_fit,
     robust_outlier_mask,
 )
@@ -145,3 +146,24 @@ def test_genfit_robust_summary_reports_outlier_columns():
     assert [row["name"] for row in rows] == ["sigma.x", "sigma.y", "nll"]
     assert all("n_outliers" in row for row in rows)
     assert all("outlier_fraction" in row for row in rows)
+
+
+def test_print_genfit_robust_summary_has_rejected_column(capsys):
+    study = GenFit(
+        _small_model(),
+        n_fits=2,
+        sample_size=120,
+        grid_resolution=20,
+        pool_size=1_200,
+        seed=654,
+        start_range=(-1.0, 1.0),
+        ncall=3_000,
+        verbose=0,
+    )
+    result = study.run()
+    print_genfit_robust_summary(result, threshold=5.0)
+    output = capsys.readouterr().out
+    assert "rejected" in output
+    assert "rejected %" in output
+    assert "sigma.x" in output
+    assert "nll" in output
