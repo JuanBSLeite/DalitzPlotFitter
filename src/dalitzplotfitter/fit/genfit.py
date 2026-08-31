@@ -1,18 +1,8 @@
-"""Repeated generate-and-fit studies for Dalitz-plot models.
-
-The :class:`GenFit` driver implements the standard pseudoexperiment workflow:
-generate independent toys from one injected model, fit every toy, collect the
-fitted parameters and fit diagnostics, and summarize their distributions with
-Gaussian fits.
-
-The first implementation is intentionally optimized for coefficient-only fits.
-For that common closure-test case the expensive amplitude evaluation on the
-candidate pool and the normalization matrix are cached once and reused by all
-pseudoexperiments.
-"""
+"""Repeated generate-and-fit studies for Dalitz-plot models."""
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
 import math
@@ -45,7 +35,9 @@ class GenFitRecord:
     """Result of one generated pseudoexperiment and one fit."""
 
     index: int
-    valid: bool
+    converged: bool
+    accepted: bool
+    rejection_reasons: tuple[str, ...]
     values: dict[str, float]
     errors: dict[str, float]
     start_values: dict[str, float]
@@ -53,6 +45,12 @@ class GenFitRecord:
     truth_nll: float
     edm: float
     nfcn: int
+
+    @property
+    def valid(self) -> bool:
+        """Backward-compatible alias for ``accepted``."""
+
+        return self.accepted
 
 
 class GenFitResult:
@@ -74,18 +72,50 @@ class GenFitResult:
         return len(self.records)
 
     @property
+    def n_converged(self) -> int:
+        return sum(record.converged for record in self.records)
+
+    @property
+    def n_accepted(self) -> int:
+        return sum(record.accepted for record in self.records)
+
+    @property
     def n_valid(self) -> int:
-        return sum(record.valid for record in self.records)
+        """Backward-compatible alias for ``n_accepted``."""
+
+        return self.n_accepted
+
+    @property
+    def convergence_rate(self) -> float:
+        if not self.records:
+            return math.nan
+        return self.n_converged / self.n_fits
+
+    @property
+    def acceptance_rate(self) -> float:
+        if not self.records:
+            return math.nan
+        return self.n_accepted / self.n_fits
 
     @property
     def success_rate(self) -> float:
-        if not self.records:
-            return math.nan
-        return self.n_valid / self.n_fits
+        """Backward-compatible alias for ``acceptance_rate``."""
+
+        return self.acceptance_rate
+
+    @property
+    def converged_mask(self) -> np.ndarray:
+        return np.asarray([record.converged for record in self.records], dtype=bool)
+
+    @property
+    def accepted_mask(self) -> np.ndarray:
+        return np.asarray([record.accepted for record in self.records], dtype=bool)
 
     @property
     def valid_mask(self) -> np.ndarray:
-        return np.asarray([record.valid for record in self.records], dtype=bool)
+        """Backward-compatible alias for ``accepted_mask``."""
+
+        return self.accepted_mask
 
     @property
     def nll(self) -> np.ndarray:
@@ -103,15 +133,25 @@ class GenFitResult:
     def nfcn(self) -> np.ndarray:
         return np.asarray([record.nfcn for record in self.records], dtype=int)
 
+    def rejection_summary(self) -> dict[str, int]:
+        """Count the reasons why converged fits were not accepted."""
+
+        reasons = Counter(
+            reason
+            for record in self.records
+            for reason in record.rejection_reasons
+        )
+        return dict(sorted(reasons.items()))
+
     def values(self, name: str, *, valid_only: bool = True) -> np.ndarray:
         self._check_parameter(name)
         values = np.asarray([record.values[name] for record in self.records], dtype=float)
-        return values[self.valid_mask] if valid_only else values
+        return values[self.accepted_mask] if valid_only else values
 
     def errors(self, name: str, *, valid_only: bool = True) -> np.ndarray:
         self._check_parameter(name)
         values = np.asarray([record.errors[name] for record in self.records], dtype=float)
-        return values[self.valid_mask] if valid_only else values
+        return values[self.accepted_mask] if valid_only else values
 
     def starts(self, name: str) -> np.ndarray:
         self._check_parameter(name)
@@ -169,13 +209,14 @@ class GenFitResult:
         )
 
     def gaussian_fit(self, name: str) -> GaussianFitResult:
-        """Fit a Gaussian to a fitted-parameter distribution or to ``'nll'``."""
+        """Fit a Gaussian to an accepted parameter distribution or NLL."""
 
         if name not in self._gaussian_cache:
-            if name == "nll":
-                values = self.nll[self.valid_mask]
-            else:
-                values = self.values(name, valid_only=True)
+            values = (
+                self.nll[self.accepted_mask]
+                if name == "nll"
+                else self.values(name, valid_only=True)
+            )
             self._gaussian_cache[name] = self._gaussian_fit(values)
         return self._gaussian_cache[name]
 
@@ -184,7 +225,11 @@ class GenFitResult:
 
         rows: list[dict[str, float | int | str | bool]] = []
         for name in (*self.parameter_names, "nll"):
-            values = self.nll[self.valid_mask] if name == "nll" else self.values(name)
+            values = (
+                self.nll[self.accepted_mask]
+                if name == "nll"
+                else self.values(name)
+            )
             gaussian = self.gaussian_fit(name)
             rows.append(
                 {
@@ -202,12 +247,19 @@ class GenFitResult:
         return rows
 
     def print_summary(self) -> None:
-        """Print convergence and Gaussian-summary tables."""
+        """Print convergence, acceptance, rejection reasons, and statistics."""
 
         print(
-            f"GenFit: {self.n_valid}/{self.n_fits} valid fits "
-            f"({100.0 * self.success_rate:.1f}%)"
+            f"GenFit: {self.n_converged}/{self.n_fits} converged "
+            f"({100.0 * self.convergence_rate:.1f}%), "
+            f"{self.n_accepted}/{self.n_fits} accepted "
+            f"({100.0 * self.acceptance_rate:.1f}%)"
         )
+        reasons = self.rejection_summary()
+        if reasons:
+            print("Rejected-fit reasons:")
+            for reason, count in reasons.items():
+                print(f"  {reason}: {count}")
         print(
             f"{'quantity':18s} {'mean':>13s} {'std':>13s} "
             f"{'gauss mean':>13s} {'gauss sigma':>13s}"
@@ -229,10 +281,10 @@ class GenFitResult:
         ax=None,
         density: bool = False,
     ):
-        """Plot one GenFit histogram and overlay its fitted Gaussian."""
+        """Plot one accepted GenFit distribution and fitted Gaussian."""
 
         if name == "nll":
-            values = self.nll[self.valid_mask]
+            values = self.nll[self.accepted_mask]
             truth = None
         else:
             values = self.values(name)
@@ -241,7 +293,7 @@ class GenFitResult:
 
         if ax is None:
             _, ax = plt.subplots(figsize=(7.0, 4.8))
-        counts, edges, _ = ax.hist(values, bins=bins, density=density, alpha=0.65)
+        _, edges, _ = ax.hist(values, bins=bins, density=density, alpha=0.65)
         centers = 0.5 * (edges[:-1] + edges[1:])
         if gaussian.valid and gaussian.sigma > 0.0 and centers.size:
             x = np.linspace(edges[0], edges[-1], 500)
@@ -250,11 +302,8 @@ class GenFitResult:
                 y = pdf / (math.sqrt(2.0 * math.pi) * gaussian.sigma)
             else:
                 bin_width = float(np.mean(np.diff(edges)))
-                y = (
-                    gaussian.n_entries
-                    * bin_width
-                    * pdf
-                    / (math.sqrt(2.0 * math.pi) * gaussian.sigma)
+                y = gaussian.n_entries * bin_width * pdf / (
+                    math.sqrt(2.0 * math.pi) * gaussian.sigma
                 )
             ax.plot(x, y, label="Gaussian fit")
         if truth is not None:
@@ -278,27 +327,7 @@ class GenFitResult:
 
 
 class GenFit:
-    """Run repeated generated-sample fits for a coefficient-only Dalitz model.
-
-    Parameters
-    ----------
-    model:
-        Configured :class:`~dalitzplotfitter.decay.DecayModel`.
-    n_fits:
-        Number of pseudoexperiments.
-    sample_size:
-        Number of unweighted events in each pseudoexperiment.
-    truth_values:
-        Injected free-parameter values. If omitted, the current values of the
-        model's free parameters are used.
-
-    Notes
-    -----
-    Floating dynamics parameters are deliberately rejected in this first
-    implementation. Coefficient-only GenFits can reuse the cached candidate-pool
-    amplitudes and fixed normalization matrix and are therefore much faster for
-    hundreds of pseudoexperiments.
-    """
+    """Run repeated generated-sample fits for a coefficient-only Dalitz model."""
 
     def __init__(
         self,
@@ -316,6 +345,9 @@ class GenFit:
         simplex: bool = False,
         ncall: int | None = 100_000,
         tolerance: float = 1e-4,
+        max_edm: float = 1e-3,
+        require_posdef_covar: bool = True,
+        reject_at_limit: bool = True,
         verbose: int = 1,
     ):
         if isinstance(n_fits, bool) or not isinstance(n_fits, int) or n_fits <= 0:
@@ -330,7 +362,11 @@ class GenFit:
             raise ValueError("grid_resolution must be positive")
         if tolerance <= 0.0:
             raise ValueError("tolerance must be positive")
-        if ncall is not None and (isinstance(ncall, bool) or not isinstance(ncall, int) or ncall <= 0):
+        if max_edm <= 0.0:
+            raise ValueError("max_edm must be positive")
+        if ncall is not None and (
+            isinstance(ncall, bool) or not isinstance(ncall, int) or ncall <= 0
+        ):
             raise ValueError("ncall must be a positive integer or None")
         if isinstance(verbose, bool) or not isinstance(verbose, int) or verbose < 0:
             raise ValueError("verbose must be a non-negative integer")
@@ -346,6 +382,9 @@ class GenFit:
         self.simplex = bool(simplex)
         self.ncall = ncall
         self.tolerance = float(tolerance)
+        self.max_edm = float(max_edm)
+        self.require_posdef_covar = bool(require_posdef_covar)
+        self.reject_at_limit = bool(reject_at_limit)
         self.verbose = verbose
 
         self.free_parameters = tuple(p for p in model.parameters if not p.fixed)
@@ -399,10 +438,7 @@ class GenFit:
         if self.verbose:
             print(f"[GenFit] {message}", flush=True)
 
-    def _draw_start(
-        self,
-        rng: np.random.Generator,
-    ) -> dict[str, float]:
+    def _draw_start(self, rng: np.random.Generator) -> dict[str, float]:
         starts = {}
         for parameter in self.free_parameters:
             if self.start_range is None:
@@ -442,6 +478,40 @@ class GenFit:
                 value = min(value, float(high))
         return value
 
+    def _quality(self, fit: Minuit, names: tuple[str, ...]) -> tuple[bool, bool, tuple[str, ...]]:
+        """Return numerical convergence, GenFit acceptance, and rejection reasons."""
+
+        fmin = fit.fmin
+        nll_finite = np.isfinite(float(fit.fval))
+        converged = bool(fit.valid) and nll_finite
+        reasons: list[str] = []
+
+        if not converged:
+            reasons.append("not_converged")
+        if not nll_finite:
+            reasons.append("nonfinite_nll")
+
+        edm = float(fmin.edm)
+        if not np.isfinite(edm) or edm > self.max_edm:
+            reasons.append("edm")
+
+        errors = np.asarray([float(fit.errors[name]) for name in names], dtype=float)
+        if np.any(~np.isfinite(errors)) or np.any(errors <= 0.0):
+            reasons.append("invalid_errors")
+
+        if self.require_posdef_covar:
+            has_covariance = bool(getattr(fmin, "has_covariance", False))
+            posdef = bool(getattr(fmin, "has_posdef_covar", False))
+            hesse_failed = bool(getattr(fmin, "hesse_failed", False))
+            if not has_covariance or not posdef or hesse_failed:
+                reasons.append("covariance")
+
+        if self.reject_at_limit and bool(getattr(fmin, "has_parameters_at_limit", False)):
+            reasons.append("at_limit")
+
+        accepted = converged and not reasons
+        return converged, accepted, tuple(dict.fromkeys(reasons))
+
     def run(self) -> GenFitResult:
         """Generate and fit all pseudoexperiments and return their collection."""
 
@@ -450,7 +520,7 @@ class GenFit:
         )
         pool = self.model.generate_phase_space(self.pool_size, seed=self.pool_seed)
         pool_cache = self.model.prepare_cache(pool, self.normalization_sample)
-        truth_intensity, truth_normalization = pool_cache.evaluate(self.truth_values)
+        truth_intensity, _ = pool_cache.evaluate(self.truth_values)
         target_weights = jnp.asarray(pool.weights * truth_intensity)
         probabilities = target_weights / jnp.sum(target_weights)
 
@@ -473,7 +543,9 @@ class GenFit:
             amplitude = data_components @ coefficients
             intensity = jnp.abs(amplitude) ** 2
             normalization = matrix_normalization(coefficients, normalization_matrix)
-            return -jnp.sum(jnp.log(jnp.clip(intensity, min=1e-300))) + sample_size * jnp.log(normalization)
+            return -jnp.sum(jnp.log(jnp.clip(intensity, min=1e-300))) + (
+                sample_size * jnp.log(normalization)
+            )
 
         value_and_grad = jax.jit(jax.value_and_grad(vector_nll, argnums=0))
         truth_vector = jnp.asarray([self.truth_values[name] for name in names])
@@ -522,10 +594,12 @@ class GenFit:
             fit.hesse()
 
             truth_nll, _ = value_and_grad(truth_vector, data_components)
-            valid = bool(fit.valid) and np.isfinite(float(fit.fval))
+            converged, accepted, rejection_reasons = self._quality(fit, names)
             record = GenFitRecord(
                 index=index,
-                valid=valid,
+                converged=converged,
+                accepted=accepted,
+                rejection_reasons=rejection_reasons,
                 values={name: float(fit.values[name]) for name in names},
                 errors={name: float(fit.errors[name]) for name in names},
                 start_values=start_values,
@@ -537,20 +611,21 @@ class GenFit:
             records.append(record)
             if self.verbose >= 2 or (
                 self.verbose == 1
-                and ((index + 1) == 1 or (index + 1) % max(1, self.n_fits // 10) == 0)
+                and (
+                    (index + 1) == 1
+                    or (index + 1) % max(1, self.n_fits // 10) == 0
+                )
             ):
+                reason_text = ",".join(rejection_reasons) if rejection_reasons else "-"
                 self._log(
-                    f"{index + 1}/{self.n_fits}: valid={valid} "
+                    f"{index + 1}/{self.n_fits}: converged={converged} "
+                    f"accepted={accepted} reasons={reason_text} "
                     f"NLL={record.nll:.6f} EDM={record.edm:.3e}"
                 )
 
-        result = GenFitResult(
-            tuple(records),
-            self.truth_values,
-            names,
-        )
+        result = GenFitResult(tuple(records), self.truth_values, names)
         self._log(
-            f"finished: {result.n_valid}/{result.n_fits} valid fits "
-            f"({100.0 * result.success_rate:.1f}%)"
+            f"finished: {result.n_converged}/{result.n_fits} converged, "
+            f"{result.n_accepted}/{result.n_fits} accepted"
         )
         return result
