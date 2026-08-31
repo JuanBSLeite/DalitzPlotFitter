@@ -9,6 +9,7 @@ from .outliers import (
     genfit_outlier_selection,
     genfit_robust_gaussian_fit,
     genfit_robust_summary,
+    print_genfit_robust_summary,
     robust_gaussian_fit,
     robust_outlier_mask,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "genfit_outlier_selection",
     "genfit_robust_gaussian_fit",
     "genfit_robust_summary",
+    "print_genfit_robust_summary",
     "robust_gaussian_fit",
     "robust_outlier_mask",
 ]
