@@ -189,17 +189,17 @@ def _quadrature_axis(n: int, quadrature: str) -> tuple[jnp.ndarray, jnp.ndarray]
 class SquareDalitzGrid:
     """Deterministic grid in square-Dalitz coordinates with Jacobian weights.
 
-    ``quadrature='midpoint'`` reproduces the original regular midpoint grid.
-    ``quadrature='gauss-legendre'`` uses tensor-product Gauss-Legendre nodes
-    and is recommended for likelihood normalization, especially when narrow
-    structures make midpoint convergence too slow.
+    ``quadrature='gauss-legendre'`` is the default and uses tensor-product
+    Gauss-Legendre nodes for likelihood normalization. ``quadrature='midpoint'``
+    reproduces the original regular midpoint grid for diagnostics and backwards
+    comparisons.
     """
 
     mother_mass: float
     masses: tuple[float, float, float]
     resolution: int = 800
     pair: tuple[int, int] = (0, 1)
-    quadrature: str = "midpoint"
+    quadrature: str = "gauss-legendre"
 
     def __post_init__(self) -> None:
         if self.resolution < 2:
