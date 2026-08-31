@@ -25,6 +25,7 @@ from .dynamics import (
     physical_bin_mask,
 )
 from .fit import Minimizer, MultiStartResult, Parameter, ParameterKind
+from .integration import AdaptiveSquareDalitzGrid, AdaptiveSquareDalitzResult
 from .kinematics import (
     CovariantKinematics,
     DalitzGrid,
@@ -42,6 +43,8 @@ from .kinematics import (
 from .sampling import weighted_resample
 
 __all__ = [
+    "AdaptiveSquareDalitzGrid",
+    "AdaptiveSquareDalitzResult",
     "AmplitudeComponent",
     "BaBarFlatte",
     "CPRealImag",
