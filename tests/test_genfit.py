@@ -9,7 +9,9 @@ from dalitzplotfitter import (
     Parameter,
     RealImag,
     Resonance,
+    genfit_bias_summary,
     genfit_robust_summary,
+    print_genfit_bias_summary,
     print_genfit_robust_summary,
     robust_gaussian_fit,
     robust_outlier_mask,
@@ -125,6 +127,35 @@ def test_genfit_is_reproducible_for_fixed_seeds():
     np.testing.assert_allclose(first.nll, second.nll)
     np.testing.assert_array_equal(first.converged_mask, second.converged_mask)
     np.testing.assert_array_equal(first.accepted_mask, second.accepted_mask)
+
+
+def test_genfit_bias_summary_reports_bias_and_pull_calibration(capsys):
+    result = GenFit(
+        _small_model(),
+        n_fits=4,
+        sample_size=180,
+        grid_resolution=25,
+        pool_size=1_800,
+        seed=246,
+        start_range=(-1.0, 1.0),
+        ncall=4_000,
+        verbose=0,
+    ).run()
+    rows = genfit_bias_summary(result)
+    assert [row["name"] for row in rows] == ["sigma.x", "sigma.y"]
+    for row in rows:
+        assert row["entries"] == result.n_accepted
+        assert "bias" in row
+        assert "mean_error" in row
+        assert "bias_significance" in row
+        assert "pull_mean" in row
+        assert "pull_width" in row
+
+    print_genfit_bias_summary(result)
+    output = capsys.readouterr().out
+    assert "bias/err" in output
+    assert "pull mean" in output
+    assert "pull width" in output
 
 
 def test_robust_outlier_mask_removes_catastrophic_tail():
