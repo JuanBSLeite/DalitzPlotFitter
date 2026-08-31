@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import jax.numpy as jnp
+import numpy as np
 
 from .sample import PhaseSpaceSample
 
@@ -63,9 +64,7 @@ def square_dalitz_to_invariants(
     q = jnp.sqrt(jnp.maximum(_kallen(s_ij, mi**2, mj**2), 0.0)) / (2.0 * root_s)
     p = jnp.sqrt(jnp.maximum(_kallen(mother_mass**2, s_ij, mk**2), 0.0)) / (2.0 * root_s)
 
-    # Helicity-angle convention: theta is the angle between daughter i and the
-    # bachelor k in the ij rest frame. Flipping theta -> pi-theta only mirrors
-    # theta' and leaves the integration Jacobian unchanged.
+    # theta is the angle between daughter i and the bachelor k in the ij frame.
     s_ik = mi**2 + mk**2 + 2.0 * (e_i * e_k - q * p * jnp.cos(theta))
     total = mother_mass**2 + sum(value**2 for value in masses)
     s_jk = total - s_ij - s_ik
@@ -86,7 +85,15 @@ def square_dalitz_jacobian(
     masses: tuple[float, float, float],
     pair: tuple[int, int] = (0, 1),
 ):
-    """Absolute Jacobian ``|d(s_ab,s_ac)/d(m',theta')|`` for the SDP map."""
+    """Absolute Jacobian ``|d(s_ij,s_ik)/d(m',theta')|`` for the SDP map.
+
+    With ``m_ij = m_min + Delta_m/2 * (1 + cos(pi m'))`` and
+    ``theta = pi theta'`` the determinant factorizes because ``s_ij`` is
+    independent of ``theta'``::
+
+        |J| = |ds_ij/dm'| |ds_ik/dtheta'|
+            = 2 pi^2 Delta_m m_ij q p sin(pi m') sin(pi theta').
+    """
 
     i, j = pair
     if i == j or i not in (0, 1, 2) or j not in (0, 1, 2):
@@ -152,14 +159,47 @@ def invariants_to_square_dalitz(
     return mprime, thetaprime
 
 
+def _quadrature_axis(n: int, quadrature: str) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Return nodes in [0,1] and weights compatible with package ``mean`` integration.
+
+    The integration package computes ``mean(sample.weights * f)``. Therefore
+    the returned 1D stored weights are scaled by ``n`` so that the tensor
+    product satisfies
+
+        mean(W_i W_j J_ij f_ij) = sum(w_i w_j J_ij f_ij),
+
+    where ``w_i`` are conventional quadrature weights on [0,1].
+    """
+
+    if quadrature == "midpoint":
+        nodes = (np.arange(n, dtype=np.float64) + 0.5) / n
+        stored_weights = np.ones(n, dtype=np.float64)
+    elif quadrature in ("gauss", "gauss-legendre"):
+        x, w = np.polynomial.legendre.leggauss(n)
+        nodes = 0.5 * (x + 1.0)
+        # Conventional [0,1] weights are w/2. Multiply by n because the
+        # downstream normalization matrix divides the 2D sum by n^2.
+        stored_weights = 0.5 * n * w
+    else:
+        raise ValueError("quadrature must be 'midpoint' or 'gauss-legendre'")
+    return jnp.asarray(nodes), jnp.asarray(stored_weights)
+
+
 @dataclass(frozen=True)
 class SquareDalitzGrid:
-    """Regular midpoint grid in square-Dalitz coordinates with Jacobian weights."""
+    """Deterministic grid in square-Dalitz coordinates with Jacobian weights.
+
+    ``quadrature='midpoint'`` reproduces the original regular midpoint grid.
+    ``quadrature='gauss-legendre'`` uses tensor-product Gauss-Legendre nodes
+    and is recommended for likelihood normalization, especially when narrow
+    structures make midpoint convergence too slow.
+    """
 
     mother_mass: float
     masses: tuple[float, float, float]
     resolution: int = 800
     pair: tuple[int, int] = (0, 1)
+    quadrature: str = "midpoint"
 
     def __post_init__(self) -> None:
         if self.resolution < 2:
@@ -171,11 +211,14 @@ class SquareDalitzGrid:
         i, j = self.pair
         if i == j or i not in (0, 1, 2) or j not in (0, 1, 2):
             raise ValueError("pair must contain two distinct indices from 0, 1, 2")
+        if self.quadrature not in ("midpoint", "gauss", "gauss-legendre"):
+            raise ValueError("quadrature must be 'midpoint' or 'gauss-legendre'")
 
     def sample(self) -> PhaseSpaceSample:
         n = int(self.resolution)
-        axis = (jnp.arange(n, dtype=jnp.float64) + 0.5) / n
+        axis, axis_weights = _quadrature_axis(n, self.quadrature)
         mprime, thetaprime = jnp.meshgrid(axis, axis, indexing="ij")
+        w_m, w_t = jnp.meshgrid(axis_weights, axis_weights, indexing="ij")
         mp = mprime.reshape(-1)
         tp = thetaprime.reshape(-1)
         s12, s13, s23 = square_dalitz_to_invariants(
@@ -185,13 +228,14 @@ class SquareDalitzGrid:
             masses=self.masses,
             pair=self.pair,
         )
-        weights = square_dalitz_jacobian(
+        jacobian = square_dalitz_jacobian(
             mp,
             tp,
             mother_mass=self.mother_mass,
             masses=self.masses,
             pair=self.pair,
         )
+        weights = jacobian * (w_m * w_t).reshape(-1)
         return PhaseSpaceSample(s12=s12, s13=s13, s23=s23, weights=weights)
 
 
