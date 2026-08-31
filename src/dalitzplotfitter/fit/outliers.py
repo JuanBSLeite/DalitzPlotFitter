@@ -60,17 +60,7 @@ def robust_outlier_mask(
     *,
     threshold: float = 5.0,
 ) -> OutlierSelection:
-    """Select inliers with a median/MAD robust-sigma criterion.
-
-    The robust scale is ``1.4826 * median(abs(x - median(x)))``. Finite points
-    satisfying ``abs(x - median) <= threshold * scale`` are retained. If the
-    MAD vanishes, the function falls back to the standard deviation; if that
-    also vanishes, every finite entry is retained.
-
-    ``threshold=5`` is intentionally conservative for pseudoexperiment studies:
-    the goal is to remove catastrophic/minimum-swap tails, not sculpt the
-    Gaussian core.
-    """
+    """Select inliers with a median/MAD robust-sigma criterion."""
 
     if threshold <= 0.0:
         raise ValueError("threshold must be positive")
@@ -181,10 +171,7 @@ def genfit_outlier_selection(
 ) -> OutlierSelection:
     """Return the robust outlier mask for a GenFit parameter or NLL."""
 
-    return robust_outlier_mask(
-        genfit_distribution(result, name),
-        threshold=threshold,
-    )
+    return robust_outlier_mask(genfit_distribution(result, name), threshold=threshold)
 
 
 def genfit_robust_gaussian_fit(
@@ -195,10 +182,7 @@ def genfit_robust_gaussian_fit(
 ) -> RobustGaussianFitResult:
     """Robust Gaussian fit for a GenFit parameter or NLL distribution."""
 
-    return robust_gaussian_fit(
-        genfit_distribution(result, name),
-        threshold=threshold,
-    )
+    return robust_gaussian_fit(genfit_distribution(result, name), threshold=threshold)
 
 
 def genfit_robust_summary(result, *, threshold: float = 5.0):
@@ -218,9 +202,7 @@ def genfit_robust_summary(result, *, threshold: float = 5.0):
                 "n_outliers": selection.n_outliers,
                 "outlier_fraction": selection.outlier_fraction,
                 "sample_mean": float(np.mean(kept)) if kept.size else math.nan,
-                "sample_std": (
-                    float(np.std(kept, ddof=1)) if kept.size > 1 else math.nan
-                ),
+                "sample_std": float(np.std(kept, ddof=1)) if kept.size > 1 else math.nan,
                 "gauss_mean": gaussian.mean,
                 "gauss_mean_error": gaussian.mean_error,
                 "gauss_sigma": gaussian.sigma,
@@ -229,3 +211,24 @@ def genfit_robust_summary(result, *, threshold: float = 5.0):
             }
         )
     return rows
+
+
+def print_genfit_robust_summary(result, *, threshold: float = 5.0) -> None:
+    """Print the robust GenFit summary, including rejected outliers."""
+
+    rows = genfit_robust_summary(result, threshold=threshold)
+    print(
+        f"{'quantity':18s} {'entries':>8s} {'kept':>8s} "
+        f"{'rejected':>10s} {'rejected %':>11s} "
+        f"{'gauss mean':>14s} {'gauss sigma':>14s}"
+    )
+    for row in rows:
+        print(
+            f"{row['name']:18s} "
+            f"{row['entries']:8d} "
+            f"{row['kept']:8d} "
+            f"{row['n_outliers']:10d} "
+            f"{100.0 * row['outlier_fraction']:10.2f}% "
+            f"{row['gauss_mean']:14.6g} "
+            f"{row['gauss_sigma']:14.6g}"
+        )
