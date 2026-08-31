@@ -1,10 +1,8 @@
-# Deterministic equal-area Dalitz-grid integration
+# Deterministic Dalitz-grid integration
 
-DalitzPlotFitter uses **only deterministic equal-area `DalitzGrid` quadrature** for amplitude and PDF normalization. Monte Carlo remains available for event/toy generation through `PhaseSpaceMC`, but it is not a normalization method.
+DalitzPlotFitter provides deterministic normalization on the ordinary Dalitz plot through both a fixed equal-area `DalitzGrid` and an amplitude-aware `AdaptiveDalitzGrid`. Monte Carlo remains available for event/toy generation through `PhaseSpaceMC`, but it is not the normalization method.
 
-No adaptive or Monte Carlo quadrature is part of the supported normalization API.
-
-## Grid normalization
+## Uniform equal-area grid
 
 The integration is performed directly in
 
@@ -33,18 +31,6 @@ norm = DalitzGrid(
 
 A resolution `N` returns exactly `N**2` physical points. There is no bounding rectangle and no rejection/mask step.
 
-`DecayModel` uses the same method internally. The default is
-
-```python
-model = DecayModel(
-    channel,
-    components,
-    normalization_resolution=1000,
-)
-```
-
-which corresponds to exactly one million deterministic integration points.
-
 ## Equal-area contour-adapted construction
 
 At fixed `s12`, define
@@ -53,77 +39,94 @@ At fixed `s12`, define
 W(s12) = s13_max(s12) - s13_min(s12).
 ```
 
-The physical limits are
-
-```text
-E1* = (s12 + m1^2 - m2^2) / (2 sqrt(s12))
-E3* = (M^2 - s12 - m3^2) / (2 sqrt(s12))
-q   = sqrt(lambda(s12,m1^2,m2^2)) / (2 sqrt(s12))
-p   = sqrt(lambda(M^2,s12,m3^2)) / (2 sqrt(s12))
-
-s13_min = m1^2 + m3^2 + 2(E1* E3* - q p)
-s13_max = m1^2 + m3^2 + 2(E1* E3* + q p).
-```
-
 The total Dalitz area is
 
 ```text
 A_DP = integral W(s12) ds12.
 ```
 
-Define
+Define the cumulative-area coordinate
 
 ```text
-u(s12) = [integral from s12_min to s12 W(s) ds] / A_DP.
+u(s12) = [integral from s12_min to s12 W(s) ds] / A_DP
 ```
 
-A regular midpoint grid is built in
+and a second coordinate
 
 ```text
-u_i = (i + 1/2)/N
-v_j = (j + 1/2)/N.
+v = [s13 - s13_min(s12)] / W(s12).
 ```
 
-The cumulative-area relation is inverted numerically to obtain `s12(u_i)`, then
+Both lie in `[0,1]`. The inverse map is
 
 ```text
-s13(u,v) = s13_min(s12) + v * W(s12),
+s12 = s12(u)
+s13 = s13_min(s12) + v W(s12).
 ```
 
-and
+The Jacobian is constant:
 
 ```text
-s23 = M^2 + m1^2 + m2^2 + m3^2 - s12 - s13.
+|d(s12,s13)/d(u,v)| = A_DP.
 ```
 
-All grid points lie inside the physical Dalitz boundary.
-
-## Constant Jacobian and equal areas
-
-The mapping satisfies
-
-```text
-ds12/du = A_DP / W(s12)
-partial s13/partial v = W(s12),
-```
-
-therefore
-
-```text
-|J| = A_DP
-```
-
-and
+Therefore
 
 ```text
 ds12 ds13 = A_DP du dv.
 ```
 
-Every cell represents the same physical area
+The ordinary `DalitzGrid` uses a uniform midpoint grid in `(u,v)`. Every point is physical and every cell has identical physical area.
+
+## Adaptive ordinary Dalitz grid
+
+`AdaptiveDalitzGrid` uses the same equal-area `(u,v)` map, but recursively subdivides only cells whose amplitude bilinears have not converged.
+
+```python
+from dalitzplotfitter import AdaptiveDalitzGrid
+
+adaptive = AdaptiveDalitzGrid(
+    channel.parent_mass,
+    channel.daughter_masses,
+    base_resolution=18,
+    min_depth=1,
+    max_depth=6,
+    tolerance=0.02,
+).build(model)
+
+normalization_sample = adaptive.sample
+```
+
+For each cell, the algorithm compares a midpoint estimate with the average of four quarter-cell midpoint estimates for the complete raw normalization-matrix integrand
 
 ```text
-A_DP / N^2.
+F_i^* F_j.
 ```
+
+A cell is refined when any numerically relevant matrix element exceeds the requested local tolerance. Because the decision uses the amplitudes themselves rather than resonance metadata, the same mechanism can refine Breit-Wigner, Flatte, LASS, K-matrix, QMI, spline or arbitrary direct Dalitz amplitudes.
+
+`min_depth` forces a minimum number of global subdivisions before the error criterion may stop refinement. This is useful for protecting against ultra-narrow structures that could otherwise fall between the first coarse sample points.
+
+The result stores diagnostics:
+
+```text
+adaptive.leaf_bounds
+adaptive.leaf_depths
+adaptive.leaf_errors
+adaptive.u
+adaptive.v
+```
+
+and remains directly compatible with the existing cache API:
+
+```python
+cache = model.prepare_cache(
+    data_sample,
+    normalization_sample=adaptive.sample,
+)
+```
+
+## Normalization convention
 
 The package estimator is
 
@@ -131,64 +134,38 @@ The package estimator is
 mean(weights * f).
 ```
 
-Every grid point stores the same constant weight
+For the uniform grid every point stores `A_DP`. For the adaptive grid each accepted subcell contributes its own physical quadrature area, rescaled by the total number of returned points so that the same `mean(weights * f)` convention remains valid.
+
+The normalization matrix remains
 
 ```text
-weight = A_DP,
+M_ij = integral F_i^* F_j dPhi
 ```
 
-so that
-
-```text
-mean(weight * f) = A_DP * mean(f)
-                 = (A_DP/N^2) * sum(f).
-```
-
-For one amplitude component,
-
-```text
-I_i ~= A_DP * mean(|F_i|^2),
-```
-
-and for the interference matrix,
-
-```text
-M_ij ~= A_DP * mean(conj(F_i) F_j).
-```
-
-The coherent normalization is
+and the coherent normalization is
 
 ```text
 N = c^dagger M c.
 ```
 
-## Numerical inversion of cumulative area
-
-`DalitzGrid` tabulates `W(s12)` on a dense one-dimensional support, integrates it with the trapezoidal rule, and uses linear interpolation to invert cumulative area. The default support is at least 4097 points and grows with the requested two-dimensional resolution.
-
-For convergence studies:
-
-```python
-DalitzGrid(..., resolution=1000, boundary_resolution=20001)
-```
-
-The one-dimensional boundary table is deterministic and independent of the `N x N` midpoint grid used to evaluate amplitudes.
-
 ## Convergence
 
-Normalization convergence should be studied by increasing `resolution`, for example
+For production fits, compare the full complex matrix against a denser reference rather than checking only one total normalization. Narrow resonances and rapidly varying interference terms are especially important.
 
-```text
-400 -> 600 -> 800 -> 1000 -> 1200
-```
+`notebooks/14_adaptive_sqdp_phi_kkk.ipynb` compares, for a narrow `phi(1020)` in `B+ -> K- K+ K+`:
 
-and comparing raw component integrals, interference terms, total normalization and fitted parameters.
+- uniform ordinary Dalitz;
+- adaptive ordinary Dalitz;
+- uniform Square Dalitz;
+- adaptive Square Dalitz.
+
+The preferred method should be chosen from matrix-element accuracy versus number of normalization points, not from the coordinate system alone.
 
 ## Current examples
 
 - `notebooks/02_fit_dynamic_parameters.ipynb`: coefficient closure with deterministic grid normalization;
-- `notebooks/03_lineshape_parameter_diagnostics.ipynb`: lineshape diagnostics;
-- `notebooks/04_normalization_grid_diagnostics.ipynb`: grid-convergence diagnostics;
-- `notebooks/07_e791_rho1450_mass_width_closure.ipynb`: coefficient plus mass/width closure.
+- `notebooks/04_normalization_grid_diagnostics.ipynb`: uniform-grid diagnostics;
+- `notebooks/07_e791_rho1450_mass_width_closure.ipynb`: coefficient plus mass/width closure;
+- `notebooks/14_adaptive_sqdp_phi_kkk.ipynb`: ordinary/Square, uniform/adaptive comparison for a narrow phi(1020).
 
-`PhaseSpaceMC` is retained only for generating event pools and pseudo-data.
+`PhaseSpaceMC` is retained for generating event pools and pseudo-data.

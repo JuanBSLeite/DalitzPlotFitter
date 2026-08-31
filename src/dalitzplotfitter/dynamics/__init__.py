@@ -3,6 +3,7 @@
 from .angular import CovariantAngular, covariant_spin_factor
 from .context import ResonanceContext
 from .lineshape import (
+    BaBarFlatte,
     Flatte,
     GounarisSakurai,
     KMatrix,
@@ -21,6 +22,7 @@ from .qmi2d import QMI2D, physical_bin_mask
 from .resonance import ResonanceAmplitude
 
 __all__ = [
+    "BaBarFlatte",
     "CovariantAngular",
     "Flatte",
     "GounarisSakurai",

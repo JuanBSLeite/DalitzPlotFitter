@@ -6,10 +6,11 @@ from .amplitude import (
     ConstantAmplitude,
     PreparedAmplitudeCache,
 )
-from .coefficients import RealImag
+from .coefficients import CPRealImag, RealImag
 from .config import enable_x64
 from .decay import DalitzAmplitude, DecayChannel, DecayModel, NonResonant, Resonance
 from .dynamics import (
+    BaBarFlatte,
     CovariantAngular,
     Flatte,
     GounarisSakurai,
@@ -24,20 +25,36 @@ from .dynamics import (
     physical_bin_mask,
 )
 from .fit import Minimizer, MultiStartResult, Parameter, ParameterKind
+from .integration import (
+    AdaptiveDalitzGrid,
+    AdaptiveDalitzResult,
+    AdaptiveSquareDalitzGrid,
+    AdaptiveSquareDalitzResult,
+)
 from .kinematics import (
     CovariantKinematics,
     DalitzGrid,
     PhaseSpaceMC,
     PhaseSpaceSample,
+    SquareDalitzGrid,
     boost_to_rest_frame,
     covariant_kinematics,
     covariant_kinematics_from_invariants,
     dalitz_s13_limits,
+    invariants_to_square_dalitz,
+    square_dalitz_jacobian,
+    square_dalitz_to_invariants,
 )
 from .sampling import weighted_resample
 
 __all__ = [
+    "AdaptiveDalitzGrid",
+    "AdaptiveDalitzResult",
+    "AdaptiveSquareDalitzGrid",
+    "AdaptiveSquareDalitzResult",
     "AmplitudeComponent",
+    "BaBarFlatte",
+    "CPRealImag",
     "CoherentAmplitudeModel",
     "ConstantAmplitude",
     "CovariantAngular",
@@ -66,11 +83,15 @@ __all__ = [
     "Resonance",
     "ResonanceAmplitude",
     "ResonanceContext",
+    "SquareDalitzGrid",
     "boost_to_rest_frame",
     "covariant_kinematics",
     "covariant_kinematics_from_invariants",
     "dalitz_s13_limits",
     "enable_x64",
+    "invariants_to_square_dalitz",
     "physical_bin_mask",
+    "square_dalitz_jacobian",
+    "square_dalitz_to_invariants",
     "weighted_resample",
 ]

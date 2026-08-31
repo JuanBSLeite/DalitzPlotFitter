@@ -1,5 +1,6 @@
 """One-dimensional resonance lineshapes."""
 
+from .babar_flatte import BaBarFlatte
 from .common import (
     bachelor_momentum_resonance_frame,
     blatt_weisskopf_from_momenta,
@@ -17,6 +18,7 @@ from .qmi import QMI
 from .relativistic_breit_wigner import RelativisticBreitWigner
 
 __all__ = [
+    "BaBarFlatte",
     "Flatte",
     "GounarisSakurai",
     "KMatrix",
