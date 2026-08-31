@@ -111,7 +111,7 @@ def test_square_dalitz_gauss_smooth_integrals_match_dalitz_grid():
         assert jnp.allclose(second, first, rtol=2e-4, atol=1e-6)
 
 
-def test_square_dalitz_gauss_narrow_structure_matches_dense_reference():
+def test_square_dalitz_gauss_narrow_structure_converges_with_resolution():
     channel = DecayChannel("B+", ("K+", "pi+", "pi-"))
 
     def narrow(sample):
@@ -127,7 +127,7 @@ def test_square_dalitz_gauss_narrow_structure_matches_dense_reference():
     square = SquareDalitzGrid(
         channel.parent_mass,
         channel.daughter_masses,
-        resolution=120,
+        resolution=250,
         pair=(0, 2),
         quadrature="gauss-legendre",
     ).sample()
