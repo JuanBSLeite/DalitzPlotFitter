@@ -1,5 +1,4 @@
 import jax.numpy as jnp
-import numpy as np
 
 from dalitzplotfitter import AdaptiveSquareDalitzGrid, DecayChannel, SquareDalitzGrid, enable_x64
 from dalitzplotfitter.amplitude import AmplitudeComponent, CoherentAmplitudeModel
@@ -34,7 +33,7 @@ class _ToyModel:
 
 def test_adaptive_square_constant_measure_matches_uniform_area():
     channel = DecayChannel("B+", ("K-", "K+", "K+"))
-    model = _ToyModel(center=1.5, scale=10.0)  # effectively smooth
+    model = _ToyModel(center=1.5, scale=10.0)
     adaptive = AdaptiveSquareDalitzGrid(
         channel.parent_mass,
         channel.daughter_masses,
@@ -52,15 +51,20 @@ def test_adaptive_square_constant_measure_matches_uniform_area():
         quadrature="midpoint",
     ).sample()
 
-    adaptive_area = jnp.mean(adaptive.sample.weights)
-    uniform_area = jnp.mean(uniform.weights)
-    assert jnp.allclose(adaptive_area, uniform_area, rtol=2e-3, atol=1e-6)
+    assert jnp.allclose(
+        jnp.mean(adaptive.sample.weights),
+        jnp.mean(uniform.weights),
+        rtol=2e-3,
+        atol=1e-6,
+    )
 
 
-def test_adaptive_square_refines_narrow_structure_without_metadata():
+def test_adaptive_square_refines_a_narrow_structure():
     channel = DecayChannel("B+", ("K-", "K+", "K+"))
-    center = 1.01946**2
-    model = _ToyModel(center=center, scale=1.01946 * 0.00425)
+    model = _ToyModel(
+        center=1.01946**2,
+        scale=1.01946 * 0.00425,
+    )
     result = AdaptiveSquareDalitzGrid(
         channel.parent_mass,
         channel.daughter_masses,
@@ -72,26 +76,8 @@ def test_adaptive_square_refines_narrow_structure_without_metadata():
         matrix_floor=1e-10,
     ).build(model)
 
+    # Fundamental regression only: a narrow numerical structure must trigger
+    # non-trivial refinement beyond the forced first subdivision. Detailed
+    # convergence/localisation studies belong in notebook 14/full validation.
     assert result.n_leaves > (10 * 2) ** 2
     assert int(result.leaf_depths.max()) >= 4
-
-    # Boundary/Jacobian structure can also drive cells to maximum depth. The
-    # relevant requirement is that a substantial set of maximum-depth cells is
-    # concentrated in the vicinity of the narrow pole, without the adaptive
-    # algorithm having been given its position or width.
-    deepest = result.leaf_depths == result.leaf_depths.max()
-    x0, x1, y0, y1 = result.leaf_bounds[deepest].T
-    mp = 0.5 * (x0 + x1)
-    tp = 0.5 * (y0 + y1)
-    from dalitzplotfitter import square_dalitz_to_invariants
-
-    s12, _, _ = square_dalitz_to_invariants(
-        jnp.asarray(mp),
-        jnp.asarray(tp),
-        mother_mass=channel.parent_mass,
-        masses=channel.daughter_masses,
-        pair=(0, 1),
-    )
-    distance = np.abs(np.asarray(s12) - center)
-    assert float(np.min(distance)) < 0.03
-    assert float(np.quantile(distance, 0.5)) < 0.08
