@@ -33,21 +33,13 @@ def square_dalitz_to_invariants(
     masses: tuple[float, float, float],
     pair: tuple[int, int] = (0, 1),
 ):
-    """Map square-Dalitz coordinates to ``s12``, ``s13`` and ``s23``.
-
-    The convention follows Laura++: for a selected two-body pair ``(i,j)``,
-
-    ``m' = acos(2 (m_ij - m_min)/(m_max - m_min) - 1) / pi``
-    and ``theta' = theta_ij / pi``.
-    """
-
+    """Map square-Dalitz coordinates to ``s12``, ``s13`` and ``s23``."""
     i, j = pair
     if i == j or i not in (0, 1, 2) or j not in (0, 1, 2):
         raise ValueError("pair must contain two distinct indices from 0, 1, 2")
     k = next(index for index in range(3) if index not in pair)
 
-    m = masses
-    mi, mj, mk = m[i], m[j], m[k]
+    mi, mj, mk = masses[i], masses[j], masses[k]
     m_min = mi + mj
     m_max = mother_mass - mk
     delta_m = m_max - m_min
@@ -58,13 +50,11 @@ def square_dalitz_to_invariants(
     s_ij = m_ij**2
     theta = jnp.pi * tp
 
-    root_s = m_ij
-    e_i = (s_ij + mi**2 - mj**2) / (2.0 * root_s)
-    e_k = (mother_mass**2 - s_ij - mk**2) / (2.0 * root_s)
-    q = jnp.sqrt(jnp.maximum(_kallen(s_ij, mi**2, mj**2), 0.0)) / (2.0 * root_s)
-    p = jnp.sqrt(jnp.maximum(_kallen(mother_mass**2, s_ij, mk**2), 0.0)) / (2.0 * root_s)
+    e_i = (s_ij + mi**2 - mj**2) / (2.0 * m_ij)
+    e_k = (mother_mass**2 - s_ij - mk**2) / (2.0 * m_ij)
+    q = jnp.sqrt(jnp.maximum(_kallen(s_ij, mi**2, mj**2), 0.0)) / (2.0 * m_ij)
+    p = jnp.sqrt(jnp.maximum(_kallen(mother_mass**2, s_ij, mk**2), 0.0)) / (2.0 * m_ij)
 
-    # theta is the angle between daughter i and the bachelor k in the ij frame.
     s_ik = mi**2 + mk**2 + 2.0 * (e_i * e_k - q * p * jnp.cos(theta))
     total = mother_mass**2 + sum(value**2 for value in masses)
     s_jk = total - s_ij - s_ik
@@ -85,16 +75,7 @@ def square_dalitz_jacobian(
     masses: tuple[float, float, float],
     pair: tuple[int, int] = (0, 1),
 ):
-    """Absolute Jacobian ``|d(s_ij,s_ik)/d(m',theta')|`` for the SDP map.
-
-    With ``m_ij = m_min + Delta_m/2 * (1 + cos(pi m'))`` and
-    ``theta = pi theta'`` the determinant factorizes because ``s_ij`` is
-    independent of ``theta'``::
-
-        |J| = |ds_ij/dm'| |ds_ik/dtheta'|
-            = 2 pi^2 Delta_m m_ij q p sin(pi m') sin(pi theta').
-    """
-
+    """Absolute Jacobian ``|d(s_ij,s_ik)/d(m',theta')|`` for the SDP map."""
     i, j = pair
     if i == j or i not in (0, 1, 2) or j not in (0, 1, 2):
         raise ValueError("pair must contain two distinct indices from 0, 1, 2")
@@ -128,7 +109,6 @@ def invariants_to_square_dalitz(
     pair: tuple[int, int] = (0, 1),
 ):
     """Convert physical Dalitz invariants to Laura++ ``(m', theta')``."""
-
     i, j = pair
     if i == j or i not in (0, 1, 2) or j not in (0, 1, 2):
         raise ValueError("pair must contain two distinct indices from 0, 1, 2")
@@ -160,25 +140,13 @@ def invariants_to_square_dalitz(
 
 
 def _quadrature_axis(n: int, quadrature: str) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Return nodes in [0,1] and weights compatible with package ``mean`` integration.
-
-    The integration package computes ``mean(sample.weights * f)``. Therefore
-    the returned 1D stored weights are scaled by ``n`` so that the tensor
-    product satisfies
-
-        mean(W_i W_j J_ij f_ij) = sum(w_i w_j J_ij f_ij),
-
-    where ``w_i`` are conventional quadrature weights on [0,1].
-    """
-
+    """Return nodes in [0,1] and weights compatible with package mean integration."""
     if quadrature == "midpoint":
         nodes = (np.arange(n, dtype=np.float64) + 0.5) / n
         stored_weights = np.ones(n, dtype=np.float64)
     elif quadrature in ("gauss", "gauss-legendre"):
         x, w = np.polynomial.legendre.leggauss(n)
         nodes = 0.5 * (x + 1.0)
-        # Conventional [0,1] weights are w/2. Multiply by n because the
-        # downstream normalization matrix divides the 2D sum by n^2.
         stored_weights = 0.5 * n * w
     else:
         raise ValueError("quadrature must be 'midpoint' or 'gauss-legendre'")
@@ -187,19 +155,19 @@ def _quadrature_axis(n: int, quadrature: str) -> tuple[jnp.ndarray, jnp.ndarray]
 
 @dataclass(frozen=True)
 class SquareDalitzGrid:
-    """Deterministic grid in square-Dalitz coordinates with Jacobian weights.
+    """Deterministic Square-Dalitz grid with Jacobian weights.
 
-    ``quadrature='gauss-legendre'`` is the default and uses tensor-product
-    Gauss-Legendre nodes for likelihood normalization. ``quadrature='midpoint'``
-    reproduces the original regular midpoint grid for diagnostics and backwards
-    comparisons.
+    The default is a uniform midpoint grid in both transformed variables over
+    [0,1] x [0,1]. Midpoints avoid evaluating exactly on the physical boundary,
+    where the Jacobian vanishes. Gauss-Legendre remains available explicitly
+    for convergence studies.
     """
 
     mother_mass: float
     masses: tuple[float, float, float]
     resolution: int = 800
     pair: tuple[int, int] = (0, 1)
-    quadrature: str = "gauss-legendre"
+    quadrature: str = "midpoint"
 
     def __post_init__(self) -> None:
         if self.resolution < 2:
