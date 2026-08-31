@@ -74,6 +74,47 @@ result.rejection_summary()
 `valid`, `valid_mask`, `n_valid`, and `success_rate` are retained as backward-compatible
 aliases for the accepted-fit selection.
 
+## Fit-bias test
+
+The primary purpose of the repeated pseudoexperiments is to test whether the fitter is
+biased under finite-sample statistical fluctuations. Every toy is generated from the
+same injected parameter values, but each sample is statistically independent. Therefore
+individual fitted values are expected to fluctuate around the truth; the estimator is
+unbiased when the ensemble average is compatible with the injected value.
+
+Use the dedicated bias summary:
+
+```python
+from dalitzplotfitter import genfit_bias_summary, print_genfit_bias_summary
+
+rows = genfit_bias_summary(result)
+print_genfit_bias_summary(result)
+```
+
+For every free parameter the table reports:
+
+- injected truth value;
+- mean fitted value over accepted pseudoexperiments;
+- `bias = mean_fit - truth`;
+- standard error on the ensemble mean, `std(fit) / sqrt(N)`;
+- bias significance, `bias / error(mean)`;
+- pull mean;
+- pull width.
+
+The pull for each pseudoexperiment is
+
+```text
+(fitted value - truth) / fitted uncertainty
+```
+
+For an unbiased fitter with correctly calibrated uncertainties, the ensemble should be
+compatible with zero bias, pull mean near zero, and pull width near one.
+
+Importantly, `genfit_bias_summary()` uses **all accepted fits** and performs no MAD or
+other distribution-level outlier rejection. A statistically rare fluctuation is part of
+the pseudoexperiment ensemble and must not be removed merely because it lies far from
+the injected truth.
+
 ## Accessing the distributions
 
 ```python
@@ -104,7 +145,7 @@ Gaussian maximum-likelihood fit. Only accepted fits enter these distributions.
 ## Robust outlier treatment
 
 Numerical-quality rejection and statistical outlier rejection are separate steps.
-After the accepted-fit selection, the robust helpers can remove catastrophic tails from
+After the accepted-fit selection, the robust helpers can identify catastrophic tails in
 a one-dimensional parameter or NLL distribution using a median/MAD criterion:
 
 ```python
@@ -113,8 +154,10 @@ from dalitzplotfitter import print_genfit_robust_summary
 print_genfit_robust_summary(result, threshold=5.0)
 ```
 
-The printed table includes the number and percentage of rejected statistical outliers.
-Raw pseudoexperiment results remain stored in `result`.
+This robust view is diagnostic. It should not replace the unfiltered accepted ensemble
+when quoting the primary fit-bias result. The printed table includes the number and
+percentage of rejected statistical outliers, while raw pseudoexperiment results remain
+stored in `result`.
 
 ## Plots
 
