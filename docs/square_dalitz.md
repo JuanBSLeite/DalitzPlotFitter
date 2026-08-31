@@ -49,11 +49,22 @@ quadrature="midpoint"
 quadrature="gauss-legendre"
 ```
 
-The midpoint rule is retained for diagnostics and backwards comparisons. `gauss-legendre` uses tensor-product Gauss-Legendre nodes in `(m', theta')` and is recommended for likelihood normalization. It converges substantially faster for localized or narrow structures than a regular midpoint grid at the same number of points.
+The **default** is `midpoint`. It uses a regular, uniform grid of cell centers in both transformed variables,
+
+```text
+m'_a     = (a + 1/2) / N
+theta'_b = (b + 1/2) / N
+```
+
+so the sampling itself is uniform on `[0,1] x [0,1]`; all non-uniformity of the physical measure enters through the Jacobian.
+
+`gauss-legendre` remains available explicitly for convergence studies. It often converges faster for smooth functions, but narrow or highly localized amplitudes still require sufficient resolution. The quadrature choice therefore does not replace a convergence study of the normalization matrix.
 
 The Gauss-Legendre weights are folded into `PhaseSpaceSample.weights` together with the physical Jacobian. They are scaled so that the package-wide convention `mean(weights * f)` remains valid.
 
 ## Usage
+
+The standard Square-Dalitz grid is simply
 
 ```python
 from dalitzplotfitter import SquareDalitzGrid
@@ -61,9 +72,9 @@ from dalitzplotfitter import SquareDalitzGrid
 normalization_sample = SquareDalitzGrid(
     model.channel.parent_mass,
     model.channel.daughter_masses,
-    resolution=200,
+    resolution=1000,
     pair=(0, 2),
-    quadrature="gauss-legendre",
+    quadrature="midpoint",
 ).sample()
 
 cache = model.prepare_cache(
@@ -125,9 +136,8 @@ The Square Dalitz sample is used for component normalization, the charge integra
 `tests/test_square_dalitz.py` checks:
 
 - invariant -> square-Dalitz -> invariant round trips;
-- the integral of a constant against the ordinary Dalitz area;
-- nontrivial polynomial moments;
-- narrow Breit-Wigner-like structures;
-- the improved convergence of Gauss-Legendre quadrature.
+- the midpoint integral of a constant against the ordinary Dalitz area;
+- Gauss-Legendre constant and smooth-moment integrals;
+- convergence for a narrow Breit-Wigner-like structure at sufficiently high resolution.
 
-These comparisons protect the transformation, Jacobian and quadrature-weight convention from silent errors.
+The narrow-structure test intentionally compares a 250x250 Gauss grid against a 500x500 reference at tight relative precision. A coarser 120x120 grid is not expected to reach the same tolerance for a K*(892)-like width. These comparisons protect the transformation, Jacobian and quadrature-weight convention from silent errors.
