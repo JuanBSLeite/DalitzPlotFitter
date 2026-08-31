@@ -50,6 +50,7 @@ jobs:
             tests/test_dalitz_grid.py \
             tests/test_decay_model.py \
             tests/test_dynamics.py \
+            tests/test_genfit.py \
             tests/test_integration.py \
             tests/test_minimizer.py \
             tests/test_phasespace_mc.py \
