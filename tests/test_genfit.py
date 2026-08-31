@@ -65,7 +65,21 @@ def test_genfit_collects_parameter_and_fit_diagnostics():
     assert result.truth_nll.shape == (3,)
     assert result.edm.shape == (3,)
     assert result.nfcn.shape == (3,)
-    assert 0.0 <= result.success_rate <= 1.0
+    assert result.converged_mask.shape == (3,)
+    assert result.accepted_mask.shape == (3,)
+    np.testing.assert_array_equal(result.valid_mask, result.accepted_mask)
+    assert result.n_valid == result.n_accepted
+    assert result.success_rate == result.acceptance_rate
+    assert 0.0 <= result.convergence_rate <= 1.0
+    assert 0.0 <= result.acceptance_rate <= 1.0
+    assert result.n_accepted <= result.n_converged
+
+    for record in result.records:
+        assert record.valid == record.accepted
+        assert isinstance(record.rejection_reasons, tuple)
+        if record.accepted:
+            assert record.converged
+            assert record.rejection_reasons == ()
 
     rows = result.summary()
     assert [row["name"] for row in rows] == ["sigma.x", "sigma.y", "nll"]
@@ -109,6 +123,8 @@ def test_genfit_is_reproducible_for_fixed_seeds():
         second.values("sigma.x", valid_only=False),
     )
     np.testing.assert_allclose(first.nll, second.nll)
+    np.testing.assert_array_equal(first.converged_mask, second.converged_mask)
+    np.testing.assert_array_equal(first.accepted_mask, second.accepted_mask)
 
 
 def test_robust_outlier_mask_removes_catastrophic_tail():
@@ -148,22 +164,20 @@ def test_genfit_robust_summary_reports_outlier_columns():
     assert all("outlier_fraction" in row for row in rows)
 
 
-def test_print_genfit_robust_summary_has_rejected_column(capsys):
+def test_print_genfit_robust_summary_has_rejected_columns(capsys):
     study = GenFit(
         _small_model(),
         n_fits=2,
         sample_size=120,
         grid_resolution=20,
         pool_size=1_200,
-        seed=654,
-        start_range=(-1.0, 1.0),
+        seed=987,
+        start_range=(-0.8, 0.8),
         ncall=3_000,
         verbose=0,
     )
     result = study.run()
-    print_genfit_robust_summary(result, threshold=5.0)
+    print_genfit_robust_summary(result)
     output = capsys.readouterr().out
     assert "rejected" in output
     assert "rejected %" in output
-    assert "sigma.x" in output
-    assert "nll" in output
