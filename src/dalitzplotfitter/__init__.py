@@ -24,7 +24,16 @@ from .dynamics import (
     ResonanceContext,
     physical_bin_mask,
 )
-from .fit import Minimizer, MultiStartResult, Parameter, ParameterKind
+from .fit import (
+    GaussianFitResult,
+    GenFit,
+    GenFitRecord,
+    GenFitResult,
+    Minimizer,
+    MultiStartResult,
+    Parameter,
+    ParameterKind,
+)
 from .integration import (
     AdaptiveDalitzGrid,
     AdaptiveDalitzResult,
@@ -64,6 +73,10 @@ __all__ = [
     "DecayChannel",
     "DecayModel",
     "Flatte",
+    "GaussianFitResult",
+    "GenFit",
+    "GenFitRecord",
+    "GenFitResult",
     "GounarisSakurai",
     "KMatrix",
     "LASS",
