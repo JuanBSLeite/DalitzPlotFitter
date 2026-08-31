@@ -1,6 +1,6 @@
 # Square Dalitz integration
 
-`SquareDalitzGrid` provides deterministic integration on the square-Dalitz variables commonly used in three-body B-decay amplitude analyses.
+`SquareDalitzGrid` provides deterministic integration on the square-Dalitz variables commonly used in three-body amplitude analyses.
 
 For a selected two-body pair `(i, j)`, with invariant mass `m_ij`, the coordinates follow the Laura++ convention
 
@@ -24,13 +24,34 @@ The map is not equal-area in the original Dalitz invariants. `SquareDalitzGrid.s
 integral(f) = mean(sample.weights * f)
 ```
 
-a regular midpoint grid in `(m', theta')` evaluates the same physical Dalitz integral as `DalitzGrid`:
+the physical integral is
 
 ```text
 integral_DP f(s12,s13,s23) ds_a ds_b
 =
 integral_0^1 integral_0^1 f(s(m',theta')) |J| dm' dtheta'.
 ```
+
+For the implemented convention,
+
+```text
+|J| = 2 pi^2 Delta_m m_ij q p sin(pi m') sin(pi theta')
+```
+
+where `q` is the daughter momentum in the `ij` rest frame and `p` is the bachelor momentum in that frame.
+
+## Quadrature
+
+Two deterministic quadratures are available:
+
+```python
+quadrature="midpoint"
+quadrature="gauss-legendre"
+```
+
+The midpoint rule is retained for diagnostics and backwards comparisons. `gauss-legendre` uses tensor-product Gauss-Legendre nodes in `(m', theta')` and is recommended for likelihood normalization. It converges substantially faster for localized or narrow structures than a regular midpoint grid at the same number of points.
+
+The Gauss-Legendre weights are folded into `PhaseSpaceSample.weights` together with the physical Jacobian. They are scaled so that the package-wide convention `mean(weights * f)` remains valid.
 
 ## Usage
 
@@ -40,8 +61,9 @@ from dalitzplotfitter import SquareDalitzGrid
 normalization_sample = SquareDalitzGrid(
     model.channel.parent_mass,
     model.channel.daughter_masses,
-    resolution=500,
+    resolution=200,
     pair=(0, 2),
+    quadrature="gauss-legendre",
 ).sample()
 
 cache = model.prepare_cache(
@@ -52,13 +74,29 @@ cache = model.prepare_cache(
 
 The same sample may be supplied to `DecayModel.pdf(normalization_sample=...)`.
 
-No amplitude, coefficient, cache, likelihood or minimizer code depends on the coordinate system used to construct the normalization sample. In particular, the normalization matrix remains
+No amplitude, coefficient, cache, likelihood or minimizer code depends on the coordinate system used to construct the normalization sample. The normalization matrix remains
 
 ```text
 M_ij = integral F_i^* F_j dPhi
 ```
 
 and a coherent model is normalized as `c^dagger M c`.
+
+## What must converge in a fit
+
+A comparison of only the total truth normalization
+
+```text
+I = c^dagger M c
+```
+
+is not sufficient to validate a quadrature. Different errors in matrix elements can cancel for one particular coefficient vector. For fit closure the relevant numerical object is the full complex normalization matrix
+
+```text
+M_ij = integral F_i^* F_j dPhi.
+```
+
+A robust convergence study should therefore compare all diagonal and interference elements against a denser reference grid. This is especially important for narrow resonances and for interference between structures oriented along different Dalitz axes.
 
 ## B+ -> K+ pi+ pi- convention
 
@@ -80,7 +118,7 @@ which corresponds to the `(1,3)` pair in one-based notation and therefore transf
 m_13 = m(K+ pi-).
 ```
 
-The notebook uses the Square Dalitz grid for component normalization, the two charge integrals `I+` and `I-`, and the joint CP likelihood denominator `I+ + I-`.
+The Square Dalitz sample is used for component normalization, the charge integrals `I+` and `I-`, and the joint CP likelihood denominator `I+ + I-`.
 
 ## Validation
 
@@ -89,6 +127,7 @@ The notebook uses the Square Dalitz grid for component normalization, the two ch
 - invariant -> square-Dalitz -> invariant round trips;
 - the integral of a constant against the ordinary Dalitz area;
 - nontrivial polynomial moments;
-- an illustrative narrow Breit-Wigner-like function in `s13`.
+- narrow Breit-Wigner-like structures;
+- the improved convergence of Gauss-Legendre quadrature.
 
-These comparisons protect the transformation and Jacobian from silent convention errors.
+These comparisons protect the transformation, Jacobian and quadrature-weight convention from silent errors.
