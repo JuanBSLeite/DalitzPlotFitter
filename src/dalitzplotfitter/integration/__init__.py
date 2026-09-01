@@ -1,18 +1,12 @@
 """Numerical normalization tools."""
 
-from .adaptive_dalitz import AdaptiveDalitzGrid, AdaptiveDalitzResult
-from .adaptive_square import AdaptiveSquareDalitzGrid, AdaptiveSquareDalitzResult
+from .gauss_legendre import DalitzGaussLegendreGrid
 from .grid import GridIntegrator
-from .laura import LauraGaussLegendreGrid
 from .matrix import matrix_normalization, normalization_matrix
 
 __all__ = [
-    "AdaptiveDalitzGrid",
-    "AdaptiveDalitzResult",
-    "AdaptiveSquareDalitzGrid",
-    "AdaptiveSquareDalitzResult",
+    "DalitzGaussLegendreGrid",
     "GridIntegrator",
-    "LauraGaussLegendreGrid",
     "matrix_normalization",
     "normalization_matrix",
 ]

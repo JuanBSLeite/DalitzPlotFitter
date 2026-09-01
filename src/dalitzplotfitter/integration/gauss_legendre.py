@@ -1,8 +1,7 @@
-"""Laura++-style Gauss--Legendre integration on the Dalitz plot.
+"""Tensor-product Gauss--Legendre integration on the Dalitz plot.
 
-Laura++ evaluates normalization integrals with a tensor-product Gauss--Legendre
-quadrature in the *masses* ``m13`` and ``m23`` rather than directly in the
-squared invariant masses.  The change of variables
+The quadrature is applied to the masses ``m13`` and ``m23`` rather than
+directly to the squared invariant masses. The change of variables
 
     ds13 ds23 = 4 m13 m23 dm13 dm23
 
@@ -67,8 +66,8 @@ def _s13_limits_numpy(
 
 
 @dataclass(frozen=True)
-class LauraGaussLegendreGrid:
-    """Tensor-product Gauss--Legendre grid following the Laura++ prescription.
+class DalitzGaussLegendreGrid:
+    """Tensor-product Gauss--Legendre grid in ``m13`` and ``m23``.
 
     Parameters
     ----------
@@ -77,12 +76,11 @@ class LauraGaussLegendreGrid:
     masses:
         Daughter masses ``(m1, m2, m3)`` in GeV.
     bin_width:
-        Laura++-style target mass bin width in GeV.  The default, 0.005 GeV,
-        corresponds to the 5 MeV default documented for Laura++.
+        Target mass bin width in GeV. The default is 0.005 GeV (5 MeV).
     order_m13, order_m23:
         Optional explicit quadrature orders.  If omitted, each order is the
         corresponding kinematic mass range divided by ``bin_width`` (rounded
-        upward), matching the Laura++ granularity prescription.
+        upward).
     """
 
     mother_mass: float
@@ -94,7 +92,7 @@ class LauraGaussLegendreGrid:
     def __post_init__(self) -> None:
         if len(self.masses) != 3:
             raise ValueError(
-                "LauraGaussLegendreGrid requires exactly three daughter masses"
+                "DalitzGaussLegendreGrid requires exactly three daughter masses"
             )
         if self.mother_mass <= sum(self.masses):
             raise ValueError("Mother mass must be above the three-body threshold")
@@ -125,7 +123,7 @@ class LauraGaussLegendreGrid:
         return int(n13), int(n23)
 
     def sample(self) -> PhaseSpaceSample:
-        """Build the physical Laura++-style quadrature sample."""
+        """Build the physical Gauss--Legendre quadrature sample."""
 
         m1, m2, m3 = self.masses
         (m13_low, m13_high), (m23_low, m23_high) = self.mass_ranges
@@ -160,8 +158,7 @@ class LauraGaussLegendreGrid:
             & (s13 <= high13 + tol)
         )
 
-        # Laura++ Eq. (30): dm13 dm23 quadrature multiplied by the Jacobian
-        # ds13 ds23 = 4*m13*m23 dm13 dm23.
+        # Convert dm13 dm23 quadrature to ds13 ds23.
         quadrature_weights = 4.0 * m13 * m23 * w13 * w23
 
         s12 = s12[physical].reshape(-1)
@@ -169,7 +166,9 @@ class LauraGaussLegendreGrid:
         s23 = s23[physical].reshape(-1)
         quadrature_weights = quadrature_weights[physical].reshape(-1)
         if s12.size == 0:
-            raise RuntimeError("Laura++ quadrature produced no physical Dalitz points")
+            raise RuntimeError(
+                "Gauss--Legendre quadrature produced no physical Dalitz points"
+            )
 
         # GridIntegrator computes mean(weights * f); multiplying raw quadrature
         # weights by N converts that convention into the required weighted sum.
@@ -183,4 +182,4 @@ class LauraGaussLegendreGrid:
         )
 
 
-__all__ = ["LauraGaussLegendreGrid"]
+__all__ = ["DalitzGaussLegendreGrid"]

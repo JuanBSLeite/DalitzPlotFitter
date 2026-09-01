@@ -10,6 +10,12 @@ from jax import Array
 
 from dalitzplotfitter.fit import Parameter, ParameterKind
 from dalitzplotfitter.integration import matrix_normalization, normalization_matrix
+from dalitzplotfitter.observables import (
+    fit_fractions as matrix_fit_fractions,
+)
+from dalitzplotfitter.observables import (
+    interference_fractions as matrix_interference_fractions,
+)
 
 from .components import AmplitudeComponent
 
@@ -215,4 +221,26 @@ class PreparedAmplitudeCache:
         _, norm_components = self._evaluate_components(fit_values)
         return matrix_normalization(
             coefficients, self._matrix_with_dynamic_blocks(norm_components)
+        )
+
+    def normalization_matrix(self, fit_values: Mapping[str, object]) -> Array:
+        """Return the normalization matrix at the supplied parameter point."""
+
+        _, norm_components = self._evaluate_components(fit_values)
+        return self._matrix_with_dynamic_blocks(norm_components)
+
+    def fit_fractions(self, fit_values: Mapping[str, object]) -> Array:
+        """Return diagonal fit fractions in component order."""
+
+        return matrix_fit_fractions(
+            self.coefficient_vector(fit_values),
+            self.normalization_matrix(fit_values),
+        )
+
+    def interference_fractions(self, fit_values: Mapping[str, object]) -> Array:
+        """Return the symmetric matrix of pairwise interference fractions."""
+
+        return matrix_interference_fractions(
+            self.coefficient_vector(fit_values),
+            self.normalization_matrix(fit_values),
         )

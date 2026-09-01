@@ -47,57 +47,72 @@ Resonance(
 
 ## Normalization
 
-Amplitude and PDF normalization use deterministic quadrature. The default is
-the equal-area `DalitzGrid`; a Laura++-style Gauss--Legendre method is also
-available.
+Amplitude and PDF normalization use deterministic quadrature. The supported
+methods are `gauss-legendre` (default) and `square-dalitz`.
 
 ```python
-from dalitzplotfitter import DalitzGrid
+from dalitzplotfitter import DalitzGaussLegendreGrid
 
-norm = DalitzGrid(
+norm = DalitzGaussLegendreGrid(
     channel.parent_mass,
     channel.daughter_masses,
-    resolution=1000,
+    bin_width=0.005,
 ).sample()
 cache = model.prepare_cache(data, norm)
 ```
 
-A resolution `N` gives exactly `N**2` physical integration points. The default `DecayModel` normalization uses
+The default `DecayModel` normalization uses
 
 ```python
 model = DecayModel(
     channel,
     components,
     normalize_components=True,
-    normalization_resolution=1000,
+    normalization_method="gauss-legendre",
+    normalization_bin_width=0.005,
 )
 ```
 
-so the default normalization support contains exactly one million deterministic grid points. It is created lazily and reused for the lifetime of the model.
+The quadrature sample is created lazily and reused for the lifetime of the model.
 
 There is no Monte Carlo normalization path in the supported API.
 
-To use the Laura++ prescription in both component and total-PDF normalization:
+The mass-plane Gauss--Legendre implementation uses
 
 ```python
 model = DecayModel(
     channel,
     components,
-    normalization_method="laura",
+    normalization_method="gauss-legendre",
     normalization_bin_width=0.005,  # GeV; Laura++ default is 5 MeV
 )
 ```
 
-This constructs a tensor-product Gauss--Legendre rule in `m13` and `m23`,
+It constructs a tensor-product rule in `m13` and `m23`,
 keeps the nodes inside the physical Dalitz boundary and includes the Jacobian
 `4*m13*m23`. The resulting sample is used unchanged by `SignalPDF` and
 `PreparedAmplitudeCache`, so direct and matrix normalizations share the same
 quadrature points and weights. Explicit `normalization_order_m13` and
 `normalization_order_m23` values can be supplied for convergence studies.
 
-Laura++'s additional sub-grid treatment for resonances narrower than 20 MeV is
-not enabled by this base method yet; use the existing amplitude-aware adaptive
-grids for such models and validate every normalization-matrix element.
+This numerical prescription is the same base normalization method used by
+Laura++. The implementation name describes the quadrature and does not encode
+the name of the reference package.
+
+Square-Dalitz normalization is selected with
+
+```python
+model = DecayModel(
+    channel,
+    components,
+    normalization_method="square-dalitz",
+    normalization_resolution=1000,
+    normalization_pair=(0, 1),
+)
+```
+
+The former equal-area and adaptive normalization methods are not part of the
+supported first-version API.
 
 ## Component normalization convention
 
@@ -119,10 +134,10 @@ DecayChannel + amplitude-component declarations
         -> Blatt-Weisskopf factors
         -> angular factor
         -> automatic identical-particle symmetrization
-        -> deterministic DalitzGrid component normalization
+        -> deterministic Gauss-Legendre or Square-Dalitz normalization
         -> RealImag coefficient
         -> coherent amplitude
-        -> deterministic DalitzGrid PDF normalization
+        -> the same quadrature for PDF normalization
         -> JAX NLL + automatic gradients
         -> iminuit
 ```
@@ -141,26 +156,36 @@ followed by `weighted_resample()`.
 
 `PhaseSpaceMC` is **not** used for amplitude or PDF normalization.
 
-## Deterministic Dalitz grid
+## Tutorial notebooks
 
-`DalitzGrid` constructs an equal-area grid in transformed Dalitz coordinates. A resolution `N` gives exactly `N**2` physical integration points with constant quadrature weights. Details are in `docs/dalitz_grid_integration.md`.
+The repository intentionally keeps only four end-to-end notebooks:
 
-## E791 examples
+- `notebooks/01_e791_toy_fit.ipynb`: E791 signal toy generation and fit;
+- `notebooks/02_e791_efficiency_background_fit.ipynb`: E791 fit with efficiency
+  and a floating background fraction;
+- `notebooks/03_b2kpipi_toy_fit.ipynb`: non-CP `B+ -> K+ pi+ pi-` signal toy and fit;
+- `notebooks/04_b2kpipi_efficiency_background_fit.ipynb`: the same B channel with
+  efficiency and background.
 
-Current validation examples use deterministic grid normalization:
+Each notebook prints generated and fitted parameters and the corresponding fit
+fractions.
 
-- `notebooks/02_fit_dynamic_parameters.ipynb`: E791 coefficient closure;
-- `notebooks/03_lineshape_parameter_diagnostics.ipynb`: lineshape diagnostics;
-- `notebooks/04_normalization_grid_diagnostics.ipynb`: grid-convergence and normalization diagnostics;
-- `notebooks/07_e791_rho1450_mass_width_closure.ipynb`: coefficients plus `rho(1450)` mass and width.
-- `notebooks/15_laura_e791_integration_validation.ipynb`: Laura++-style versus
-  equal-area normalization using the complete seven-component E791 Fit 2 model,
-  including matrix-element convergence and direct/cache closure.
-- `notebooks/16_laura_e791_genfit.ipynb`: end-to-end E791 Fit 2 pseudo-data
-  generation and Cartesian-coefficient fit with Laura++-style normalization.
-- `notebooks/17_laura_e791_genfit_ensemble.ipynb`: repeated E791 Fit 2
-  pseudoexperiment generation and fitting, with bias compatibility, fit-validity
-  and pull mean/width diagnostics.
+## Fit fractions
+
+Fit fractions are evaluated with the same component convention and
+normalization matrix used by the model:
+
+```python
+fractions = model.fit_fractions(fit_values)
+model.print_fit_fractions(
+    fit_values,
+    include_interference=True,
+)
+```
+
+The default gives physical fractions without detector efficiency. Supplying
+`efficiency=efficiency_model` gives acceptance-weighted fractions explicitly.
+Fit fractions need not sum to one because interference is coherent.
 
 ## Coefficients
 

@@ -2,12 +2,12 @@ import jax.numpy as jnp
 import pytest
 
 from dalitzplotfitter import (
-    DalitzGrid,
+    DalitzGaussLegendreGrid,
     DecayChannel,
     DecayModel,
-    LauraGaussLegendreGrid,
     NonResonant,
     RealImag,
+    SquareDalitzGrid,
     enable_x64,
 )
 from dalitzplotfitter.integration import (
@@ -23,38 +23,41 @@ MOTHER_MASS = 1.86966
 MASSES = (0.13957, 0.13957, 0.13957)
 
 
-def test_laura_grid_validates_configuration():
+def test_gauss_legendre_grid_validates_configuration():
     with pytest.raises(ValueError, match="bin_width must be positive"):
-        LauraGaussLegendreGrid(MOTHER_MASS, MASSES, bin_width=0.0)
+        DalitzGaussLegendreGrid(MOTHER_MASS, MASSES, bin_width=0.0)
     with pytest.raises(ValueError, match="order_m13 must be at least 2"):
-        LauraGaussLegendreGrid(MOTHER_MASS, MASSES, order_m13=1)
+        DalitzGaussLegendreGrid(MOTHER_MASS, MASSES, order_m13=1)
 
 
-def test_laura_weights_integrate_constant_to_dalitz_area():
-    laura = LauraGaussLegendreGrid(
+def test_gauss_legendre_weights_integrate_constant_to_square_dalitz_area():
+    gauss_legendre = DalitzGaussLegendreGrid(
         MOTHER_MASS,
         MASSES,
         order_m13=500,
         order_m23=500,
     ).sample()
-    reference_area = DalitzGrid(
+    square = SquareDalitzGrid(
         MOTHER_MASS,
         MASSES,
-        resolution=100,
-        boundary_resolution=100_001,
-    ).area
+        resolution=300,
+    ).sample()
+    reference_area = jnp.mean(square.weights)
 
-    integral = GridIntegrator(laura).integrate(
+    integral = GridIntegrator(gauss_legendre).integrate(
         lambda data: jnp.ones_like(data["s12"])
     )
     assert jnp.isclose(integral, reference_area, rtol=2.0e-4, atol=0.0)
-    assert bool(jnp.all(laura.weights > 0.0))
+    assert bool(jnp.all(gauss_legendre.weights > 0.0))
     invariant_sum = MOTHER_MASS**2 + sum(mass**2 for mass in MASSES)
-    assert jnp.allclose(laura.s12 + laura.s13 + laura.s23, invariant_sum)
+    assert jnp.allclose(
+        gauss_legendre.s12 + gauss_legendre.s13 + gauss_legendre.s23,
+        invariant_sum,
+    )
 
 
-def test_laura_matrix_normalization_matches_direct_integral():
-    sample = LauraGaussLegendreGrid(
+def test_gauss_legendre_matrix_normalization_matches_direct_integral():
+    sample = DalitzGaussLegendreGrid(
         MOTHER_MASS,
         MASSES,
         order_m13=160,
@@ -80,12 +83,12 @@ def test_laura_matrix_normalization_matches_direct_integral():
     )
 
 
-def test_decay_model_selects_and_reuses_laura_normalization():
+def test_decay_model_selects_and_reuses_gauss_legendre_normalization():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     model = DecayModel(
         channel,
         [NonResonant(RealImag(1.0, 0.0))],
-        normalization_method="laura",
+        normalization_method="gauss-legendre",
         normalization_order_m13=80,
         normalization_order_m23=70,
     )

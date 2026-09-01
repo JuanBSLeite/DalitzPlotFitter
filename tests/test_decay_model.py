@@ -11,7 +11,6 @@ from dalitzplotfitter import (
     enable_x64,
 )
 
-
 enable_x64()
 
 
@@ -27,6 +26,7 @@ def _model(channel, components, **kwargs):
     return DecayModel(
         channel,
         components,
+        normalization_method="square-dalitz",
         normalization_resolution=45,
         **kwargs,
     )
@@ -71,10 +71,11 @@ def test_unphysical_decay_channel_is_rejected():
         DecayChannel("pi0", ("pi0", "pi0", "pi0"))
 
 
-def test_decay_model_defaults_to_component_normalization_and_million_point_grid():
+def test_decay_model_defaults_to_gauss_legendre_component_normalization():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     model = DecayModel(channel, [NonResonant(RealImag(1.0, 0.0))])
     assert model.normalize_components is True
+    assert model.normalization_method == "gauss-legendre"
     assert model.normalization_resolution == 1000
     assert model._normalization_sample is None
 
@@ -87,7 +88,16 @@ def test_internal_normalization_grid_is_lazy_and_reused():
     second = model.normalization_sample
     assert first is second
     assert first.size == 45**2
-    assert bool(jnp.all(first.weights == first.weights[0]))
+    assert bool(jnp.any(first.weights != first.weights[0]))
+
+
+def test_decay_model_rejects_removed_normalization_methods():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    components = [NonResonant(RealImag(1.0, 0.0))]
+    with pytest.raises(ValueError, match="gauss-legendre.*square-dalitz"):
+        DecayModel(channel, components, normalization_method="equal_area")
+    with pytest.raises(ValueError, match="gauss-legendre.*square-dalitz"):
+        DecayModel(channel, components, normalization_method="adaptive")
 
 
 def test_component_normalization_is_unit_diagonal_by_default():
@@ -122,6 +132,48 @@ def test_component_normalization_can_be_disabled():
     data = model.generate_phase_space(32, seed=12)
     cache = model.prepare_cache(data)
     assert cache.normalize_components is False
+
+
+def test_decay_model_computes_and_prints_fit_fractions(capsys):
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    model = _model(
+        channel,
+        [
+            NonResonant(RealImag(1.0, 0.0), name="first"),
+            NonResonant(RealImag(1.0, 0.0), name="second"),
+        ],
+    )
+
+    fractions = model.fit_fractions()
+    interference = model.interference_fractions()
+    printed = model.print_fit_fractions(include_interference=True, precision=2)
+    output = capsys.readouterr().out
+
+    assert jnp.allclose(fractions, jnp.asarray([0.25, 0.25]))
+    assert jnp.allclose(
+        jnp.sum(fractions) + jnp.sum(jnp.triu(interference, k=1)),
+        1.0,
+    )
+    assert printed == {"first": 0.25, "second": 0.25}
+    assert "Fit fractions (physical)" in output
+    assert "first x second" in output
+    assert "50.00" in output
+
+
+def test_decay_model_acceptance_weighted_fit_fractions_validate_efficiency():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    model = _model(
+        channel,
+        [NonResonant(RealImag(1.0, 0.0), name="NR")],
+    )
+
+    fractions = model.fit_fractions(
+        efficiency=lambda data: 0.5 + 0.0 * data["s12"]
+    )
+    assert jnp.allclose(fractions, jnp.ones((1,)))
+
+    with pytest.raises(ValueError, match="one value per normalization point"):
+        model.fit_fractions(efficiency=jnp.ones((3,)))
 
 
 def test_decay_model_rejects_duplicate_component_names():

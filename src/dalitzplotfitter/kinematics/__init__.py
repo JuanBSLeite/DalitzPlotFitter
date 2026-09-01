@@ -7,7 +7,7 @@ from .covariant import (
     covariant_kinematics_from_invariants,
     spatial_magnitude,
 )
-from .dalitz_grid import DalitzGrid, dalitz_s13_limits
+from .dalitz_grid import dalitz_s13_limits
 from .phase_space_mc import PhaseSpaceMC
 from .sample import PhaseSpaceSample
 from .square_dalitz import (
@@ -20,7 +20,6 @@ from .vectors import invariant_mass_squared
 
 __all__ = [
     "CovariantKinematics",
-    "DalitzGrid",
     "PhaseSpaceMC",
     "PhaseSpaceSample",
     "SquareDalitzGrid",

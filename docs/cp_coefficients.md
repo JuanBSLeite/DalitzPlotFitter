@@ -67,7 +67,8 @@ At least one complex-amplitude convention must be fixed, as in an ordinary ampli
 
 ## Complete BaBar B± -> K± pi∓ pi± benchmark
 
-`notebooks/12_cp_coefficients_closure.ipynb` implements the complete nominal signal isobar model of BaBar, Phys. Rev. D 78, 012004 (2008), arXiv:0803.4451.
+The CP classes remain available in the library, but the reduced tutorial set is
+currently restricted to non-CP workflows.
 
 The nominal model contains a constant phase-space nonresonant term and nine intermediate states:
 

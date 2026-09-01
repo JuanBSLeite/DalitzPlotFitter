@@ -334,7 +334,7 @@ Always launch the notebook process after setting the memory configuration:
 ```bash
 source .venv/bin/activate
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
-jupyter lab notebooks/01_dplus_fit_closure.ipynb
+jupyter lab notebooks/01_e791_toy_fit.ipynb
 ```
 
 or launch VS Code from that shell:

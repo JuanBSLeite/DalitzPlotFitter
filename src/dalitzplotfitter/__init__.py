@@ -25,16 +25,9 @@ from .dynamics import (
     physical_bin_mask,
 )
 from .fit import Minimizer, MultiStartResult, Parameter, ParameterKind
-from .integration import (
-    AdaptiveDalitzGrid,
-    AdaptiveDalitzResult,
-    AdaptiveSquareDalitzGrid,
-    AdaptiveSquareDalitzResult,
-    LauraGaussLegendreGrid,
-)
+from .integration import DalitzGaussLegendreGrid
 from .kinematics import (
     CovariantKinematics,
-    DalitzGrid,
     PhaseSpaceMC,
     PhaseSpaceSample,
     SquareDalitzGrid,
@@ -49,10 +42,6 @@ from .kinematics import (
 from .sampling import weighted_resample
 
 __all__ = [
-    "AdaptiveDalitzGrid",
-    "AdaptiveDalitzResult",
-    "AdaptiveSquareDalitzGrid",
-    "AdaptiveSquareDalitzResult",
     "AmplitudeComponent",
     "BaBarFlatte",
     "CPRealImag",
@@ -61,14 +50,13 @@ __all__ = [
     "CovariantAngular",
     "CovariantKinematics",
     "DalitzAmplitude",
-    "DalitzGrid",
     "DecayChannel",
     "DecayModel",
     "Flatte",
     "GounarisSakurai",
     "KMatrix",
     "LASS",
-    "LauraGaussLegendreGrid",
+    "DalitzGaussLegendreGrid",
     "Minimizer",
     "MultiStartResult",
     "NonResonant",

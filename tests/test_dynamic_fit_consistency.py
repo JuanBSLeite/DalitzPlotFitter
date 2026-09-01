@@ -5,7 +5,6 @@ import jax.numpy as jnp
 import numpy as np
 
 from dalitzplotfitter import (
-    DalitzGrid,
     DecayChannel,
     DecayModel,
     Minimizer,
@@ -13,6 +12,7 @@ from dalitzplotfitter import (
     Parameter,
     RealImag,
     Resonance,
+    SquareDalitzGrid,
     enable_x64,
 )
 
@@ -68,7 +68,7 @@ def _dynamic_rho_model(*, coefficient_free: bool = True):
 
 
 def _grid(model, resolution):
-    return DalitzGrid(
+    return SquareDalitzGrid(
         model.channel.parent_mass,
         model.channel.daughter_masses,
         resolution=resolution,
