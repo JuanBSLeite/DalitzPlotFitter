@@ -1,18 +1,16 @@
 # User-friendly analysis API
 
-DalitzPlotFitter keeps the low-level classes available for validation and custom analyses, but common workflows can now use `FitSession`.
+DalitzPlotFitter keeps the low-level classes available for validation and custom analyses, while common workflows can use `FitSession` and `CPFitSession`.
 
 ## Minimal signal fit
-
-Low-level construction requires creating a `SignalPDF`, an `UnbinnedNLL` and a `Minimizer` explicitly. The high-level equivalent is:
 
 ```python
 from dalitzplotfitter import FitSession
 
 session = FitSession(model, data)
 result = session.fit(simplex=True)
-session.print_result(result)
-session.print_fit_fractions(result)
+session.report(result)
+session.plot_projection(result, "s13")
 ```
 
 The fit parameters are collected automatically from the amplitude model.
@@ -48,8 +46,6 @@ The same efficiency and veto are included in the signal numerator and determinis
 
 ## Backgrounds without manual normalization
 
-A callable histogram/function can be supplied through `BackgroundSpec`:
-
 ```python
 from dalitzplotfitter import BackgroundSpec, FitSession, Parameter
 
@@ -59,19 +55,11 @@ session = FitSession(
     model,
     data,
     signal_fraction=f_sig,
-    backgrounds=(
-        BackgroundSpec("combinatorial", background_shape),
-    ),
+    backgrounds=(BackgroundSpec("combinatorial", background_shape),),
 )
 ```
 
-The session evaluates `background_shape` on both data and the model normalization grid and computes
-
-```text
-integral B(Phi) dPhi
-```
-
-automatically. If a veto is attached to the session, the same veto is applied to the background by default.
+The session evaluates the shape on data and the model normalization grid and computes its normalization automatically. If a veto is attached to the session, it is also applied to the background by default.
 
 For multiple non-extended backgrounds:
 
@@ -82,12 +70,12 @@ session = FitSession(
     signal_fraction=f_sig,
     backgrounds=(
         BackgroundSpec("comb", comb_shape, fraction=f_comb),
-        BackgroundSpec("misid", misid_shape),  # remainder
+        BackgroundSpec("misid", misid_shape),
     ),
 )
 ```
 
-Extended fits use `signal_yield=` and per-background `yield_=` instead.
+The final background remains the remainder category. Extended fits use `signal_yield=` and per-background `yield_=` instead.
 
 ## Constraints
 
@@ -97,7 +85,91 @@ session = session.with_constraint(
 )
 ```
 
-or pass a tuple of constraints directly when constructing the session.
+## Automatic fit report
+
+```python
+report = session.report(result)
+```
+
+The returned dictionary contains fit validity, NLL, EDM, function-call count, parameter values/errors, optional correlation matrix and optional fit fractions. The same information is printed in a compact form.
+
+## Automatic projections
+
+```python
+session.plot_projection(result, "s13")
+session.plot_projection(result, "s23", show_components=True)
+```
+
+The projection is shown in event units and can include signal plus each background category. The deterministic normalization sample is used to evaluate the fitted model rather than generating a new toy sample.
+
+## Simultaneous direct-CP fits
+
+The manual `PreparedAmplitudeCache + CPJointNLL + Minimizer` assembly can be replaced by:
+
+```python
+from dalitzplotfitter import CPFitSession
+
+session = CPFitSession(
+    plus_model,
+    minus_model,
+    plus_data,
+    minus_data,
+)
+result = session.fit()
+session.report(result)
+session.plot_projection(result, "s13")
+```
+
+Shared `Parameter` objects appearing in the B+ and B- models are collected only once.
+
+### CP efficiency and veto
+
+For a charge-symmetric acceptance:
+
+```python
+session = session.with_efficiency(efficiency)
+session = session.with_veto(veto)
+```
+
+The same object is applied to both charges. Charge-specific objects can be supplied as the second argument.
+
+The acceptance is folded into both data numerators and the two normalization caches.
+
+### CP backgrounds
+
+```python
+from dalitzplotfitter import CPBackgroundSpec
+
+session = CPFitSession(
+    plus_model,
+    minus_model,
+    plus_data,
+    minus_data,
+    signal_fraction=f_sig,
+    backgrounds=(
+        CPBackgroundSpec("combinatorial", background_shape),
+    ),
+)
+```
+
+If only `plus_shape` is supplied, the same shape is used for B-. Supplying `minus_shape=` allows charge-dependent background shapes. Each category is normalized automatically in the joint charge-Dalitz space.
+
+Multiple categories follow the same remainder convention as `CPJointNLL`. Extended fits use the existing signal/background yield convention; independent B+/B- production/detection yield nuisance parameters remain intentionally outside this convenience layer for now.
+
+### CP reports and projections
+
+```python
+session.report(
+    result,
+    include_fit_fractions=True,
+    acceptance_weighted_fractions=True,
+)
+
+session.plot_projection(result, "s13")
+session.plot_projection(result, "s23")
+```
+
+The CP projections deliberately use one common total-event normalization. B+ and B- are therefore **not normalized independently**, so an integrated charge asymmetry remains visible.
 
 ## Plot helpers
 
@@ -113,22 +185,31 @@ plot_square_dalitz(
 )
 ```
 
-These helpers remove the repeated `hist2d`, labels, ranges and Square-Dalitz conversion code from analysis notebooks.
+## ROOT CP input
+
+```python
+session = CPFitSession.from_root(
+    plus_model,
+    minus_model,
+    "Bplus.root", "DecayTree",
+    "Bminus.root", "DecayTree",
+    plus_root_kwargs={"s12":"S12", "s13":"S13", "s23":"S23"},
+    minus_root_kwargs={"s12":"S12", "s13":"S13", "s23":"S23"},
+)
+```
 
 ## Design principle
 
-`FitSession` is intentionally a composition layer. It does not replace `SignalPDF`, `PreparedAmplitudeCache`, `MultiBackgroundNLL`, `CPJointNLL` or `Minimizer`. Those remain the reference low-level API for advanced workflows and detailed validation.
+`FitSession` and `CPFitSession` are composition layers. They do not replace `SignalPDF`, `PreparedAmplitudeCache`, `MultiBackgroundNLL`, `CPJointNLL` or `Minimizer`. Those remain the low-level API for advanced workflows and detailed validation.
 
-## Good next ergonomic improvements
+## Remaining ergonomic improvements
 
-The next useful convenience layer would be:
+Useful future additions are:
 
 1. declarative model construction from dictionaries/YAML/JSON;
-2. automatic projection plots with signal/background component overlays;
-3. a `CPFitSession` wrapping the two charge samples and `CPJointNLL`;
-4. direct `model.fit(data, ...)` shorthand backed by `FitSession`;
-5. a standard fit-report object/table including parameters, correlations, fit fractions and diagnostics;
-6. automatic ROOT histogram discovery/inspection helpers;
-7. optional pandas-compatible fit-result export.
+2. direct `model.fit(data, ...)` shorthand backed by `FitSession`;
+3. automatic ROOT file/tree/histogram inspection;
+4. optional pandas-compatible result export;
+5. component-level amplitude projection overlays and standardized pull/residual panels.
 
-These are ergonomics features and should be built on top of the validated numerical core rather than duplicating it.
+These should continue to sit on top of the validated numerical core rather than duplicate it.
