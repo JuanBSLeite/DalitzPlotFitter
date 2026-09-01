@@ -168,7 +168,9 @@ The repository intentionally keeps only four end-to-end notebooks:
   efficiency and background.
 
 Each notebook prints generated and fitted parameters and the corresponding fit
-fractions.
+fractions, and compares the fitted and generated models in the `s12` and `s13`
+projections. The two complete-fit notebooks additionally display standalone
+Dalitz maps of the efficiency and normalized background density.
 
 ## Fit fractions
 
