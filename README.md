@@ -48,6 +48,45 @@ result = session.fit()
 
 Background shapes can be supplied through `BackgroundSpec`; their deterministic Dalitz normalization is computed automatically.
 
+## User-friendly toy generation
+
+Once a model exists, pseudo-data no longer requires manually creating a phase-space pool and calling `weighted_resample`:
+
+```python
+from dalitzplotfitter import generate_toy
+
+toy = generate_toy(model, 50_000, seed=1)
+```
+
+Efficiency, vetoes and backgrounds can be included directly:
+
+```python
+from dalitzplotfitter import ToyBackground
+
+toy = generate_toy(
+    model,
+    50_000,
+    parameters=fit_values,
+    efficiency=efficiency,
+    veto=veto,
+    signal_fraction=0.82,
+    backgrounds=(ToyBackground("comb", background_shape),),
+    seed=2,
+)
+```
+
+For simultaneous direct-CP pseudoexperiments, `generate_cp_toy` computes the accepted B+/B- charge split from the model integrals automatically:
+
+```python
+plus_toy, minus_toy = generate_cp_toy(
+    plus_model,
+    minus_model,
+    50_000,
+    parameters=fit_values,
+    seed=3,
+)
+```
+
 ## Simultaneous CP fits
 
 `CPFitSession` removes the manual construction of the two prepared caches, joint CP likelihood and minimizer:
@@ -206,7 +245,8 @@ The repository contains a progressive set of examples:
 - `notebooks/14_b2kpipi_root_hist_eff_background.ipynb`: ROOT TH2 maps in ordinary Dalitz coordinates;
 - `notebooks/15_b2kpipi_square_dalitz_eff_background.ipynb`: ROOT TH2 efficiency/background maps in `(m', theta')`;
 - `notebooks/16_user_friendly_quickstart.ipynb`: concise non-CP `FitSession` workflow;
-- `notebooks/17_b2kpipi_cp_user_friendly.ipynb`: concise `CPFitSession` workflow, automatic report and charge-separated fitted projections.
+- `notebooks/17_b2kpipi_cp_user_friendly.ipynb`: concise `CPFitSession` workflow, automatic report and charge-separated fitted projections;
+- `notebooks/18_user_friendly_toy_generation.ipynb`: signal/background and CP pseudo-data generation in a few lines, with Dalitz and Square-Dalitz plots.
 
 The B-to-Kpipi examples consistently use
 
