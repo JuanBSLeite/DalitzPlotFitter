@@ -10,6 +10,7 @@ from .background import BackgroundCategory, CPBackgroundCategory
 from .coefficients import CPRealImag, RealImag
 from .config import enable_x64
 from .constraints import ConstrainedNLL, GaussianConstraint
+from .cp_workflow import CPBackgroundSpec, CPFitSession
 from .decay import DalitzAmplitude, DecayChannel, DecayModel, NonResonant, Resonance
 from .discriminants import Exponential1D, FactorizedDensity, Gaussian1D, Histogram1D
 from .dynamics import (
@@ -71,10 +72,11 @@ from .veto import (
 from .workflow import BackgroundSpec, FitSession
 
 __all__ = [
-    "AmplitudeComponent", "BackgroundCategory", "BackgroundSpec", "CPBackgroundCategory", "BaBarFlatte",
-    "CPRealImag", "CoherentAmplitudeModel", "CompositeVeto", "ConstrainedNLL",
-    "ConstantAmplitude", "CovariantAngular", "CovariantKinematics", "DalitzAmplitude",
-    "DecayChannel", "DecayModel", "Exponential1D", "FactorizedDensity", "FitSession", "Flatte",
+    "AmplitudeComponent", "BackgroundCategory", "BackgroundSpec", "CPBackgroundCategory",
+    "CPBackgroundSpec", "CPFitSession", "BaBarFlatte", "CPRealImag",
+    "CoherentAmplitudeModel", "CompositeVeto", "ConstrainedNLL", "ConstantAmplitude",
+    "CovariantAngular", "CovariantKinematics", "DalitzAmplitude", "DecayChannel",
+    "DecayModel", "Exponential1D", "FactorizedDensity", "FitSession", "Flatte",
     "FunctionalVeto", "Gaussian1D", "GaussianConstraint", "GounarisSakurai",
     "Histogram1D", "KMatrix", "LASS", "DalitzGaussLegendreGrid", "MassWindowVeto",
     "Minimizer", "MultiBackgroundNLL", "MultiStartResult", "NonResonant", "Parameter",
