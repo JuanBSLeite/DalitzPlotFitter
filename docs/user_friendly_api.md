@@ -98,7 +98,10 @@ The returned dictionary contains fit validity, NLL, EDM, function-call count, pa
 ```python
 session.plot_projection(result, "s13")
 session.plot_projection(result, "s23", show_components=True)
+session.plot_projection(result, "s13", log_scale=True)
 ```
+
+Data are shown as black circular points with statistical error bars, while the fitted signal/background components and total fit are drawn as lines. For `s12`, `s13`, and `s23`, the vertical-axis label is generated automatically from the actual uniform bin width, for example `Candidates / 0.25 GeV^2`. `log_scale=True` changes the projection y axis to logarithmic scale.
 
 The projection is shown in event units and can include signal plus each background category. The deterministic normalization sample is used to evaluate the fitted model rather than generating a new toy sample.
 
@@ -166,10 +169,10 @@ session.report(
 )
 
 session.plot_projection(result, "s13")
-session.plot_projection(result, "s23")
+session.plot_projection(result, "s23", log_scale=True)
 ```
 
-The CP projections deliberately use one common total-event normalization. B+ and B- are therefore **not normalized independently**, so an integrated charge asymmetry remains visible.
+The CP projections use the same black-point/error-bar convention and automatic candidates-per-bin-width y label. They deliberately use one common total-event normalization. B+ and B- are therefore **not normalized independently**, so an integrated charge asymmetry remains visible.
 
 ## Plot helpers
 
@@ -177,13 +180,18 @@ The CP projections deliberately use one common total-event normalization. B+ and
 from dalitzplotfitter import plot_dalitz, plot_square_dalitz
 
 plot_dalitz(data, x="s13", y="s23", title="Selected data")
+plot_dalitz(data, x="s13", y="s23", log_scale=True)
+
 plot_square_dalitz(
     data,
     mother_mass=model.channel.parent_mass,
     masses=model.channel.daughter_masses,
     pair=(0, 2),
+    log_scale=True,
 )
 ```
+
+For two-dimensional Dalitz and Square-Dalitz plots, `log_scale=True` applies logarithmic normalization to the color scale rather than changing either coordinate axis.
 
 ## ROOT CP input
 
