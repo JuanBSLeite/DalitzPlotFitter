@@ -46,11 +46,7 @@ class FunctionalVeto(VetoMap):
 
 @dataclass(frozen=True)
 class MassWindowVeto(VetoMap):
-    """Veto one invariant-mass window, Laura++ ``addMassVeto`` style.
-
-    Parameters are given in invariant mass (GeV), not mass squared.  Points
-    with ``minimum <= m_ij <= maximum`` are rejected.
-    """
+    """Veto one invariant-mass window, Laura++ ``addMassVeto`` style."""
 
     pair: tuple[int, int]
     minimum: float
@@ -91,4 +87,28 @@ class CompositeVeto(VetoMap):
         return mask
 
 
-__all__ = ["CompositeVeto", "FunctionalVeto", "MassWindowVeto", "VetoMap"]
+@dataclass(frozen=True)
+class VetoedDensity:
+    """Apply a veto map to any Dalitz density/shape callable.
+
+    This is useful for backgrounds so the same veto object used for signal and
+    data selection can also be included when computing background values and
+    normalization integrals.
+    """
+
+    density: Callable[[dict[str, Array]], Array]
+    veto: VetoMap
+
+    def __call__(self, data: dict[str, Array]) -> Array:
+        values = jnp.asarray(self.density(data))
+        mask = jnp.asarray(self.veto(data), dtype=values.dtype)
+        return values * mask
+
+
+__all__ = [
+    "CompositeVeto",
+    "FunctionalVeto",
+    "MassWindowVeto",
+    "VetoMap",
+    "VetoedDensity",
+]
