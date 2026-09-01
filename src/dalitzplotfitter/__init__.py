@@ -44,7 +44,14 @@ from .likelihood import MultiBackgroundNLL
 from .pdf import SCFSignalPDF, SignalPDF
 from .resolution import SquareDalitzSCFMap
 from .sampling import weighted_resample
-from .veto import CompositeVeto, FunctionalVeto, MassWindowVeto, VetoMap, VetoedDensity
+from .veto import (
+    CompositeVeto,
+    FunctionalVeto,
+    MassWindowVeto,
+    VetoMap,
+    VetoedDensity,
+    vetoed_signal_pdf,
+)
 
 __all__ = [
     "AmplitudeComponent",
@@ -99,5 +106,6 @@ __all__ = [
     "physical_bin_mask",
     "square_dalitz_jacobian",
     "square_dalitz_to_invariants",
+    "vetoed_signal_pdf",
     "weighted_resample",
 ]
