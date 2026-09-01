@@ -30,28 +30,17 @@ class CPJointNLL:
     Arbitrary named background categories can be supplied through
     ``background_categories``.  Each category is also normalized jointly over
     charge.  The legacy single-background arguments remain supported.
-
-    Non-extended fits use a total ``signal_fraction`` and relative background
-    composition fractions.  For ``N`` named background categories, the first
-    ``N-1`` categories carry relative fractions and the final category is the
-    remainder.  Extended fits use independent yields for signal and for every
-    background category.
     """
 
     plus_cache: PreparedAmplitudeCache
     minus_cache: PreparedAmplitudeCache
     plus_efficiency: Array | None = None
     minus_efficiency: Array | None = None
-
-    # Legacy single-background interface.
     plus_background: Array | None = None
     minus_background: Array | None = None
     plus_background_normalization: Array | float | None = None
     minus_background_normalization: Array | float | None = None
-
-    # New arbitrary-category interface.
     background_categories: tuple[CPBackgroundCategory, ...] = ()
-
     signal_fraction: object | None = None
     extended: bool = False
     signal_yield: object | None = None
@@ -60,7 +49,6 @@ class CPJointNLL:
     def __post_init__(self) -> None:
         if (self.plus_efficiency is None) != (self.minus_efficiency is None):
             raise ValueError("plus_efficiency and minus_efficiency must be supplied together")
-
         legacy_fields = (
             self.plus_background,
             self.minus_background,
@@ -69,18 +57,12 @@ class CPJointNLL:
         )
         legacy_supplied = tuple(value is not None for value in legacy_fields)
         if any(legacy_supplied) and not all(legacy_supplied):
-            raise ValueError(
-                "background requires plus/minus background values and plus/minus normalizations"
-            )
+            raise ValueError("background requires plus/minus background values and plus/minus normalizations")
         if any(legacy_supplied) and self.background_categories:
-            raise ValueError(
-                "use either the legacy single-background arguments or background_categories, not both"
-            )
-
+            raise ValueError("use either the legacy single-background arguments or background_categories, not both")
         names = [category.name for category in self.background_categories]
         if len(set(names)) != len(names):
             raise ValueError("CP background category names must be unique")
-
         if self.extended:
             if self.signal_fraction is not None:
                 raise ValueError("signal_fraction is not used in extended mode")
@@ -88,9 +70,7 @@ class CPJointNLL:
                 raise ValueError("extended mode requires signal_yield")
             if self.background_categories:
                 if self.background_yield is not None:
-                    raise ValueError(
-                        "background_yield belongs to the legacy single-background interface"
-                    )
+                    raise ValueError("background_yield belongs to the legacy single-background interface")
                 if any(category.fraction is not None for category in self.background_categories):
                     raise ValueError("background fractions are not used in extended mode")
                 if any(category.yield_ is None for category in self.background_categories):
@@ -112,17 +92,11 @@ class CPJointNLL:
                     raise ValueError("background yields require extended=True")
                 if len(self.background_categories) > 1:
                     if any(c.fraction is None for c in self.background_categories[:-1]):
-                        raise ValueError(
-                            "all CP background categories except the last require a relative fraction"
-                        )
+                        raise ValueError("all CP background categories except the last require a relative fraction")
                     if self.background_categories[-1].fraction is not None:
-                        raise ValueError(
-                            "the last CP background category is the remainder and must not define fraction"
-                        )
+                        raise ValueError("the last CP background category is the remainder and must not define fraction")
                 elif len(self.background_categories) == 1 and self.background_categories[0].fraction is not None:
-                    raise ValueError(
-                        "a single CP background category does not need a relative fraction"
-                    )
+                    raise ValueError("a single CP background category does not need a relative fraction")
 
     @property
     def has_legacy_background(self) -> bool:
@@ -132,51 +106,53 @@ class CPJointNLL:
     def has_background(self) -> bool:
         return self.has_legacy_background or bool(self.background_categories)
 
-    def _signal_densities(
-        self, parameters: Parameters
-    ) -> tuple[Array, Array, Array, Array]:
+    def _signal_densities(self, parameters: Parameters) -> tuple[Array, Array, Array, Array]:
         intensity_plus, integral_plus = self.plus_cache.evaluate(parameters)
         intensity_minus, integral_minus = self.minus_cache.evaluate(parameters)
         if self.plus_efficiency is not None:
             intensity_plus = jnp.asarray(self.plus_efficiency) * intensity_plus
             intensity_minus = jnp.asarray(self.minus_efficiency) * intensity_minus
         total_integral = integral_plus + integral_minus
-        return (
-            intensity_plus / total_integral,
-            intensity_minus / total_integral,
-            integral_plus,
-            integral_minus,
-        )
+        return intensity_plus / total_integral, intensity_minus / total_integral, integral_plus, integral_minus
 
     def _legacy_background_densities(self) -> tuple[Array, Array]:
         if not self.has_legacy_background:
             raise RuntimeError("legacy background densities requested without legacy background")
-        total = jnp.asarray(self.plus_background_normalization) + jnp.asarray(
-            self.minus_background_normalization
-        )
-        return (
-            jnp.asarray(self.plus_background) / total,
-            jnp.asarray(self.minus_background) / total,
-        )
+        total = jnp.asarray(self.plus_background_normalization) + jnp.asarray(self.minus_background_normalization)
+        return jnp.asarray(self.plus_background) / total, jnp.asarray(self.minus_background) / total
+
+    def _background_densities(self) -> tuple[Array, Array]:
+        """Backward-compatible single-background density helper."""
+        return self._legacy_background_densities()
 
     def background_weights(self, parameters: Parameters) -> Array:
-        """Return relative weights for named background categories."""
-
         n = len(self.background_categories)
         if n == 0:
             return jnp.empty((0,), dtype=jnp.float64)
         if n == 1:
             return jnp.ones((1,), dtype=jnp.float64)
-        explicit = jnp.asarray(
-            [_resolve(category.fraction, parameters) for category in self.background_categories[:-1]],
-            dtype=jnp.float64,
-        )
+        explicit = jnp.asarray([_resolve(category.fraction, parameters) for category in self.background_categories[:-1]], dtype=jnp.float64)
         remainder = 1.0 - jnp.sum(explicit)
         return jnp.concatenate((explicit, jnp.asarray([remainder])))
 
+    def component_densities(self, parameters: Parameters):
+        """Return unweighted component densities for diagnostics/legacy tests."""
+        signal_plus, signal_minus, _, _ = self._signal_densities(parameters)
+        if self.background_categories:
+            weights = self.background_weights(parameters) if not self.extended else None
+            categories = []
+            for index, category in enumerate(self.background_categories):
+                if self.extended:
+                    categories.append((category.plus_density, category.minus_density))
+                else:
+                    categories.append((weights[index] * category.plus_density, weights[index] * category.minus_density))
+            return (signal_plus, signal_minus), tuple(categories)
+        if self.has_legacy_background:
+            return (signal_plus, signal_minus), self._legacy_background_densities()
+        return (signal_plus, signal_minus), None
+
     def densities(self, parameters: Parameters) -> tuple[Array, Array]:
         signal_plus, signal_minus, _, _ = self._signal_densities(parameters)
-
         if self.extended:
             n_signal = jnp.asarray(_resolve(self.signal_yield, parameters))
             total_plus = n_signal * signal_plus
@@ -192,10 +168,8 @@ class CPJointNLL:
                 total_plus = total_plus + n_background * background_plus
                 total_minus = total_minus + n_background * background_minus
             return total_plus, total_minus
-
         if not self.has_background:
             return signal_plus, signal_minus
-
         f_signal = jnp.asarray(_resolve(self.signal_fraction, parameters))
         if self.background_categories:
             weights = self.background_weights(parameters)
@@ -206,11 +180,7 @@ class CPJointNLL:
                 background_minus = background_minus + weight * category.minus_density
         else:
             background_plus, background_minus = self._legacy_background_densities()
-
-        return (
-            f_signal * signal_plus + (1.0 - f_signal) * background_plus,
-            f_signal * signal_minus + (1.0 - f_signal) * background_minus,
-        )
+        return f_signal * signal_plus + (1.0 - f_signal) * background_plus, f_signal * signal_minus + (1.0 - f_signal) * background_minus
 
     def expected_events(self, parameters: Parameters) -> Array:
         if not self.extended:
@@ -227,25 +197,19 @@ class CPJointNLL:
         pdf_plus, pdf_minus = self.densities(parameters)
         tiny_plus = jnp.finfo(pdf_plus.dtype).tiny
         tiny_minus = jnp.finfo(pdf_minus.dtype).tiny
-        nll = -jnp.sum(jnp.log(jnp.maximum(pdf_plus, tiny_plus))) - jnp.sum(
-            jnp.log(jnp.maximum(pdf_minus, tiny_minus))
-        )
+        nll = -jnp.sum(jnp.log(jnp.maximum(pdf_plus, tiny_plus))) - jnp.sum(jnp.log(jnp.maximum(pdf_minus, tiny_minus)))
         if self.extended:
             nll = nll + self.expected_events(parameters)
         return nll
 
     def charge_probabilities(self, parameters: Parameters) -> tuple[Array, Array]:
-        """Return predicted positive/negative fractions after all components."""
-
         integral_plus = self.plus_cache.normalization(parameters)
         integral_minus = self.minus_cache.normalization(parameters)
         signal_total = integral_plus + integral_minus
         signal_plus = integral_plus / signal_total
         signal_minus = integral_minus / signal_total
-
         if not self.has_background:
             return signal_plus, signal_minus
-
         if self.extended:
             n_signal = jnp.asarray(_resolve(self.signal_yield, parameters))
             numerator_plus = n_signal * signal_plus
@@ -266,7 +230,6 @@ class CPJointNLL:
                 numerator_minus = numerator_minus + n_background * bminus / btotal
                 total_yield = total_yield + n_background
             return numerator_plus / total_yield, numerator_minus / total_yield
-
         f_signal = jnp.asarray(_resolve(self.signal_fraction, parameters))
         if self.background_categories:
             weights = self.background_weights(parameters)
@@ -281,11 +244,7 @@ class CPJointNLL:
             btotal = bplus + bminus
             background_plus = bplus / btotal
             background_minus = bminus / btotal
-
-        return (
-            f_signal * signal_plus + (1.0 - f_signal) * background_plus,
-            f_signal * signal_minus + (1.0 - f_signal) * background_minus,
-        )
+        return f_signal * signal_plus + (1.0 - f_signal) * background_plus, f_signal * signal_minus + (1.0 - f_signal) * background_minus
 
 
 __all__ = ["CPJointNLL"]
