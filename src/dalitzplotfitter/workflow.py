@@ -63,21 +63,25 @@ def _collect_parameters(value: object) -> tuple[Parameter, ...]:
             found.extend(_collect_parameters(getattr(value, field.name)))
         return tuple(found)
     if isinstance(value, Mapping):
-        return tuple(
-            parameter
-            for item in value.values()
-            for parameter in _collect_parameters(item)
-        )
+        return tuple(parameter for item in value.values() for parameter in _collect_parameters(item))
     if isinstance(value, (tuple, list)):
-        return tuple(
-            parameter for item in value for parameter in _collect_parameters(item)
-        )
+        return tuple(parameter for item in value for parameter in _collect_parameters(item))
     return ()
 
 
 def _resolve(value: object, parameters: Mapping[str, object]):
     resolver = getattr(value, "resolve", None)
     return resolver(parameters) if resolver is not None else value
+
+
+def _scaled_projection_weights(sample: PhaseSpaceSample, density, scale: float) -> np.ndarray:
+    """Normalize MC projection weights to the requested component yield."""
+
+    raw = np.asarray(sample.weights, dtype=float) * np.asarray(density, dtype=float)
+    total = float(np.sum(raw))
+    if not np.isfinite(total) or total <= 0.0:
+        raise ValueError("projection density has non-positive or non-finite integral")
+    return float(scale) * raw / total
 
 
 @dataclass(frozen=True)
@@ -95,33 +99,9 @@ class FitSession:
     constraints: tuple[object, ...] = ()
 
     @classmethod
-    def from_root(
-        cls,
-        model: object,
-        file_path: str | Path,
-        tree: str,
-        *,
-        efficiency: object | None = None,
-        veto: object | None = None,
-        backgrounds: Sequence[BackgroundSpec | BackgroundCategory] = (),
-        signal_fraction: object | None = None,
-        extended: bool = False,
-        signal_yield: object | None = None,
-        constraints: Sequence[object] = (),
-        **root_kwargs,
-    ) -> "FitSession":
+    def from_root(cls, model: object, file_path: str | Path, tree: str, *, efficiency: object | None = None, veto: object | None = None, backgrounds: Sequence[BackgroundSpec | BackgroundCategory] = (), signal_fraction: object | None = None, extended: bool = False, signal_yield: object | None = None, constraints: Sequence[object] = (), **root_kwargs) -> "FitSession":
         data = read_phase_space_sample(file_path, tree, **root_kwargs)
-        return cls(
-            model=model,
-            data=data,
-            efficiency=efficiency,
-            veto=veto,
-            backgrounds=tuple(backgrounds),
-            signal_fraction=signal_fraction,
-            extended=extended,
-            signal_yield=signal_yield,
-            constraints=tuple(constraints),
-        )
+        return cls(model=model, data=data, efficiency=efficiency, veto=veto, backgrounds=tuple(backgrounds), signal_fraction=signal_fraction, extended=extended, signal_yield=signal_yield, constraints=tuple(constraints))
 
     def with_efficiency(self, efficiency: object | None) -> "FitSession":
         return replace(self, efficiency=efficiency)
@@ -129,24 +109,8 @@ class FitSession:
     def with_veto(self, veto: object | None) -> "FitSession":
         return replace(self, veto=veto)
 
-    def with_background(
-        self,
-        name: str,
-        shape: object,
-        *,
-        fraction: object | None = None,
-        yield_: object | None = None,
-        normalization_sample: PhaseSpaceSample | None = None,
-        apply_veto: bool = True,
-    ) -> "FitSession":
-        spec = BackgroundSpec(
-            name=name,
-            shape=shape,
-            fraction=fraction,
-            yield_=yield_,
-            normalization_sample=normalization_sample,
-            apply_veto=apply_veto,
-        )
+    def with_background(self, name: str, shape: object, *, fraction: object | None = None, yield_: object | None = None, normalization_sample: PhaseSpaceSample | None = None, apply_veto: bool = True) -> "FitSession":
+        spec = BackgroundSpec(name=name, shape=shape, fraction=fraction, yield_=yield_, normalization_sample=normalization_sample, apply_veto=apply_veto)
         return replace(self, backgrounds=self.backgrounds + (spec,))
 
     def with_constraint(self, constraint: object) -> "FitSession":
@@ -155,25 +119,16 @@ class FitSession:
     @cached_property
     def signal_pdf(self) -> SignalPDF:
         sample = self.model.normalization_sample
-
         def intensity(data, parameters):
             return self.model.intensity(data, parameters)
-
-        return SignalPDF(
-            intensity=intensity,
-            integrator=GridIntegrator(sample),
-            efficiency=UnityEfficiency() if self.efficiency is None else self.efficiency,
-            veto=self.veto,
-        )
+        return SignalPDF(intensity=intensity, integrator=GridIntegrator(sample), efficiency=UnityEfficiency() if self.efficiency is None else self.efficiency, veto=self.veto)
 
     @staticmethod
     def _evaluate_shape(shape: object, data: dict) -> jnp.ndarray:
         values = jnp.asarray(shape(data))
         size = int(jnp.asarray(next(iter(data.values()))).shape[0])
         if values.shape != (size,):
-            raise ValueError(
-                f"background shape must return one value per event, got {values.shape} for {size} events"
-            )
+            raise ValueError(f"background shape must return one value per event, got {values.shape} for {size} events")
         return values
 
     def _build_background(self, background: BackgroundSpec | BackgroundCategory) -> BackgroundCategory:
@@ -188,13 +143,7 @@ class FitSession:
             data_values = data_values * jnp.asarray(self.veto(data_dict), dtype=data_values.dtype)
             norm_values = norm_values * jnp.asarray(self.veto(norm_dict), dtype=norm_values.dtype)
         normalization = jnp.mean(jnp.asarray(norm_sample.weights) * norm_values)
-        return BackgroundCategory(
-            name=background.name,
-            values=data_values,
-            normalization=normalization,
-            fraction=background.fraction,
-            yield_=background.yield_,
-        )
+        return BackgroundCategory(name=background.name, values=data_values, normalization=normalization, fraction=background.fraction, yield_=background.yield_)
 
     @cached_property
     def background_categories(self) -> tuple[BackgroundCategory, ...]:
@@ -205,13 +154,7 @@ class FitSession:
         data = self.data.as_dict()
         if not self.background_categories and not self.extended:
             return UnbinnedNLL(self.signal_pdf.logpdf, data)
-        return MultiBackgroundNLL(
-            signal_density=lambda parameters: self.signal_pdf(data, parameters),
-            backgrounds=self.background_categories,
-            signal_fraction=self.signal_fraction,
-            extended=self.extended,
-            signal_yield=self.signal_yield,
-        )
+        return MultiBackgroundNLL(signal_density=lambda parameters: self.signal_pdf(data, parameters), backgrounds=self.background_categories, signal_fraction=self.signal_fraction, extended=self.extended, signal_yield=self.signal_yield)
 
     @cached_property
     def objective(self):
@@ -223,10 +166,7 @@ class FitSession:
     @property
     def parameters(self) -> tuple[Parameter, ...]:
         candidates: list[Parameter] = list(getattr(self.model, "parameters", ()))
-        candidates.extend(_collect_parameters(self.signal_fraction))
-        candidates.extend(_collect_parameters(self.signal_yield))
-        candidates.extend(_collect_parameters(self.backgrounds))
-        candidates.extend(_collect_parameters(self.constraints))
+        candidates.extend(_collect_parameters(self.signal_fraction)); candidates.extend(_collect_parameters(self.signal_yield)); candidates.extend(_collect_parameters(self.backgrounds)); candidates.extend(_collect_parameters(self.constraints))
         unique: dict[str, Parameter] = {}
         for parameter in candidates:
             previous = unique.get(parameter.name)
@@ -238,43 +178,14 @@ class FitSession:
     def minimizer(self, *, tolerance: float = 1e-4, verbose: int = 0) -> Minimizer:
         return Minimizer(self.objective, self.parameters, tolerance=tolerance, verbose=verbose)
 
-    def fit(
-        self,
-        start_values: Mapping[str, float] | None = None,
-        *,
-        simplex: bool = False,
-        ncall: int | None = None,
-        tolerance: float = 1e-4,
-        verbose: int = 0,
-    ):
-        return self.minimizer(tolerance=tolerance, verbose=verbose).fit(
-            start_values=start_values,
-            simplex=simplex,
-            ncall=ncall,
-        )
+    def fit(self, start_values: Mapping[str, float] | None = None, *, simplex: bool = False, ncall: int | None = None, tolerance: float = 1e-4, verbose: int = 0):
+        return self.minimizer(tolerance=tolerance, verbose=verbose).fit(start_values=start_values, simplex=simplex, ncall=ncall)
 
-    def fit_multistart(
-        self,
-        n_starts: int = 20,
-        *,
-        seed: int | None = None,
-        include_default: bool = False,
-        simplex: bool = False,
-        tolerance: float = 1e-4,
-        verbose: int = 0,
-    ):
-        return self.minimizer(tolerance=tolerance, verbose=verbose).fit_multistart(
-            n_starts=n_starts,
-            seed=seed,
-            include_default=include_default,
-            simplex=simplex,
-        )
+    def fit_multistart(self, n_starts: int = 20, *, seed: int | None = None, include_default: bool = False, simplex: bool = False, tolerance: float = 1e-4, verbose: int = 0):
+        return self.minimizer(tolerance=tolerance, verbose=verbose).fit_multistart(n_starts=n_starts, seed=seed, include_default=include_default, simplex=simplex)
 
     def result_values(self, result) -> dict[str, float]:
-        values: dict[str, float] = {}
-        for parameter in self.parameters:
-            values[parameter.name] = float(parameter.value) if parameter.fixed else float(result.values[parameter.name])
-        return values
+        return {p.name: (float(p.value) if p.fixed else float(result.values[p.name])) for p in self.parameters}
 
     def print_result(self, result, *, precision: int = 6) -> dict[str, float]:
         if precision < 0:
@@ -283,126 +194,61 @@ class FitSession:
         print(f"valid={bool(result.valid)}  NLL={float(result.fval):.{precision}f}")
         print(f"{'parameter':24s} {'value':>16s} {'error':>16s}")
         for parameter in self.parameters:
-            value = values[parameter.name]
-            error = 0.0 if parameter.fixed else float(result.errors[parameter.name])
+            value = values[parameter.name]; error = 0.0 if parameter.fixed else float(result.errors[parameter.name])
             print(f"{parameter.name:24s} {value:16.{precision}g} {error:16.{precision}g}")
         return values
 
-    def print_fit_fractions(
-        self,
-        result,
-        *,
-        acceptance_weighted: bool = False,
-        include_interference: bool = False,
-        precision: int = 3,
-    ):
-        return self.model.print_fit_fractions(
-            self.result_values(result),
-            efficiency=self.efficiency if acceptance_weighted else None,
-            include_interference=include_interference,
-            precision=precision,
-        )
+    def print_fit_fractions(self, result, *, acceptance_weighted: bool = False, include_interference: bool = False, precision: int = 3):
+        return self.model.print_fit_fractions(self.result_values(result), efficiency=self.efficiency if acceptance_weighted else None, include_interference=include_interference, precision=precision)
 
-    def report(
-        self,
-        result,
-        *,
-        include_fit_fractions: bool = True,
-        acceptance_weighted_fractions: bool = False,
-        include_correlation: bool = True,
-    ) -> dict[str, object]:
-        """Print and return a compact fit summary."""
-
+    def report(self, result, *, include_fit_fractions: bool = True, acceptance_weighted_fractions: bool = False, include_correlation: bool = True) -> dict[str, object]:
         values = self.print_result(result)
-        errors = {
-            p.name: (0.0 if p.fixed else float(result.errors[p.name])) for p in self.parameters
-        }
-        report: dict[str, object] = {
-            "valid": bool(result.valid),
-            "nll": float(result.fval),
-            "edm": float(result.fmin.edm),
-            "nfcn": int(result.nfcn),
-            "values": values,
-            "errors": errors,
-        }
+        errors = {p.name: (0.0 if p.fixed else float(result.errors[p.name])) for p in self.parameters}
+        report: dict[str, object] = {"valid": bool(result.valid), "nll": float(result.fval), "edm": float(result.fmin.edm), "nfcn": int(result.nfcn), "values": values, "errors": errors}
         if include_fit_fractions:
-            report["fit_fractions"] = self.print_fit_fractions(
-                result,
-                acceptance_weighted=acceptance_weighted_fractions,
-            )
+            report["fit_fractions"] = self.print_fit_fractions(result, acceptance_weighted=acceptance_weighted_fractions)
         if include_correlation and getattr(result, "covariance", None) is not None:
-            correlation = result.covariance.correlation()
-            free = [p.name for p in self.parameters if not p.fixed]
-            report["correlation"] = {
-                first: {second: float(correlation[first, second]) for second in free}
-                for first in free
-            }
+            correlation = result.covariance.correlation(); free = [p.name for p in self.parameters if not p.fixed]
+            report["correlation"] = {first: {second: float(correlation[first, second]) for second in free} for first in free}
         return report
 
-    def _projection_components(
-        self, values: Mapping[str, float]
-    ) -> list[tuple[str, PhaseSpaceSample, np.ndarray]]:
-        norm = self.model.normalization_sample
-        signal_density = jnp.asarray(self.signal_pdf(norm.as_dict(), values))
+    def _projection_components(self, values: Mapping[str, float], projection_sample: PhaseSpaceSample | None = None) -> list[tuple[str, PhaseSpaceSample, np.ndarray]]:
+        sample = self.model.normalization_sample if projection_sample is None else projection_sample
+        signal_density = jnp.asarray(self.signal_pdf(sample.as_dict(), values))
         if self.extended:
             signal_scale = float(_resolve(self.signal_yield, values))
         elif self.background_categories:
             signal_scale = self.data.size * float(_resolve(self.signal_fraction, values))
         else:
             signal_scale = float(self.data.size)
-        components = [
-            (
-                "signal",
-                norm,
-                np.asarray(signal_scale * norm.weights * signal_density / norm.size),
-            )
-        ]
+        components = [("signal", sample, _scaled_projection_weights(sample, signal_density, signal_scale))]
         if not self.background_categories:
             return components
-
         if self.extended:
             bg_scales = [float(_resolve(category.yield_, values)) for category in self.background_categories]
         else:
             bg_total = self.data.size * (1.0 - float(_resolve(self.signal_fraction, values)))
             weights = np.asarray(self.base_objective.background_weights(values), dtype=float)
             bg_scales = [bg_total * float(weight) for weight in weights]
-
         for source, category, scale in zip(self.backgrounds, self.background_categories, bg_scales):
             if not isinstance(source, BackgroundSpec):
                 continue
-            bg_norm_sample = source.normalization_sample or self.model.normalization_sample
-            raw = jnp.asarray(source.shape(bg_norm_sample.as_dict()))
+            bg_sample = (source.normalization_sample or self.model.normalization_sample) if projection_sample is None else projection_sample
+            raw = jnp.asarray(source.shape(bg_sample.as_dict()))
             if self.veto is not None and source.apply_veto:
-                raw = raw * jnp.asarray(self.veto(bg_norm_sample.as_dict()))
+                raw = raw * jnp.asarray(self.veto(bg_sample.as_dict()))
             density = raw / category.normalization
-            components.append(
-                (
-                    category.name,
-                    bg_norm_sample,
-                    np.asarray(scale * bg_norm_sample.weights * density / bg_norm_sample.size),
-                )
-            )
+            components.append((category.name, bg_sample, _scaled_projection_weights(bg_sample, density, scale)))
         return components
 
-    def plot_projection(
-        self,
-        result,
-        variable: str = "s13",
-        *,
-        bins: int = 60,
-        range: tuple[float, float] | None = None,
-        show_components: bool = True,
-        log_scale: bool = False,
-        ax=None,
-    ):
-        """Plot data as black points with errors and fitted model as lines.
+    def plot_projection(self, result, variable: str = "s13", *, bins: int = 60, range: tuple[float, float] | None = None, show_components: bool = True, log_scale: bool = False, projection_size: int = 250_000, projection_seed: int = 20260901, ax=None):
+        """Plot data and a smooth fitted projection.
 
-        ``log_scale=True`` enables a logarithmic y axis. For invariant-mass-squared
-        projections, the y label includes the actual uniform bin width in GeV^2.
+        Fit/PDF normalization remains deterministic. A weighted phase-space MC
+        sample is used only to render the one-dimensional model projection, which
+        avoids aliasing from directly histogramming Gauss--Legendre nodes.
         """
-
         import matplotlib.pyplot as plt
-
         values = self.result_values(result)
         data_values = np.asarray(getattr(self.data, variable))
         hist_range = range or (float(np.min(data_values)), float(np.max(data_values)))
@@ -410,16 +256,10 @@ class FitSession:
         if ax is None:
             _, ax = plt.subplots(figsize=(7, 5))
         unit = r"GeV$^2$" if variable in ("s12", "s13", "s23") else ""
-        plot_binned_data(
-            data_values,
-            bins=edges,
-            ax=ax,
-            label="data",
-            unit=unit,
-            log_scale=log_scale,
-        )
+        plot_binned_data(data_values, bins=edges, ax=ax, label="data", unit=unit, log_scale=log_scale)
+        projection_sample = self.model.generate_phase_space(projection_size, seed=projection_seed)
         total = np.zeros(bins, dtype=float)
-        for name, sample, weights in self._projection_components(values):
+        for name, sample, weights in self._projection_components(values, projection_sample):
             counts, _ = np.histogram(np.asarray(getattr(sample, variable)), bins=edges, weights=weights)
             total += counts
             if show_components:
