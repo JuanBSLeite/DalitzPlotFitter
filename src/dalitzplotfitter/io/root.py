@@ -1,8 +1,8 @@
 """ROOT-file input helpers based on uproot.
 
-No PyROOT dependency is required.  Trees are converted to JAX arrays and ROOT
-TH2 histograms can be converted directly into the package histogram efficiency
-and background models.
+No PyROOT dependency is required. Trees are converted to JAX arrays and ROOT
+TH2 histograms can be converted directly into ordinary- or Square-Dalitz
+histogram efficiency/background models.
 """
 
 from __future__ import annotations
@@ -18,6 +18,10 @@ import uproot
 from dalitzplotfitter.background import HistogramBackground
 from dalitzplotfitter.efficiency import HistogramEfficiency
 from dalitzplotfitter.kinematics import PhaseSpaceSample
+from dalitzplotfitter.square_histograms import (
+    SquareDalitzHistogramBackground,
+    SquareDalitzHistogramEfficiency,
+)
 
 PathLike = str | Path
 
@@ -45,13 +49,6 @@ def read_root_tree(
     entry_start: int | None = None,
     entry_stop: int | None = None,
 ) -> dict[str, Array]:
-    """Read selected TTree branches as JAX arrays.
-
-    ``branches`` may be a sequence, preserving ROOT branch names, or a mapping
-    ``{output_name: root_branch_name}`` for convenient renaming.  ``cut`` uses
-    uproot's expression filtering.
-    """
-
     if isinstance(branches, Mapping):
         rename = dict(branches)
         expressions = list(rename.values())
@@ -97,13 +94,6 @@ def read_phase_space_sample(
     entry_start: int | None = None,
     entry_stop: int | None = None,
 ) -> PhaseSpaceSample:
-    """Load a three-body fit sample from a ROOT TTree.
-
-    Four-momentum specifications, when supplied, must each contain four branch
-    names ordered as ``(E, px, py, pz)``.  If ``weight`` is omitted the event
-    weights are set to one, which is appropriate for ordinary unweighted data.
-    """
-
     branch_map: dict[str, str] = {"s12": s12, "s13": s13, "s23": s23}
     if weight is not None:
         branch_map["weight"] = weight
@@ -143,22 +133,12 @@ def read_phase_space_sample(
 
     weights = arrays.get("weight", jnp.ones((size,), dtype=jnp.float64))
     return PhaseSpaceSample(
-        s12=arrays["s12"],
-        s13=arrays["s13"],
-        s23=arrays["s23"],
-        weights=weights,
-        p1=momentum("p1"),
-        p2=momentum("p2"),
-        p3=momentum("p3"),
+        s12=arrays["s12"], s13=arrays["s13"], s23=arrays["s23"], weights=weights,
+        p1=momentum("p1"), p2=momentum("p2"), p3=momentum("p3"),
     )
 
 
-def read_root_histogram2d(
-    file_path: PathLike,
-    histogram: str,
-) -> tuple[Array, Array, Array]:
-    """Read a ROOT TH2-like object as ``(values, x_edges, y_edges)``."""
-
+def read_root_histogram2d(file_path: PathLike, histogram: str) -> tuple[Array, Array, Array]:
     obj = _open_object(file_path, histogram)
     try:
         values, x_edges, y_edges = obj.to_numpy(flow=False)
@@ -179,15 +159,10 @@ def histogram_efficiency_from_root(
     x_variable: str = "s12",
     y_variable: str = "s13",
 ) -> HistogramEfficiency:
-    """Construct :class:`HistogramEfficiency` directly from a ROOT TH2."""
-
     values, x_edges, y_edges = read_root_histogram2d(file_path, histogram)
     return HistogramEfficiency(
-        x_edges=x_edges,
-        y_edges=y_edges,
-        values=values,
-        x_variable=x_variable,
-        y_variable=y_variable,
+        x_edges=x_edges, y_edges=y_edges, values=values,
+        x_variable=x_variable, y_variable=y_variable,
     )
 
 
@@ -198,15 +173,50 @@ def histogram_background_from_root(
     x_variable: str = "s12",
     y_variable: str = "s13",
 ) -> HistogramBackground:
-    """Construct :class:`HistogramBackground` directly from a ROOT TH2."""
-
     values, x_edges, y_edges = read_root_histogram2d(file_path, histogram)
     return HistogramBackground(
-        x_edges=x_edges,
-        y_edges=y_edges,
+        x_edges=x_edges, y_edges=y_edges, values=values,
+        x_variable=x_variable, y_variable=y_variable,
+    )
+
+
+def square_dalitz_efficiency_from_root(
+    file_path: PathLike,
+    histogram: str,
+    *,
+    mother_mass: float,
+    masses: tuple[float, float, float],
+    pair: tuple[int, int] = (0, 1),
+) -> SquareDalitzHistogramEfficiency:
+    """Construct an efficiency map from a ROOT TH2 whose axes are ``(m', theta')``."""
+    values, mp_edges, tp_edges = read_root_histogram2d(file_path, histogram)
+    return SquareDalitzHistogramEfficiency(
+        mprime_edges=mp_edges,
+        thetaprime_edges=tp_edges,
         values=values,
-        x_variable=x_variable,
-        y_variable=y_variable,
+        mother_mass=mother_mass,
+        masses=masses,
+        pair=pair,
+    )
+
+
+def square_dalitz_background_from_root(
+    file_path: PathLike,
+    histogram: str,
+    *,
+    mother_mass: float,
+    masses: tuple[float, float, float],
+    pair: tuple[int, int] = (0, 1),
+) -> SquareDalitzHistogramBackground:
+    """Construct a background map from a ROOT TH2 whose axes are ``(m', theta')``."""
+    values, mp_edges, tp_edges = read_root_histogram2d(file_path, histogram)
+    return SquareDalitzHistogramBackground(
+        mprime_edges=mp_edges,
+        thetaprime_edges=tp_edges,
+        values=values,
+        mother_mass=mother_mass,
+        masses=masses,
+        pair=pair,
     )
 
 
@@ -216,4 +226,6 @@ __all__ = [
     "read_phase_space_sample",
     "read_root_histogram2d",
     "read_root_tree",
+    "square_dalitz_background_from_root",
+    "square_dalitz_efficiency_from_root",
 ]
