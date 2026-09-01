@@ -16,6 +16,7 @@ from dalitzplotfitter.fit import Minimizer, Parameter
 from dalitzplotfitter.io import read_phase_space_sample
 from dalitzplotfitter.kinematics import PhaseSpaceSample
 from dalitzplotfitter.likelihood import CPJointNLL
+from dalitzplotfitter.plotting import plot_binned_data
 
 
 def _collect_parameters(value: object) -> tuple[Parameter, ...]:
@@ -460,7 +461,6 @@ class CPFitSession:
             if charge == "plus"
             else self.minus_acceptance_normalization
         )
-        cache = self.plus_cache if charge == "plus" else self.minus_cache
         _, integral_plus = self.plus_cache.evaluate(values)
         _, integral_minus = self.minus_cache.evaluate(values)
         joint_signal_norm = integral_plus + integral_minus
@@ -492,8 +492,8 @@ class CPFitSession:
             weights = np.asarray(self.base_objective.background_weights(values), dtype=float)
             bg_scales = [bg_total * float(weight) for weight in weights]
 
-        for index, (source, category, scale) in enumerate(
-            zip(self.backgrounds, self.background_categories, bg_scales)
+        for source, category, scale in zip(
+            self.backgrounds, self.background_categories, bg_scales
         ):
             if not isinstance(source, CPBackgroundSpec):
                 continue
@@ -529,7 +529,7 @@ class CPFitSession:
         show_components: bool = True,
         axes=None,
     ):
-        """Plot B+/B- data and fit projections with a common global normalization."""
+        """Plot B+/B- data as black points with errors and fit as lines."""
 
         import matplotlib.pyplot as plt
 
@@ -542,7 +542,8 @@ class CPFitSession:
             if hist_range is None:
                 hist_range = (float(np.min(data_values)), float(np.max(data_values)))
             edges = np.linspace(hist_range[0], hist_range[1], bins + 1)
-            ax.hist(data_values, bins=edges, histtype="step", label=f"B{'+' if charge == 'plus' else '-'} data")
+            charge_label = f"B{'+' if charge == 'plus' else '-'} data"
+            plot_binned_data(data_values, bins=edges, ax=ax, label=charge_label)
             total = np.zeros(bins, dtype=float)
             for name, sample, weights in self._projection_components(values, charge):
                 counts, _ = np.histogram(np.asarray(getattr(sample, variable)), bins=edges, weights=weights)
