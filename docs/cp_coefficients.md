@@ -67,7 +67,7 @@ At least one complex-amplitude convention must be fixed, as in an ordinary ampli
 
 ## Efficiency and background mixtures
 
-`CPJointNLL` also supports efficiency-weighted signal and a background mixture while preserving the same joint charge normalization.
+`CPJointNLL` also supports efficiency-weighted signal and background while preserving the same joint charge normalization.
 
 With charge-dependent efficiencies `epsilon_q(phi)` define
 
@@ -85,35 +85,31 @@ J_plus  = integral B_plus(phi)  dPhi
 J_minus = integral B_minus(phi) dPhi.
 ```
 
-With a global background fraction `f_bkg`, the full joint PDF is
+### Non-extended convention
+
+The reference mixture parameter is the **signal fraction**, `f_sig`,
 
 ```text
-p(phi,+) = (1-f_bkg) epsilon_plus(phi)|A_plus(phi)|^2
-                         / (I_plus^eps + I_minus^eps)
-           + f_bkg B_plus(phi)/(J_plus + J_minus)
+p(phi,+) = f_sig epsilon_plus(phi)|A_plus(phi)|^2
+                     / (I_plus^eps + I_minus^eps)
+           + (1-f_sig) B_plus(phi)/(J_plus + J_minus)
 
-p(phi,-) = (1-f_bkg) epsilon_minus(phi)|A_minus(phi)|^2
-                         / (I_plus^eps + I_minus^eps)
-           + f_bkg B_minus(phi)/(J_plus + J_minus).
+p(phi,-) = f_sig epsilon_minus(phi)|A_minus(phi)|^2
+                     / (I_plus^eps + I_minus^eps)
+           + (1-f_sig) B_minus(phi)/(J_plus + J_minus).
 ```
 
-Thus both signal and background are normalized in the combined `(Dalitz, charge)` space. The fitted total charge probabilities are
+The total charge probabilities are
 
 ```text
-P(+) = (1-f_bkg) I_plus^eps/(I_plus^eps + I_minus^eps)
-       + f_bkg J_plus/(J_plus + J_minus)
+P(+) = f_sig I_plus^eps/(I_plus^eps + I_minus^eps)
+       + (1-f_sig) J_plus/(J_plus + J_minus)
 
-P(-) = (1-f_bkg) I_minus^eps/(I_plus^eps + I_minus^eps)
-       + f_bkg J_minus/(J_plus + J_minus).
+P(-) = f_sig I_minus^eps/(I_plus^eps + I_minus^eps)
+       + (1-f_sig) J_minus/(J_plus + J_minus).
 ```
 
-The signal-only API remains unchanged:
-
-```python
-nll = CPJointNLL(plus_cache, minus_cache)
-```
-
-For the complete mixture, use for example
+Example:
 
 ```python
 nll = CPJointNLL(
@@ -125,11 +121,58 @@ nll = CPJointNLL(
     minus_background=bkg_minus_data,
     plus_background_normalization=bkg_plus_norm,
     minus_background_normalization=bkg_minus_norm,
-    background_fraction=background_fraction,
+    signal_fraction=signal_fraction,
 )
 ```
 
-`background_fraction` may be either a number or a fit `Parameter`.
+`signal_fraction` may be either a number or a fit `Parameter`.
+
+### Extended convention
+
+For an extended likelihood, the mixture is parameterized by component yields rather than fractions:
+
+```text
+lambda(phi,+) = N_sig S_plus(phi) + N_bkg B_plus(phi)
+lambda(phi,-) = N_sig S_minus(phi) + N_bkg B_minus(phi),
+```
+
+where `S_plus + S_minus` and `B_plus + B_minus` each integrate to one over the combined charge-Dalitz sample space. The extended NLL is
+
+```text
+NLL_ext = N_sig + N_bkg
+          - sum_plus  log lambda(phi,+)
+          - sum_minus log lambda(phi,-),
+```
+
+up to the parameter-independent factorial constant.
+
+Use
+
+```python
+nll = CPJointNLL(
+    plus_cache,
+    minus_cache,
+    plus_efficiency=eff_plus_data,
+    minus_efficiency=eff_minus_data,
+    plus_background=bkg_plus_data,
+    minus_background=bkg_minus_data,
+    plus_background_normalization=bkg_plus_norm,
+    minus_background_normalization=bkg_minus_norm,
+    extended=True,
+    signal_yield=signal_yield,
+    background_yield=background_yield,
+)
+```
+
+The total expected number of events is available through
+
+```python
+nll.expected_events(values)
+```
+
+Signal-only extended fits are also supported by setting `extended=True` and supplying only `signal_yield`.
+
+The non-extended and extended parameterizations are deliberately mutually exclusive: a fit must use either `signal_fraction` or explicit yields, never both.
 
 ## B± -> K± pi+ pi- tutorial convention
 
@@ -146,4 +189,4 @@ s13 = m^2(K± pi∓)
 s23 = m^2(pi+ pi-).
 ```
 
-The signal-only tutorial uses `CPJointNLL` directly. The efficiency/background tutorial uses the extended form above, with charge kept as part of the fitted sample space throughout. Both tutorials start the minimization from deliberately displaced values and report generated, start and fitted coefficients together with charge-separated fit fractions.
+The signal-only tutorial uses `CPJointNLL` directly. The efficiency/background tutorial uses `signal_fraction` by default and also shows how to instantiate the extended likelihood with `signal_yield` and `background_yield`. Both tutorials start the minimization from deliberately displaced values and report generated, start and fitted coefficients together with charge-separated fit fractions.
