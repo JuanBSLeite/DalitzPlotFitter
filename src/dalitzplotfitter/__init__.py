@@ -29,6 +29,13 @@ from .dynamics import (
 )
 from .fit import Minimizer, MultiStartResult, Parameter, ParameterKind
 from .integration import DalitzGaussLegendreGrid
+from .io import (
+    histogram_background_from_root,
+    histogram_efficiency_from_root,
+    read_phase_space_sample,
+    read_root_histogram2d,
+    read_root_tree,
+)
 from .kinematics import (
     CovariantKinematics,
     PhaseSpaceMC,
@@ -110,8 +117,13 @@ __all__ = [
     "covariant_kinematics_from_invariants",
     "dalitz_s13_limits",
     "enable_x64",
+    "histogram_background_from_root",
+    "histogram_efficiency_from_root",
     "invariants_to_square_dalitz",
     "physical_bin_mask",
+    "read_phase_space_sample",
+    "read_root_histogram2d",
+    "read_root_tree",
     "square_dalitz_jacobian",
     "square_dalitz_to_invariants",
     "vetoed_signal_pdf",
