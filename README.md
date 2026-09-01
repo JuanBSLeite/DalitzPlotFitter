@@ -220,7 +220,8 @@ The repository contains a progressive set of end-to-end examples:
 - `notebooks/08_b2kpipi_multiple_backgrounds.ipynb`: arbitrary multiple background categories, signal-fraction convention and extended per-category yields;
 - `notebooks/09_b2kpipi_veto_maps.ipynb`: Laura++-style mass-window and functional veto maps applied consistently to data, signal and background normalization;
 - `notebooks/10_b2kpipi_discriminating_variables.ipynb`: joint Dalitz + reconstructed-mass + BDT fit with factorized PDFs and mass/BDT projections;
-- `notebooks/11_b2kpipi_gaussian_constraints.ipynb`: external Gaussian constraint on a fit parameter, including an NLL scan showing the effect of the constraint.
+- `notebooks/11_b2kpipi_gaussian_constraints.ipynb`: external Gaussian constraint on a fit parameter, including an NLL scan showing the effect of the constraint;
+- `notebooks/12_b2kpipi_scf_with_veto.ipynb`: SCF migration combined with a veto applied in reconstructed Dalitz coordinates, with before/after density plots.
 
 The B-to-Kpipi examples consistently use
 
