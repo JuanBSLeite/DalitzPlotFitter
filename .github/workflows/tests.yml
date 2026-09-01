@@ -55,4 +55,5 @@ jobs:
             tests/test_phasespace_mc.py \
             tests/test_resonance_amplitude.py \
             tests/test_sampling.py \
+            tests/test_scf.py \
             tests/test_square_dalitz.py
