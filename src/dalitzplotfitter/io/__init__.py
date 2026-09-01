@@ -6,6 +6,8 @@ from .root import (
     read_phase_space_sample,
     read_root_histogram2d,
     read_root_tree,
+    square_dalitz_background_from_root,
+    square_dalitz_efficiency_from_root,
 )
 
 __all__ = [
@@ -14,4 +16,6 @@ __all__ = [
     "read_phase_space_sample",
     "read_root_histogram2d",
     "read_root_tree",
+    "square_dalitz_background_from_root",
+    "square_dalitz_efficiency_from_root",
 ]
