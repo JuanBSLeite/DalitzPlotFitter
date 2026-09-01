@@ -6,6 +6,7 @@ from .amplitude import (
     ConstantAmplitude,
     PreparedAmplitudeCache,
 )
+from .background import BackgroundCategory
 from .coefficients import CPRealImag, RealImag
 from .config import enable_x64
 from .decay import DalitzAmplitude, DecayChannel, DecayModel, NonResonant, Resonance
@@ -39,15 +40,19 @@ from .kinematics import (
     square_dalitz_jacobian,
     square_dalitz_to_invariants,
 )
+from .likelihood import MultiBackgroundNLL
 from .pdf import SCFSignalPDF, SignalPDF
 from .resolution import SquareDalitzSCFMap
 from .sampling import weighted_resample
+from .veto import CompositeVeto, FunctionalVeto, MassWindowVeto, VetoMap
 
 __all__ = [
     "AmplitudeComponent",
+    "BackgroundCategory",
     "BaBarFlatte",
     "CPRealImag",
     "CoherentAmplitudeModel",
+    "CompositeVeto",
     "ConstantAmplitude",
     "CovariantAngular",
     "CovariantKinematics",
@@ -55,11 +60,14 @@ __all__ = [
     "DecayChannel",
     "DecayModel",
     "Flatte",
+    "FunctionalVeto",
     "GounarisSakurai",
     "KMatrix",
     "LASS",
     "DalitzGaussLegendreGrid",
+    "MassWindowVeto",
     "Minimizer",
+    "MultiBackgroundNLL",
     "MultiStartResult",
     "NonResonant",
     "Parameter",
@@ -79,6 +87,7 @@ __all__ = [
     "SignalPDF",
     "SquareDalitzGrid",
     "SquareDalitzSCFMap",
+    "VetoMap",
     "boost_to_rest_frame",
     "covariant_kinematics",
     "covariant_kinematics_from_invariants",
