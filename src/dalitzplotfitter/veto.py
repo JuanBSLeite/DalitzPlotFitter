@@ -89,12 +89,7 @@ class CompositeVeto(VetoMap):
 
 @dataclass(frozen=True)
 class VetoedDensity:
-    """Apply a veto map to any Dalitz density/shape callable.
-
-    This is useful for backgrounds so the same veto object used for signal and
-    data selection can also be included when computing background values and
-    normalization integrals.
-    """
+    """Apply a veto map to any Dalitz density/shape callable."""
 
     density: Callable[[dict[str, Array]], Array]
     veto: VetoMap
@@ -105,10 +100,32 @@ class VetoedDensity:
         return values * mask
 
 
+def vetoed_signal_pdf(model, veto: VetoMap, *, normalization_sample=None, efficiency=None):
+    """Build a veto-aware ``SignalPDF`` directly from a ``DecayModel``."""
+
+    from dalitzplotfitter.integration import GridIntegrator
+    from dalitzplotfitter.pdf import SignalPDF
+
+    sample = model.normalization_sample if normalization_sample is None else normalization_sample
+
+    def intensity(data, parameters):
+        return model.intensity(data, parameters)
+
+    kwargs = {"veto": veto}
+    if efficiency is not None:
+        kwargs["efficiency"] = efficiency
+    return SignalPDF(
+        intensity=intensity,
+        integrator=GridIntegrator(sample),
+        **kwargs,
+    )
+
+
 __all__ = [
     "CompositeVeto",
     "FunctionalVeto",
     "MassWindowVeto",
     "VetoMap",
     "VetoedDensity",
+    "vetoed_signal_pdf",
 ]
