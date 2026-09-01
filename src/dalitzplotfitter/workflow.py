@@ -392,9 +392,14 @@ class FitSession:
         bins: int = 60,
         range: tuple[float, float] | None = None,
         show_components: bool = True,
+        log_scale: bool = False,
         ax=None,
     ):
-        """Plot data as black points with errors and fitted model as lines."""
+        """Plot data as black points with errors and fitted model as lines.
+
+        ``log_scale=True`` enables a logarithmic y axis. For invariant-mass-squared
+        projections, the y label includes the actual uniform bin width in GeV^2.
+        """
 
         import matplotlib.pyplot as plt
 
@@ -404,7 +409,15 @@ class FitSession:
         edges = np.linspace(hist_range[0], hist_range[1], bins + 1)
         if ax is None:
             _, ax = plt.subplots(figsize=(7, 5))
-        plot_binned_data(data_values, bins=edges, ax=ax, label="data")
+        unit = r"GeV$^2$" if variable in ("s12", "s13", "s23") else ""
+        plot_binned_data(
+            data_values,
+            bins=edges,
+            ax=ax,
+            label="data",
+            unit=unit,
+            log_scale=log_scale,
+        )
         total = np.zeros(bins, dtype=float)
         for name, sample, weights in self._projection_components(values):
             counts, _ = np.histogram(np.asarray(getattr(sample, variable)), bins=edges, weights=weights)
@@ -413,7 +426,6 @@ class FitSession:
                 ax.stairs(counts, edges, label=name)
         ax.stairs(total, edges, label="total fit", linewidth=2.0)
         ax.set_xlabel(rf"${variable}$ [GeV$^2$]")
-        ax.set_ylabel("events / bin")
         ax.legend()
         return ax
 
