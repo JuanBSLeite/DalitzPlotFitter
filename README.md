@@ -139,9 +139,58 @@ DecayChannel + amplitude-component declarations
         -> coherent amplitude
         -> the same quadrature for PDF normalization
         -> optional efficiency / veto / SCF / background mixture
+        -> optional factorized discriminating-variable PDFs
+        -> optional external Gaussian constraints
         -> JAX NLL + automatic gradients
         -> iminuit
 ```
+
+## Additional discriminating variables
+
+Basic observables beyond the Dalitz plot can be added with factorized PDFs,
+for example reconstructed mass or a BDT output:
+
+```python
+from dalitzplotfitter import FactorizedDensity, Gaussian1D, Histogram1D
+
+signal_full = FactorizedDensity(
+    base_density=lambda values: signal_dp(data, values),
+    observables={"mass": mass, "bdt": bdt},
+    pdfs={
+        "mass": Gaussian1D(mass_mean, 0.014, 5.20, 5.35),
+        "bdt": Histogram1D(edges, signal_bdt_shape),
+    },
+)
+```
+
+This implements the usual approximation
+
+```text
+P(DP, x1, x2, ...) = P(DP) P(x1) P(x2) ...
+```
+
+for each signal or background category. `Gaussian1D`, `Exponential1D` and
+`Histogram1D` are normalized on their declared fit ranges.
+
+## External constraints
+
+Gaussian external measurements can be added directly to any likelihood:
+
+```python
+from dalitzplotfitter import ConstrainedNLL, GaussianConstraint
+
+constraint = GaussianConstraint(signal_fraction, mean=0.70, sigma=0.04)
+constrained_nll = ConstrainedNLL(base_nll, constraint)
+```
+
+The Gaussian contributes, up to a parameter-independent constant,
+
+```text
+0.5 * ((x - mean)/sigma)^2
+```
+
+to the total NLL. Multiple constraints can be combined in the same
+`ConstrainedNLL`.
 
 ## Phase-space Monte Carlo is for toys only
 
@@ -169,7 +218,9 @@ The repository contains a progressive set of end-to-end examples:
 - `notebooks/06_b2kpipi_cp_efficiency_background_fit.ipynb`: direct-CP fit with efficiency and background, including non-extended and extended likelihood usage;
 - `notebooks/07_b2kpipi_scf_migration.ipynb`: Laura++-style SCF / misreconstructed-event migration matrix, CR+SCF decomposition and normalization conservation;
 - `notebooks/08_b2kpipi_multiple_backgrounds.ipynb`: arbitrary multiple background categories, signal-fraction convention and extended per-category yields;
-- `notebooks/09_b2kpipi_veto_maps.ipynb`: Laura++-style mass-window and functional veto maps applied consistently to data, signal and background normalization.
+- `notebooks/09_b2kpipi_veto_maps.ipynb`: Laura++-style mass-window and functional veto maps applied consistently to data, signal and background normalization;
+- `notebooks/10_b2kpipi_discriminating_variables.ipynb`: joint Dalitz + reconstructed-mass + BDT fit with factorized PDFs and mass/BDT projections;
+- `notebooks/11_b2kpipi_gaussian_constraints.ipynb`: external Gaussian constraint on a fit parameter, including an NLL scan showing the effect of the constraint.
 
 The B-to-Kpipi examples consistently use
 
