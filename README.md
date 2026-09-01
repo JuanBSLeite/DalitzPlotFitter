@@ -138,6 +138,7 @@ DecayChannel + amplitude-component declarations
         -> RealImag coefficient
         -> coherent amplitude
         -> the same quadrature for PDF normalization
+        -> optional efficiency / veto / SCF / background mixture
         -> JAX NLL + automatic gradients
         -> iminuit
 ```
@@ -158,19 +159,26 @@ followed by `weighted_resample()`.
 
 ## Tutorial notebooks
 
-The repository intentionally keeps only four end-to-end notebooks:
+The repository contains a progressive set of end-to-end examples:
 
 - `notebooks/01_e791_toy_fit.ipynb`: E791 signal toy generation and fit;
-- `notebooks/02_e791_efficiency_background_fit.ipynb`: E791 fit with efficiency
-  and a floating background fraction;
+- `notebooks/02_e791_efficiency_background_fit.ipynb`: E791 fit with efficiency and background;
 - `notebooks/03_b2kpipi_toy_fit.ipynb`: non-CP `B+ -> K+ pi+ pi-` signal toy and fit;
-- `notebooks/04_b2kpipi_efficiency_background_fit.ipynb`: the same B channel with
-  efficiency and background.
+- `notebooks/04_b2kpipi_efficiency_background_fit.ipynb`: the same B channel with efficiency and background;
+- `notebooks/05_b2kpipi_cp_toy_fit.ipynb`: simultaneous direct-CP signal-only fit;
+- `notebooks/06_b2kpipi_cp_efficiency_background_fit.ipynb`: direct-CP fit with efficiency and background, including non-extended and extended likelihood usage;
+- `notebooks/07_b2kpipi_scf_migration.ipynb`: Laura++-style SCF / misreconstructed-event migration matrix, CR+SCF decomposition and normalization conservation;
+- `notebooks/08_b2kpipi_multiple_backgrounds.ipynb`: arbitrary multiple background categories, signal-fraction convention and extended per-category yields;
+- `notebooks/09_b2kpipi_veto_maps.ipynb`: Laura++-style mass-window and functional veto maps applied consistently to data, signal and background normalization.
 
-Each notebook prints generated and fitted parameters and the corresponding fit
-fractions, and compares the fitted and generated models in the `s12` and `s13`
-projections. The two complete-fit notebooks additionally display standalone
-Dalitz maps of the efficiency and normalized background density.
+The B-to-Kpipi examples consistently use
+
+```text
+s13 = m^2(K+ pi-)
+s23 = m^2(pi+ pi-)
+```
+
+for the particle ordering `(K+, pi+, pi-)`.
 
 ## Fit fractions
 
@@ -198,6 +206,8 @@ c = x + i y
 ```
 
 through `RealImag`. `x` and `y` may be constants or fit `Parameter` objects.
+
+Direct-CP examples use `CPRealImag` with shared CP-even and CP-odd Cartesian parameters.
 
 ## Installation
 
