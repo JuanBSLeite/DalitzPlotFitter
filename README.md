@@ -9,16 +9,9 @@ Laura++ is one of the main physics references used to define and validate resona
 ## High-level API
 
 ```python
-from dalitzplotfitter import (
-    DecayChannel,
-    DecayModel,
-    NonResonant,
-    RealImag,
-    Resonance,
-)
+from dalitzplotfitter import DecayChannel, DecayModel, NonResonant, RealImag, Resonance
 
 channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
-
 model = DecayModel(
     channel,
     [
@@ -26,106 +19,54 @@ model = DecayModel(
         NonResonant(RealImag(0.2, -0.1)),
     ],
 )
-
 pdf = model.pdf()
-```
-
-`DecayChannel` resolves the parent and daughter masses from `particle`. `Resonance` resolves resonance mass, width and spin from `particle` unless an analysis-specific override is supplied.
-
-Historical or analysis-specific values can be supplied explicitly:
-
-```python
-Resonance(
-    "sigma",
-    pair=(0, 1),
-    coefficient=RealImag(x, y),
-    mass=0.478,
-    width=0.324,
-    spin=0,
-)
 ```
 
 ## ROOT input with uproot
 
 ROOT files are supported directly through `uproot`, with no PyROOT dependency.
 
-A fit sample can be read from a TTree with
-
 ```python
 from dalitzplotfitter import read_phase_space_sample
 
 data = read_phase_space_sample(
-    "data.root",
-    "DecayTree",
-    s12="S12",
-    s13="S13",
-    s23="S23",
-    weight="eventWeight",  # optional
+    "data.root", "DecayTree",
+    s12="S12", s13="S13", s23="S23",
+    weight="eventWeight",
 )
 ```
 
-For arbitrary observables and branch renaming use `read_root_tree`. Optional `cut`, `entry_start` and `entry_stop` arguments are forwarded to uproot.
+ROOT TH2 maps in ordinary Dalitz variables can be loaded with `histogram_efficiency_from_root` and `histogram_background_from_root`.
 
-ROOT TH2 maps can be converted directly into the package histogram models:
+For B-decay analyses, ROOT TH2 maps defined directly in Square-Dalitz coordinates are also supported:
 
 ```python
 from dalitzplotfitter import (
-    histogram_background_from_root,
-    histogram_efficiency_from_root,
+    square_dalitz_background_from_root,
+    square_dalitz_efficiency_from_root,
 )
 
-efficiency = histogram_efficiency_from_root(
-    "maps.root",
-    "efficiency_s13_s23",
-    x_variable="s13",
-    y_variable="s23",
+kwargs = dict(
+    mother_mass=channel.parent_mass,
+    masses=channel.daughter_masses,
+    pair=(0, 2),
 )
 
-background = histogram_background_from_root(
-    "maps.root",
-    "background_s13_s23",
-    x_variable="s13",
-    y_variable="s23",
+efficiency = square_dalitz_efficiency_from_root(
+    "maps.root", "efficiency_sdp", **kwargs
+)
+background = square_dalitz_background_from_root(
+    "maps.root", "background_sdp", **kwargs
 )
 ```
 
-See `docs/root_io.md` for details, including optional four-momentum branches.
+The TH2 axes are interpreted as `(m', theta')`. During PDF evaluation the fitter converts `(s12,s13,s23)` internally to Square-Dalitz coordinates before the bin lookup. The ordered `pair` must match the convention used to build the external maps.
+
+See `docs/root_io.md` for details.
 
 ## Normalization
 
-Amplitude and PDF normalization use deterministic quadrature. The supported
-methods are `gauss-legendre` (default) and `square-dalitz`.
-
-```python
-from dalitzplotfitter import DalitzGaussLegendreGrid
-
-norm = DalitzGaussLegendreGrid(
-    channel.parent_mass,
-    channel.daughter_masses,
-    bin_width=0.005,
-).sample()
-cache = model.prepare_cache(data, norm)
-```
-
-The default `DecayModel` normalization uses
-
-```python
-model = DecayModel(
-    channel,
-    components,
-    normalize_components=True,
-    normalization_method="gauss-legendre",
-    normalization_bin_width=0.005,
-)
-```
-
-The quadrature sample is created lazily and reused for the lifetime of the model.
-
-There is no Monte Carlo normalization path in the supported API.
-
-The mass-plane Gauss--Legendre implementation constructs a tensor-product rule in `m13` and `m23`, keeps the nodes inside the physical Dalitz boundary and includes the Jacobian `4*m13*m23`. The resulting sample is used unchanged by `SignalPDF` and `PreparedAmplitudeCache`, so direct and matrix normalizations share the same quadrature points and weights.
-
-Square-Dalitz normalization is selected with
+Amplitude and PDF normalization use deterministic quadrature. The supported methods are `gauss-legendre` and `square-dalitz`.
 
 ```python
 model = DecayModel(
@@ -137,6 +78,8 @@ model = DecayModel(
 )
 ```
 
+Square-Dalitz histogram values are scalar efficiency/background values; they do not receive an extra Jacobian. The coordinate-transformation Jacobian belongs to the integration measure and is already carried by `SquareDalitzGrid` normalization weights.
+
 ## Component normalization convention
 
 Every dynamical component is normalized before applying its complex coefficient:
@@ -145,69 +88,56 @@ Every dynamical component is normalized before applying its complex coefficient:
 integral dPhi |F_j|^2 = 1
 ```
 
-Detector efficiency is excluded from the individual component normalization and enters only the total PDF normalization.
+Detector efficiency is excluded from individual component normalization and enters only total PDF normalization.
 
 ## Architecture
 
 ```text
 ROOT TTree / arrays / generated sample
         -> PhaseSpaceSample
-        -> DecayChannel + amplitude-component declarations
-        -> pure-JAX kinematics
-        -> resonance lineshape
-        -> Blatt-Weisskopf factors
-        -> angular factor
-        -> automatic identical-particle symmetrization
-        -> deterministic Gauss-Legendre or Square-Dalitz normalization
+        -> DecayChannel + amplitude components
+        -> pure-JAX kinematics and dynamics
+        -> deterministic Dalitz / Square-Dalitz normalization
         -> coherent amplitude
-        -> optional ROOT/array efficiency maps
-        -> optional veto / SCF / background mixture
-        -> optional factorized discriminating-variable PDFs
-        -> optional external Gaussian constraints
+        -> optional ordinary-Dalitz or Square-Dalitz efficiency/background maps
+        -> optional veto / SCF / multiple backgrounds
+        -> optional discriminating-variable PDFs
+        -> optional Gaussian constraints
         -> JAX NLL + automatic gradients
         -> iminuit
 ```
 
 ## Additional discriminating variables
 
-Basic observables beyond the Dalitz plot can be added with factorized PDFs, for example reconstructed mass or a BDT output, using `FactorizedDensity`, `Gaussian1D`, `Exponential1D` and `Histogram1D`.
-
-The factorized approximation is
-
-```text
-P(DP, x1, x2, ...) = P(DP) P(x1) P(x2) ...
-```
-
-for each signal or background category.
+Basic observables beyond the Dalitz plot can be added with factorized PDFs using `FactorizedDensity`, `Gaussian1D`, `Exponential1D` and `Histogram1D`.
 
 ## External constraints
 
-Gaussian external measurements can be added directly to any likelihood with `GaussianConstraint` and `ConstrainedNLL`.
+Gaussian external measurements can be added with `GaussianConstraint` and `ConstrainedNLL`.
 
 ## Phase-space Monte Carlo is for toys only
 
-`PhaseSpaceMC` remains available for event/proposal generation. It implements three-body Lorentz-invariant phase space directly in JAX and returns the corresponding phase-space importance weight.
-
-`PhaseSpaceMC` is **not** used for amplitude or PDF normalization.
+`PhaseSpaceMC` remains available for event/proposal generation and is not used for amplitude or PDF normalization.
 
 ## Tutorial notebooks
 
-The repository contains a progressive set of end-to-end examples:
+The repository contains a progressive set of examples:
 
 - `notebooks/01_e791_toy_fit.ipynb`: E791 signal toy generation and fit;
-- `notebooks/02_e791_efficiency_background_fit.ipynb`: E791 fit with efficiency and background;
-- `notebooks/03_b2kpipi_toy_fit.ipynb`: non-CP `B+ -> K+ pi+ pi-` signal toy and fit;
-- `notebooks/04_b2kpipi_efficiency_background_fit.ipynb`: the same B channel with efficiency and background;
-- `notebooks/05_b2kpipi_cp_toy_fit.ipynb`: simultaneous direct-CP signal-only fit;
-- `notebooks/06_b2kpipi_cp_efficiency_background_fit.ipynb`: direct-CP fit with efficiency and background, including non-extended and extended likelihood usage;
-- `notebooks/07_b2kpipi_scf_migration.ipynb`: Laura++-style SCF / misreconstructed-event migration matrix, CR+SCF decomposition and normalization conservation;
-- `notebooks/08_b2kpipi_multiple_backgrounds.ipynb`: arbitrary multiple background categories, signal-fraction convention and extended per-category yields;
-- `notebooks/09_b2kpipi_veto_maps.ipynb`: Laura++-style mass-window and functional veto maps applied consistently to data, signal and background normalization;
-- `notebooks/10_b2kpipi_discriminating_variables.ipynb`: joint Dalitz + reconstructed-mass + BDT fit with factorized PDFs and mass/BDT projections;
-- `notebooks/11_b2kpipi_gaussian_constraints.ipynb`: external Gaussian constraint on a fit parameter, including an NLL scan showing the effect of the constraint;
-- `notebooks/12_b2kpipi_scf_with_veto.ipynb`: SCF migration combined with a veto applied in reconstructed Dalitz coordinates;
-- `notebooks/13_b2kpipi_root_tree_input.ipynb`: synthetic ROOT TTree read with uproot and used directly as amplitude-fit input, with Dalitz and fitted projections;
-- `notebooks/14_b2kpipi_root_hist_eff_background.ipynb`: ROOT TH2 efficiency and background maps loaded into `HistogramEfficiency` and `HistogramBackground`, with map and projection plots.
+- `notebooks/02_e791_efficiency_background_fit.ipynb`: E791 efficiency/background fit;
+- `notebooks/03_b2kpipi_toy_fit.ipynb`: non-CP `B+ -> K+ pi+ pi-` toy fit;
+- `notebooks/04_b2kpipi_efficiency_background_fit.ipynb`: B efficiency/background fit;
+- `notebooks/05_b2kpipi_cp_toy_fit.ipynb`: simultaneous direct-CP signal fit;
+- `notebooks/06_b2kpipi_cp_efficiency_background_fit.ipynb`: CP fit with efficiency/background;
+- `notebooks/07_b2kpipi_scf_migration.ipynb`: SCF migration;
+- `notebooks/08_b2kpipi_multiple_backgrounds.ipynb`: arbitrary multiple backgrounds;
+- `notebooks/09_b2kpipi_veto_maps.ipynb`: veto maps;
+- `notebooks/10_b2kpipi_discriminating_variables.ipynb`: Dalitz + mass + BDT;
+- `notebooks/11_b2kpipi_gaussian_constraints.ipynb`: Gaussian constraints;
+- `notebooks/12_b2kpipi_scf_with_veto.ipynb`: SCF + reconstructed-space veto;
+- `notebooks/13_b2kpipi_root_tree_input.ipynb`: ROOT TTree input;
+- `notebooks/14_b2kpipi_root_hist_eff_background.ipynb`: ROOT TH2 maps in ordinary Dalitz coordinates;
+- `notebooks/15_b2kpipi_square_dalitz_eff_background.ipynb`: ROOT TH2 efficiency/background maps in `(m', theta')`, with Square-Dalitz and ordinary-Dalitz plots and a signal/background fit.
 
 The B-to-Kpipi examples consistently use
 
@@ -216,11 +146,7 @@ s13 = m^2(K+ pi-)
 s23 = m^2(pi+ pi-)
 ```
 
-for the particle ordering `(K+, pi+, pi-)`.
-
-## Fit fractions
-
-Fit fractions are evaluated with the same component convention and normalization matrix used by the model. The default gives physical fractions without detector efficiency; supplying an efficiency gives acceptance-weighted fractions explicitly.
+for particle ordering `(K+, pi+, pi-)`.
 
 ## Installation
 
