@@ -21,15 +21,15 @@ model = DecayModel(
 )
 ```
 
-For common fits, `FitSession` composes the PDF, likelihood, constraints and minimizer automatically:
+For common fits, `FitSession` composes the PDF, likelihood, backgrounds, constraints and minimizer automatically:
 
 ```python
 from dalitzplotfitter import FitSession
 
 session = FitSession(model, data)
 result = session.fit(simplex=True)
-session.print_result(result)
-session.print_fit_fractions(result)
+session.report(result)
+session.plot_projection(result, "s13")
 ```
 
 A ROOT-file workflow can be reduced to:
@@ -46,9 +46,33 @@ session = FitSession.from_root(
 result = session.fit()
 ```
 
-Background shapes can be supplied through `BackgroundSpec`; their deterministic Dalitz normalization is computed automatically. See `docs/user_friendly_api.md`.
+Background shapes can be supplied through `BackgroundSpec`; their deterministic Dalitz normalization is computed automatically.
 
-Common plots are also available in one call:
+## Simultaneous CP fits
+
+`CPFitSession` removes the manual construction of the two prepared caches, joint CP likelihood and minimizer:
+
+```python
+from dalitzplotfitter import CPFitSession
+
+session = CPFitSession(
+    plus_model,
+    minus_model,
+    plus_data,
+    minus_data,
+)
+result = session.fit()
+session.report(result)
+session.plot_projection(result, "s13")
+```
+
+Shared parameters are collected only once. Efficiency, vetoes and `CPBackgroundSpec` categories are folded into the same joint charge-Dalitz normalization convention used by `CPJointNLL`.
+
+Charge-separated projection plots use one common global normalization, so the B+ and B- projections do not hide an integrated charge asymmetry through independent rescaling.
+
+See `docs/user_friendly_api.md`.
+
+## Plot helpers
 
 ```python
 from dalitzplotfitter import plot_dalitz, plot_square_dalitz
@@ -143,7 +167,7 @@ ROOT TTree / arrays / generated sample
         -> optional veto / SCF / multiple backgrounds
         -> optional discriminating-variable PDFs
         -> optional Gaussian constraints
-        -> FitSession convenience layer (optional)
+        -> FitSession / CPFitSession convenience layer (optional)
         -> JAX NLL + automatic gradients
         -> iminuit
 ```
@@ -156,7 +180,7 @@ Basic observables beyond the Dalitz plot can be added with factorized PDFs using
 
 ## External constraints
 
-Gaussian external measurements can be added with `GaussianConstraint` and `ConstrainedNLL`, or attached directly to a `FitSession`.
+Gaussian external measurements can be added with `GaussianConstraint` and `ConstrainedNLL`, or attached directly to a fit session.
 
 ## Phase-space Monte Carlo is for toys only
 
@@ -181,7 +205,8 @@ The repository contains a progressive set of examples:
 - `notebooks/13_b2kpipi_root_tree_input.ipynb`: ROOT TTree input;
 - `notebooks/14_b2kpipi_root_hist_eff_background.ipynb`: ROOT TH2 maps in ordinary Dalitz coordinates;
 - `notebooks/15_b2kpipi_square_dalitz_eff_background.ipynb`: ROOT TH2 efficiency/background maps in `(m', theta')`;
-- `notebooks/16_user_friendly_quickstart.ipynb`: concise `FitSession` workflow plus one-line Dalitz and Square-Dalitz plotting helpers.
+- `notebooks/16_user_friendly_quickstart.ipynb`: concise non-CP `FitSession` workflow;
+- `notebooks/17_b2kpipi_cp_user_friendly.ipynb`: concise `CPFitSession` workflow, automatic report and charge-separated fitted projections.
 
 The B-to-Kpipi examples consistently use
 
