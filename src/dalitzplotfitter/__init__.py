@@ -54,7 +54,7 @@ from .kinematics import (
 )
 from .likelihood import MultiBackgroundNLL
 from .pdf import SCFSignalPDF, SignalPDF
-from .plotting import plot_dalitz, plot_square_dalitz
+from .plotting import binned_data, plot_binned_data, plot_dalitz, plot_square_dalitz
 from .resolution import SquareDalitzSCFMap
 from .sampling import weighted_resample
 from .square_histograms import (
@@ -92,11 +92,11 @@ __all__ = [
     "ResonanceAmplitude", "ResonanceContext", "SCFSignalPDF", "SignalPDF",
     "SquareDalitzGrid", "SquareDalitzHistogramBackground", "SquareDalitzHistogramEfficiency",
     "SquareDalitzSCFMap", "ToyBackground", "VetoMap", "VetoedDensity", "boost_to_rest_frame",
-    "covariant_kinematics", "covariant_kinematics_from_invariants", "dalitz_s13_limits",
-    "enable_x64", "generate_cp_toy", "generate_signal_toy", "generate_toy",
-    "histogram_background_from_root", "histogram_efficiency_from_root",
-    "invariants_to_square_dalitz", "physical_bin_mask", "plot_dalitz", "plot_square_dalitz",
-    "read_phase_space_sample", "read_root_histogram2d", "read_root_tree",
+    "binned_data", "covariant_kinematics", "covariant_kinematics_from_invariants",
+    "dalitz_s13_limits", "enable_x64", "generate_cp_toy", "generate_signal_toy",
+    "generate_toy", "histogram_background_from_root", "histogram_efficiency_from_root",
+    "invariants_to_square_dalitz", "physical_bin_mask", "plot_binned_data", "plot_dalitz",
+    "plot_square_dalitz", "read_phase_space_sample", "read_root_histogram2d", "read_root_tree",
     "square_dalitz_background_from_root", "square_dalitz_efficiency_from_root",
     "square_dalitz_jacobian", "square_dalitz_to_invariants", "vetoed_signal_pdf",
     "weighted_resample",
