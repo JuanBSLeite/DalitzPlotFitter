@@ -17,23 +17,53 @@ mean is exactly the Gauss--Legendre weighted sum.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 
 import jax.numpy as jnp
 import numpy as np
 
 from dalitzplotfitter.kinematics import PhaseSpaceSample
-from dalitzplotfitter.kinematics.dalitz_grid import dalitz_s13_limits
 
 
-def _scaled_legendre(order: int, low: float, high: float) -> tuple[np.ndarray, np.ndarray]:
+def _scaled_legendre(
+    order: int,
+    low: float,
+    high: float,
+) -> tuple[np.ndarray, np.ndarray]:
     """Return Gauss--Legendre nodes and weights scaled to ``[low, high]``."""
 
     nodes, weights = np.polynomial.legendre.leggauss(order)
     half = 0.5 * (high - low)
     mean = 0.5 * (high + low)
     return mean + half * nodes, half * weights
+
+
+def _kallen(x, y, z):
+    return x**2 + y**2 + z**2 - 2.0 * x * y - 2.0 * x * z - 2.0 * y * z
+
+
+def _s13_limits_numpy(
+    s12: np.ndarray,
+    *,
+    mother_mass: float,
+    masses: tuple[float, float, float],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Evaluate the exact boundary in NumPy float64 before conversion to JAX."""
+
+    m1, m2, m3 = masses
+    root_s12 = np.sqrt(s12)
+    e1 = (s12 + m1**2 - m2**2) / (2.0 * root_s12)
+    e3 = (mother_mass**2 - s12 - m3**2) / (2.0 * root_s12)
+    q = np.sqrt(np.maximum(_kallen(s12, m1**2, m2**2), 0.0)) / (
+        2.0 * root_s12
+    )
+    p = np.sqrt(
+        np.maximum(_kallen(mother_mass**2, s12, m3**2), 0.0)
+    ) / (2.0 * root_s12)
+    common = m1**2 + m3**2 + 2.0 * e1 * e3
+    spread = 2.0 * q * p
+    return common - spread, common + spread
 
 
 @dataclass(frozen=True)
@@ -63,7 +93,9 @@ class LauraGaussLegendreGrid:
 
     def __post_init__(self) -> None:
         if len(self.masses) != 3:
-            raise ValueError("LauraGaussLegendreGrid requires exactly three daughter masses")
+            raise ValueError(
+                "LauraGaussLegendreGrid requires exactly three daughter masses"
+            )
         if self.mother_mass <= sum(self.masses):
             raise ValueError("Mother mass must be above the three-body threshold")
         if self.bin_width <= 0.0:
@@ -113,13 +145,11 @@ class LauraGaussLegendreGrid:
         s12_min = (m1 + m2) ** 2
         s12_max = (self.mother_mass - m3) ** 2
         s12_safe = np.clip(s12, s12_min, s12_max)
-        low13, high13 = dalitz_s13_limits(
-            jnp.asarray(s12_safe),
+        low13, high13 = _s13_limits_numpy(
+            s12_safe,
             mother_mass=self.mother_mass,
             masses=self.masses,
         )
-        low13 = np.asarray(low13)
-        high13 = np.asarray(high13)
 
         scale = max(1.0, self.mother_mass**2)
         tol = 64.0 * np.finfo(float).eps * scale

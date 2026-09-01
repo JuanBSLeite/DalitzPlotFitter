@@ -1,6 +1,43 @@
 # Deterministic Dalitz-grid integration
 
-DalitzPlotFitter provides deterministic normalization on the ordinary Dalitz plot through both a fixed equal-area `DalitzGrid` and an amplitude-aware `AdaptiveDalitzGrid`. Monte Carlo remains available for event/toy generation through `PhaseSpaceMC`, but it is not the normalization method.
+DalitzPlotFitter provides deterministic normalization on the ordinary Dalitz plot through a fixed equal-area `DalitzGrid`, a Laura++-style Gauss--Legendre grid, and an amplitude-aware `AdaptiveDalitzGrid`. Monte Carlo remains available for event/toy generation through `PhaseSpaceMC`, but it is not the normalization method.
+
+## Laura++-style Gauss--Legendre grid
+
+`LauraGaussLegendreGrid` implements the base prescription in Sec. 4.4 and
+Eq. (30) of the Laura++ paper. The integration variables are `m13` and `m23`,
+not their squares:
+
+```text
+ds13 ds23 = 4 m13 m23 dm13 dm23.
+```
+
+A tensor-product Gauss--Legendre rule covers the kinematic bounding box. Only
+abscissas inside the exact Dalitz boundary are retained, and their weights
+include the Jacobian. The target width defaults to 5 MeV and determines the
+orders from each mass range, as in Laura++.
+
+```python
+from dalitzplotfitter import LauraGaussLegendreGrid
+
+norm = LauraGaussLegendreGrid(
+    channel.parent_mass,
+    channel.daughter_masses,
+    bin_width=0.005,
+).sample()
+```
+
+At model level, select it with `normalization_method="laura"`. The same sample
+then flows through individual-component normalization, the normalization
+matrix, the PDF and the cached NLL.
+
+The Laura++ narrow-resonance extension is separate from this base rule: below
+its default 20 MeV threshold it partitions bands `m0 +/- 5 Gamma0` and uses a
+target width of `0.01 Gamma0`; a diagonal `m12` band switches to Square Dalitz
+coordinates. That metadata-driven partitioning is not currently part of
+`LauraGaussLegendreGrid`. For narrow structures, use an adaptive grid and run
+matrix-element convergence tests rather than assuming the 5 MeV base rule is
+sufficient.
 
 ## Uniform equal-area grid
 
@@ -167,5 +204,8 @@ The preferred method should be chosen from matrix-element accuracy versus number
 - `notebooks/04_normalization_grid_diagnostics.ipynb`: uniform-grid diagnostics;
 - `notebooks/07_e791_rho1450_mass_width_closure.ipynb`: coefficient plus mass/width closure;
 - `notebooks/14_adaptive_sqdp_phi_kkk.ipynb`: ordinary/Square, uniform/adaptive comparison for a narrow phi(1020).
+- `notebooks/15_laura_e791_integration_validation.ipynb`: Laura++-style
+  Gauss--Legendre convergence against an independent equal-area reference for
+  the complete E791 Fit 2 amplitude model.
 
 `PhaseSpaceMC` is retained for generating event pools and pseudo-data.

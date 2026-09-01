@@ -47,7 +47,9 @@ Resonance(
 
 ## Normalization
 
-Amplitude and PDF normalization use **only deterministic equal-area `DalitzGrid` quadrature**.
+Amplitude and PDF normalization use deterministic quadrature. The default is
+the equal-area `DalitzGrid`; a Laura++-style Gauss--Legendre method is also
+available.
 
 ```python
 from dalitzplotfitter import DalitzGrid
@@ -74,6 +76,28 @@ model = DecayModel(
 so the default normalization support contains exactly one million deterministic grid points. It is created lazily and reused for the lifetime of the model.
 
 There is no Monte Carlo normalization path in the supported API.
+
+To use the Laura++ prescription in both component and total-PDF normalization:
+
+```python
+model = DecayModel(
+    channel,
+    components,
+    normalization_method="laura",
+    normalization_bin_width=0.005,  # GeV; Laura++ default is 5 MeV
+)
+```
+
+This constructs a tensor-product Gauss--Legendre rule in `m13` and `m23`,
+keeps the nodes inside the physical Dalitz boundary and includes the Jacobian
+`4*m13*m23`. The resulting sample is used unchanged by `SignalPDF` and
+`PreparedAmplitudeCache`, so direct and matrix normalizations share the same
+quadrature points and weights. Explicit `normalization_order_m13` and
+`normalization_order_m23` values can be supplied for convergence studies.
+
+Laura++'s additional sub-grid treatment for resonances narrower than 20 MeV is
+not enabled by this base method yet; use the existing amplitude-aware adaptive
+grids for such models and validate every normalization-matrix element.
 
 ## Component normalization convention
 
@@ -129,6 +153,9 @@ Current validation examples use deterministic grid normalization:
 - `notebooks/03_lineshape_parameter_diagnostics.ipynb`: lineshape diagnostics;
 - `notebooks/04_normalization_grid_diagnostics.ipynb`: grid-convergence and normalization diagnostics;
 - `notebooks/07_e791_rho1450_mass_width_closure.ipynb`: coefficients plus `rho(1450)` mass and width.
+- `notebooks/15_laura_e791_integration_validation.ipynb`: Laura++-style versus
+  equal-area normalization using the complete seven-component E791 Fit 2 model,
+  including matrix-element convergence and direct/cache closure.
 
 ## Coefficients
 

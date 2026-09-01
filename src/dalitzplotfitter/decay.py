@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, fields, is_dataclass
-from typing import Iterable
+from typing import Literal
 
 import jax.numpy as jnp
 from particle import Particle
@@ -22,7 +23,7 @@ from dalitzplotfitter.dynamics import (
 )
 from dalitzplotfitter.dynamics.context import resolve_value
 from dalitzplotfitter.fit import Parameter, ParameterKind
-from dalitzplotfitter.integration import GridIntegrator
+from dalitzplotfitter.integration import GridIntegrator, LauraGaussLegendreGrid
 from dalitzplotfitter.kinematics import DalitzGrid, PhaseSpaceMC, PhaseSpaceSample
 from dalitzplotfitter.pdf import SignalPDF
 
@@ -215,6 +216,10 @@ class DecayModel:
     normalize_components: bool
     normalization_resolution: int
     normalization_boundary_resolution: int | None
+    normalization_method: Literal["equal_area", "laura"]
+    normalization_bin_width: float
+    normalization_order_m13: int | None
+    normalization_order_m23: int | None
     _normalization_sample: PhaseSpaceSample | None
 
     def __init__(
@@ -225,16 +230,34 @@ class DecayModel:
         normalize_components: bool = True,
         normalization_resolution: int = 1000,
         normalization_boundary_resolution: int | None = None,
+        normalization_method: Literal["equal_area", "laura"] = "equal_area",
+        normalization_bin_width: float = 0.005,
+        normalization_order_m13: int | None = None,
+        normalization_order_m23: int | None = None,
     ) -> None:
         if normalization_resolution < 2:
             raise ValueError("normalization_resolution must be at least 2")
         if normalization_boundary_resolution is not None and normalization_boundary_resolution < 4:
             raise ValueError("normalization_boundary_resolution must be at least 4")
+        if normalization_method not in ("equal_area", "laura"):
+            raise ValueError(
+                "normalization_method must be either 'equal_area' or 'laura'"
+            )
+        if normalization_bin_width <= 0.0:
+            raise ValueError("normalization_bin_width must be positive")
+        if normalization_order_m13 is not None and normalization_order_m13 < 2:
+            raise ValueError("normalization_order_m13 must be at least 2")
+        if normalization_order_m23 is not None and normalization_order_m23 < 2:
+            raise ValueError("normalization_order_m23 must be at least 2")
         object.__setattr__(self, "channel", channel)
         object.__setattr__(self, "components", tuple(components))
         object.__setattr__(self, "normalize_components", bool(normalize_components))
         object.__setattr__(self, "normalization_resolution", int(normalization_resolution))
         object.__setattr__(self, "normalization_boundary_resolution", normalization_boundary_resolution)
+        object.__setattr__(self, "normalization_method", normalization_method)
+        object.__setattr__(self, "normalization_bin_width", float(normalization_bin_width))
+        object.__setattr__(self, "normalization_order_m13", normalization_order_m13)
+        object.__setattr__(self, "normalization_order_m23", normalization_order_m23)
         object.__setattr__(self, "_normalization_sample", None)
         if not self.components:
             raise ValueError("DecayModel requires at least one amplitude component")
@@ -283,12 +306,21 @@ class DecayModel:
     def normalization_sample(self) -> PhaseSpaceSample:
         sample = self._normalization_sample
         if sample is None:
-            sample = DalitzGrid(
-                self.channel.parent_mass,
-                self.channel.daughter_masses,
-                resolution=self.normalization_resolution,
-                boundary_resolution=self.normalization_boundary_resolution,
-            ).sample()
+            if self.normalization_method == "laura":
+                sample = LauraGaussLegendreGrid(
+                    self.channel.parent_mass,
+                    self.channel.daughter_masses,
+                    bin_width=self.normalization_bin_width,
+                    order_m13=self.normalization_order_m13,
+                    order_m23=self.normalization_order_m23,
+                ).sample()
+            else:
+                sample = DalitzGrid(
+                    self.channel.parent_mass,
+                    self.channel.daughter_masses,
+                    resolution=self.normalization_resolution,
+                    boundary_resolution=self.normalization_boundary_resolution,
+                ).sample()
             object.__setattr__(self, "_normalization_sample", sample)
         return sample
 

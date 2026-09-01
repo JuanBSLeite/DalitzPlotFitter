@@ -10,15 +10,15 @@ from .coefficients import CPRealImag, RealImag
 from .config import enable_x64
 from .decay import DalitzAmplitude, DecayChannel, DecayModel, NonResonant, Resonance
 from .dynamics import (
+    LASS,
+    QMI,
+    QMI2D,
     BaBarFlatte,
     CovariantAngular,
     Flatte,
     GounarisSakurai,
     KMatrix,
-    LASS,
     Pole,
-    QMI,
-    QMI2D,
     RelativisticBreitWigner,
     ResonanceAmplitude,
     ResonanceContext,
@@ -30,6 +30,7 @@ from .integration import (
     AdaptiveDalitzResult,
     AdaptiveSquareDalitzGrid,
     AdaptiveSquareDalitzResult,
+    LauraGaussLegendreGrid,
 )
 from .kinematics import (
     CovariantKinematics,
@@ -67,6 +68,7 @@ __all__ = [
     "GounarisSakurai",
     "KMatrix",
     "LASS",
+    "LauraGaussLegendreGrid",
     "Minimizer",
     "MultiStartResult",
     "NonResonant",
