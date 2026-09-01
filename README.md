@@ -156,6 +156,8 @@ Current validation examples use deterministic grid normalization:
 - `notebooks/15_laura_e791_integration_validation.ipynb`: Laura++-style versus
   equal-area normalization using the complete seven-component E791 Fit 2 model,
   including matrix-element convergence and direct/cache closure.
+- `notebooks/16_laura_e791_genfit.ipynb`: end-to-end E791 Fit 2 pseudo-data
+  generation and Cartesian-coefficient fit with Laura++-style normalization.
 
 ## Coefficients
 
