@@ -9,6 +9,7 @@ import jax.numpy as jnp
 from jax import Array
 
 from dalitzplotfitter.amplitude import PreparedAmplitudeCache
+from dalitzplotfitter.background import CPBackgroundCategory
 
 Parameters = Mapping[str, Array | float]
 
@@ -26,29 +27,31 @@ class CPJointNLL:
 
     ``S_q(phi) = eps_q(phi) |A_q(phi)|^2 / (I_+ + I_-)``.
 
-    If a background is supplied, its density is likewise normalized jointly,
+    Arbitrary named background categories can be supplied through
+    ``background_categories``.  Each category is also normalized jointly over
+    charge.  The legacy single-background arguments remain supported.
 
-    ``B_q(phi) = B_q^raw(phi) / (J_+ + J_-)``.
-
-    Two mixture conventions are supported:
-
-    * non-extended: ``p_q = f_sig S_q + (1-f_sig) B_q``;
-    * extended: ``lambda_q = N_sig S_q + N_bkg B_q`` with
-      ``NLL = N_sig + N_bkg - sum log(lambda_q)`` up to the usual
-      parameter-independent factorial constant.
-
-    In signal-only mode no mixture parameter is needed. Extended signal-only
-    fits are supported with ``extended=True`` and ``signal_yield``.
+    Non-extended fits use a total ``signal_fraction`` and relative background
+    composition fractions.  For ``N`` named background categories, the first
+    ``N-1`` categories carry relative fractions and the final category is the
+    remainder.  Extended fits use independent yields for signal and for every
+    background category.
     """
 
     plus_cache: PreparedAmplitudeCache
     minus_cache: PreparedAmplitudeCache
     plus_efficiency: Array | None = None
     minus_efficiency: Array | None = None
+
+    # Legacy single-background interface.
     plus_background: Array | None = None
     minus_background: Array | None = None
     plus_background_normalization: Array | float | None = None
     minus_background_normalization: Array | float | None = None
+
+    # New arbitrary-category interface.
+    background_categories: tuple[CPBackgroundCategory, ...] = ()
+
     signal_fraction: object | None = None
     extended: bool = False
     signal_yield: object | None = None
@@ -58,27 +61,44 @@ class CPJointNLL:
         if (self.plus_efficiency is None) != (self.minus_efficiency is None):
             raise ValueError("plus_efficiency and minus_efficiency must be supplied together")
 
-        background_shape_fields = (
+        legacy_fields = (
             self.plus_background,
             self.minus_background,
             self.plus_background_normalization,
             self.minus_background_normalization,
         )
-        supplied = tuple(value is not None for value in background_shape_fields)
-        if any(supplied) and not all(supplied):
+        legacy_supplied = tuple(value is not None for value in legacy_fields)
+        if any(legacy_supplied) and not all(legacy_supplied):
             raise ValueError(
-                "background requires plus/minus background values and "
-                "plus/minus background normalizations"
+                "background requires plus/minus background values and plus/minus normalizations"
             )
+        if any(legacy_supplied) and self.background_categories:
+            raise ValueError(
+                "use either the legacy single-background arguments or background_categories, not both"
+            )
+
+        names = [category.name for category in self.background_categories]
+        if len(set(names)) != len(names):
+            raise ValueError("CP background category names must be unique")
 
         if self.extended:
             if self.signal_fraction is not None:
                 raise ValueError("signal_fraction is not used in extended mode")
             if self.signal_yield is None:
                 raise ValueError("extended mode requires signal_yield")
-            if self.has_background and self.background_yield is None:
-                raise ValueError("extended background fits require background_yield")
-            if not self.has_background and self.background_yield is not None:
+            if self.background_categories:
+                if self.background_yield is not None:
+                    raise ValueError(
+                        "background_yield belongs to the legacy single-background interface"
+                    )
+                if any(category.fraction is not None for category in self.background_categories):
+                    raise ValueError("background fractions are not used in extended mode")
+                if any(category.yield_ is None for category in self.background_categories):
+                    raise ValueError("every extended CP background category requires yield_")
+            elif self.has_legacy_background:
+                if self.background_yield is None:
+                    raise ValueError("extended single-background fits require background_yield")
+            elif self.background_yield is not None:
                 raise ValueError("background_yield requires a background model")
         else:
             if self.signal_yield is not None or self.background_yield is not None:
@@ -87,10 +107,30 @@ class CPJointNLL:
                 raise ValueError("non-extended background fits require signal_fraction")
             if not self.has_background and self.signal_fraction is not None:
                 raise ValueError("signal_fraction requires a background model")
+            if self.background_categories:
+                if any(category.yield_ is not None for category in self.background_categories):
+                    raise ValueError("background yields require extended=True")
+                if len(self.background_categories) > 1:
+                    if any(c.fraction is None for c in self.background_categories[:-1]):
+                        raise ValueError(
+                            "all CP background categories except the last require a relative fraction"
+                        )
+                    if self.background_categories[-1].fraction is not None:
+                        raise ValueError(
+                            "the last CP background category is the remainder and must not define fraction"
+                        )
+                elif len(self.background_categories) == 1 and self.background_categories[0].fraction is not None:
+                    raise ValueError(
+                        "a single CP background category does not need a relative fraction"
+                    )
+
+    @property
+    def has_legacy_background(self) -> bool:
+        return self.plus_background is not None
 
     @property
     def has_background(self) -> bool:
-        return self.plus_background is not None
+        return self.has_legacy_background or bool(self.background_categories)
 
     def _signal_densities(
         self, parameters: Parameters
@@ -108,9 +148,9 @@ class CPJointNLL:
             integral_minus,
         )
 
-    def _background_densities(self) -> tuple[Array, Array]:
-        if not self.has_background:
-            raise RuntimeError("background densities requested for signal-only CPJointNLL")
+    def _legacy_background_densities(self) -> tuple[Array, Array]:
+        if not self.has_legacy_background:
+            raise RuntimeError("legacy background densities requested without legacy background")
         total = jnp.asarray(self.plus_background_normalization) + jnp.asarray(
             self.minus_background_normalization
         )
@@ -119,49 +159,67 @@ class CPJointNLL:
             jnp.asarray(self.minus_background) / total,
         )
 
-    def component_densities(
-        self, parameters: Parameters
-    ) -> tuple[tuple[Array, Array], tuple[Array, Array] | None]:
-        """Return normalized signal and optional background charge densities."""
+    def background_weights(self, parameters: Parameters) -> Array:
+        """Return relative weights for named background categories."""
 
-        signal_plus, signal_minus, _, _ = self._signal_densities(parameters)
-        signal = (signal_plus, signal_minus)
-        background = self._background_densities() if self.has_background else None
-        return signal, background
+        n = len(self.background_categories)
+        if n == 0:
+            return jnp.empty((0,), dtype=jnp.float64)
+        if n == 1:
+            return jnp.ones((1,), dtype=jnp.float64)
+        explicit = jnp.asarray(
+            [_resolve(category.fraction, parameters) for category in self.background_categories[:-1]],
+            dtype=jnp.float64,
+        )
+        remainder = 1.0 - jnp.sum(explicit)
+        return jnp.concatenate((explicit, jnp.asarray([remainder])))
 
     def densities(self, parameters: Parameters) -> tuple[Array, Array]:
-        """Return the fitted non-extended PDF or extended event intensities."""
-
-        (signal_plus, signal_minus), background = self.component_densities(parameters)
+        signal_plus, signal_minus, _, _ = self._signal_densities(parameters)
 
         if self.extended:
             n_signal = jnp.asarray(_resolve(self.signal_yield, parameters))
-            if background is None:
-                return n_signal * signal_plus, n_signal * signal_minus
-            n_background = jnp.asarray(_resolve(self.background_yield, parameters))
-            background_plus, background_minus = background
-            return (
-                n_signal * signal_plus + n_background * background_plus,
-                n_signal * signal_minus + n_background * background_minus,
-            )
+            total_plus = n_signal * signal_plus
+            total_minus = n_signal * signal_minus
+            if self.background_categories:
+                for category in self.background_categories:
+                    n_background = jnp.asarray(_resolve(category.yield_, parameters))
+                    total_plus = total_plus + n_background * category.plus_density
+                    total_minus = total_minus + n_background * category.minus_density
+            elif self.has_legacy_background:
+                n_background = jnp.asarray(_resolve(self.background_yield, parameters))
+                background_plus, background_minus = self._legacy_background_densities()
+                total_plus = total_plus + n_background * background_plus
+                total_minus = total_minus + n_background * background_minus
+            return total_plus, total_minus
 
-        if background is None:
+        if not self.has_background:
             return signal_plus, signal_minus
 
         f_signal = jnp.asarray(_resolve(self.signal_fraction, parameters))
-        background_plus, background_minus = background
+        if self.background_categories:
+            weights = self.background_weights(parameters)
+            background_plus = jnp.zeros_like(signal_plus)
+            background_minus = jnp.zeros_like(signal_minus)
+            for weight, category in zip(weights, self.background_categories):
+                background_plus = background_plus + weight * category.plus_density
+                background_minus = background_minus + weight * category.minus_density
+        else:
+            background_plus, background_minus = self._legacy_background_densities()
+
         return (
             f_signal * signal_plus + (1.0 - f_signal) * background_plus,
             f_signal * signal_minus + (1.0 - f_signal) * background_minus,
         )
 
     def expected_events(self, parameters: Parameters) -> Array:
-        """Return the total expected yield for an extended fit."""
-
         if not self.extended:
             raise RuntimeError("expected_events is only defined in extended mode")
         total = jnp.asarray(_resolve(self.signal_yield, parameters))
-        if self.has_background:
+        if self.background_categories:
+            for category in self.background_categories:
+                total = total + jnp.asarray(_resolve(category.yield_, parameters))
+        elif self.has_legacy_background:
             total = total + jnp.asarray(_resolve(self.background_yield, parameters))
         return total
 
@@ -188,22 +246,42 @@ class CPJointNLL:
         if not self.has_background:
             return signal_plus, signal_minus
 
-        background_plus_norm = jnp.asarray(self.plus_background_normalization)
-        background_minus_norm = jnp.asarray(self.minus_background_normalization)
-        background_total = background_plus_norm + background_minus_norm
-        background_plus = background_plus_norm / background_total
-        background_minus = background_minus_norm / background_total
-
         if self.extended:
             n_signal = jnp.asarray(_resolve(self.signal_yield, parameters))
-            n_background = jnp.asarray(_resolve(self.background_yield, parameters))
-            total_yield = n_signal + n_background
-            return (
-                (n_signal * signal_plus + n_background * background_plus) / total_yield,
-                (n_signal * signal_minus + n_background * background_minus) / total_yield,
-            )
+            numerator_plus = n_signal * signal_plus
+            numerator_minus = n_signal * signal_minus
+            total_yield = n_signal
+            if self.background_categories:
+                for category in self.background_categories:
+                    n_background = jnp.asarray(_resolve(category.yield_, parameters))
+                    numerator_plus = numerator_plus + n_background * category.plus_probability
+                    numerator_minus = numerator_minus + n_background * category.minus_probability
+                    total_yield = total_yield + n_background
+            else:
+                n_background = jnp.asarray(_resolve(self.background_yield, parameters))
+                bplus = jnp.asarray(self.plus_background_normalization)
+                bminus = jnp.asarray(self.minus_background_normalization)
+                btotal = bplus + bminus
+                numerator_plus = numerator_plus + n_background * bplus / btotal
+                numerator_minus = numerator_minus + n_background * bminus / btotal
+                total_yield = total_yield + n_background
+            return numerator_plus / total_yield, numerator_minus / total_yield
 
         f_signal = jnp.asarray(_resolve(self.signal_fraction, parameters))
+        if self.background_categories:
+            weights = self.background_weights(parameters)
+            background_plus = jnp.asarray(0.0)
+            background_minus = jnp.asarray(0.0)
+            for weight, category in zip(weights, self.background_categories):
+                background_plus = background_plus + weight * category.plus_probability
+                background_minus = background_minus + weight * category.minus_probability
+        else:
+            bplus = jnp.asarray(self.plus_background_normalization)
+            bminus = jnp.asarray(self.minus_background_normalization)
+            btotal = bplus + bminus
+            background_plus = bplus / btotal
+            background_minus = bminus / btotal
+
         return (
             f_signal * signal_plus + (1.0 - f_signal) * background_plus,
             f_signal * signal_minus + (1.0 - f_signal) * background_minus,
