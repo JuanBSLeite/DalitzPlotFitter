@@ -19,7 +19,47 @@ model = DecayModel(
         NonResonant(RealImag(0.2, -0.1)),
     ],
 )
-pdf = model.pdf()
+```
+
+For common fits, `FitSession` composes the PDF, likelihood, constraints and minimizer automatically:
+
+```python
+from dalitzplotfitter import FitSession
+
+session = FitSession(model, data)
+result = session.fit(simplex=True)
+session.print_result(result)
+session.print_fit_fractions(result)
+```
+
+A ROOT-file workflow can be reduced to:
+
+```python
+session = FitSession.from_root(
+    model,
+    "data.root",
+    "DecayTree",
+    s12="S12",
+    s13="S13",
+    s23="S23",
+)
+result = session.fit()
+```
+
+Background shapes can be supplied through `BackgroundSpec`; their deterministic Dalitz normalization is computed automatically. See `docs/user_friendly_api.md`.
+
+Common plots are also available in one call:
+
+```python
+from dalitzplotfitter import plot_dalitz, plot_square_dalitz
+
+plot_dalitz(data, x="s13", y="s23")
+plot_square_dalitz(
+    data,
+    mother_mass=channel.parent_mass,
+    masses=channel.daughter_masses,
+    pair=(0, 2),
+)
 ```
 
 ## ROOT input with uproot
@@ -103,9 +143,12 @@ ROOT TTree / arrays / generated sample
         -> optional veto / SCF / multiple backgrounds
         -> optional discriminating-variable PDFs
         -> optional Gaussian constraints
+        -> FitSession convenience layer (optional)
         -> JAX NLL + automatic gradients
         -> iminuit
 ```
+
+The low-level `SignalPDF`, `PreparedAmplitudeCache`, likelihood and `Minimizer` classes remain public for advanced analyses and numerical validation.
 
 ## Additional discriminating variables
 
@@ -113,7 +156,7 @@ Basic observables beyond the Dalitz plot can be added with factorized PDFs using
 
 ## External constraints
 
-Gaussian external measurements can be added with `GaussianConstraint` and `ConstrainedNLL`.
+Gaussian external measurements can be added with `GaussianConstraint` and `ConstrainedNLL`, or attached directly to a `FitSession`.
 
 ## Phase-space Monte Carlo is for toys only
 
@@ -137,7 +180,8 @@ The repository contains a progressive set of examples:
 - `notebooks/12_b2kpipi_scf_with_veto.ipynb`: SCF + reconstructed-space veto;
 - `notebooks/13_b2kpipi_root_tree_input.ipynb`: ROOT TTree input;
 - `notebooks/14_b2kpipi_root_hist_eff_background.ipynb`: ROOT TH2 maps in ordinary Dalitz coordinates;
-- `notebooks/15_b2kpipi_square_dalitz_eff_background.ipynb`: ROOT TH2 efficiency/background maps in `(m', theta')`, with Square-Dalitz and ordinary-Dalitz plots and a signal/background fit.
+- `notebooks/15_b2kpipi_square_dalitz_eff_background.ipynb`: ROOT TH2 efficiency/background maps in `(m', theta')`;
+- `notebooks/16_user_friendly_quickstart.ipynb`: concise `FitSession` workflow plus one-line Dalitz and Square-Dalitz plotting helpers.
 
 The B-to-Kpipi examples consistently use
 
