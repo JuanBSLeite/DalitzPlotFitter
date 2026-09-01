@@ -68,6 +68,7 @@ def read_root_tree(
         entry_start=entry_start,
         entry_stop=entry_stop,
         library="np",
+        how=dict,
     )
     result: dict[str, Array] = {}
     for output_name, branch_name in rename.items():
@@ -110,12 +111,16 @@ def read_phase_space_sample(
     momentum_specs = {"p1": p1, "p2": p2, "p3": p3}
     supplied = [spec is not None for spec in momentum_specs.values()]
     if any(supplied) and not all(supplied):
-        raise ValueError("p1, p2 and p3 four-momentum branch specifications must be supplied together")
+        raise ValueError(
+            "p1, p2 and p3 four-momentum branch specifications must be supplied together"
+        )
     for label, spec in momentum_specs.items():
         if spec is None:
             continue
         if len(spec) != 4:
-            raise ValueError(f"{label} must contain exactly four branches ordered as (E, px, py, pz)")
+            raise ValueError(
+                f"{label} must contain exactly four branches ordered as (E, px, py, pz)"
+            )
         for index, name in enumerate(spec):
             branch_map[f"{label}_{index}"] = name
 
