@@ -23,6 +23,7 @@ from dalitzplotfitter.io import read_phase_space_sample
 from dalitzplotfitter.kinematics import PhaseSpaceSample
 from dalitzplotfitter.likelihood import MultiBackgroundNLL, UnbinnedNLL
 from dalitzplotfitter.pdf import SignalPDF
+from dalitzplotfitter.plotting import plot_binned_data
 
 
 @dataclass(frozen=True)
@@ -393,7 +394,7 @@ class FitSession:
         show_components: bool = True,
         ax=None,
     ):
-        """Plot data and fitted signal/background projections in event units."""
+        """Plot data as black points with errors and fitted model as lines."""
 
         import matplotlib.pyplot as plt
 
@@ -403,7 +404,7 @@ class FitSession:
         edges = np.linspace(hist_range[0], hist_range[1], bins + 1)
         if ax is None:
             _, ax = plt.subplots(figsize=(7, 5))
-        ax.hist(data_values, bins=edges, histtype="step", label="data")
+        plot_binned_data(data_values, bins=edges, ax=ax, label="data")
         total = np.zeros(bins, dtype=float)
         for name, sample, weights in self._projection_components(values):
             counts, _ = np.histogram(np.asarray(getattr(sample, variable)), bins=edges, weights=weights)
