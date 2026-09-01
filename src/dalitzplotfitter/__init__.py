@@ -6,7 +6,7 @@ from .amplitude import (
     ConstantAmplitude,
     PreparedAmplitudeCache,
 )
-from .background import BackgroundCategory
+from .background import BackgroundCategory, CPBackgroundCategory
 from .coefficients import CPRealImag, RealImag
 from .config import enable_x64
 from .decay import DalitzAmplitude, DecayChannel, DecayModel, NonResonant, Resonance
@@ -44,11 +44,12 @@ from .likelihood import MultiBackgroundNLL
 from .pdf import SCFSignalPDF, SignalPDF
 from .resolution import SquareDalitzSCFMap
 from .sampling import weighted_resample
-from .veto import CompositeVeto, FunctionalVeto, MassWindowVeto, VetoMap
+from .veto import CompositeVeto, FunctionalVeto, MassWindowVeto, VetoMap, VetoedDensity
 
 __all__ = [
     "AmplitudeComponent",
     "BackgroundCategory",
+    "CPBackgroundCategory",
     "BaBarFlatte",
     "CPRealImag",
     "CoherentAmplitudeModel",
@@ -88,6 +89,7 @@ __all__ = [
     "SquareDalitzGrid",
     "SquareDalitzSCFMap",
     "VetoMap",
+    "VetoedDensity",
     "boost_to_rest_frame",
     "covariant_kinematics",
     "covariant_kinematics_from_invariants",
