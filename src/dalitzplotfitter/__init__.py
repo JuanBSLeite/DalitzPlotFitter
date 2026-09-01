@@ -39,6 +39,8 @@ from .kinematics import (
     square_dalitz_jacobian,
     square_dalitz_to_invariants,
 )
+from .pdf import SCFSignalPDF, SignalPDF
+from .resolution import SquareDalitzSCFMap
 from .sampling import weighted_resample
 
 __all__ = [
@@ -73,7 +75,10 @@ __all__ = [
     "Resonance",
     "ResonanceAmplitude",
     "ResonanceContext",
+    "SCFSignalPDF",
+    "SignalPDF",
     "SquareDalitzGrid",
+    "SquareDalitzSCFMap",
     "boost_to_rest_frame",
     "covariant_kinematics",
     "covariant_kinematics_from_invariants",
