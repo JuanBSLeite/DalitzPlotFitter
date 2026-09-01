@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
 import numpy as np
 
 from dalitzplotfitter.kinematics import invariants_to_square_dalitz
@@ -14,6 +15,16 @@ def _values(sample, variable: str):
     if isinstance(sample, dict) and variable in sample:
         return np.asarray(sample[variable])
     raise KeyError(f"sample does not contain {variable!r}")
+
+
+def _bin_width_label(edges, unit: str) -> str:
+    widths = np.diff(np.asarray(edges, dtype=float))
+    if widths.size == 0:
+        return "Candidates / bin"
+    if not np.allclose(widths, widths[0], rtol=1e-10, atol=1e-12):
+        return "Candidates / bin"
+    width = f"{float(widths[0]):.3g}"
+    return f"Candidates / {width} {unit}" if unit else f"Candidates / {width}"
 
 
 def binned_data(
@@ -51,8 +62,15 @@ def plot_binned_data(
     ax=None,
     label: str = "data",
     markersize: float = 4.5,
+    unit: str | None = None,
+    log_scale: bool = False,
 ):
-    """Plot one-dimensional data as black circular points with error bars."""
+    """Plot one-dimensional data as black circular points with error bars.
+
+    When ``unit`` is supplied, the y-axis label includes the uniform bin width,
+    for example ``Candidates / 0.25 GeV^2``. ``log_scale=True`` enables a
+    logarithmic y axis.
+    """
 
     if ax is None:
         _, ax = plt.subplots(figsize=(7, 5))
@@ -73,6 +91,10 @@ def plot_binned_data(
         label=label,
         zorder=10,
     )
+    if unit is not None:
+        ax.set_ylabel(_bin_width_label(edges, unit))
+    if log_scale:
+        ax.set_yscale("log")
     return ax, counts, errors, edges
 
 
@@ -86,12 +108,23 @@ def plot_dalitz(
     ax=None,
     title: str | None = None,
     colorbar: bool = True,
+    log_scale: bool = False,
 ):
-    """Plot a standard two-dimensional Dalitz histogram in one call."""
+    """Plot a standard two-dimensional Dalitz histogram in one call.
+
+    Set ``log_scale=True`` to display the bin contents with logarithmic color
+    normalization.
+    """
 
     if ax is None:
         _, ax = plt.subplots(figsize=(7, 5.5))
-    hist = ax.hist2d(_values(sample, x), _values(sample, y), bins=bins, weights=weights)
+    hist = ax.hist2d(
+        _values(sample, x),
+        _values(sample, y),
+        bins=bins,
+        weights=weights,
+        norm=LogNorm() if log_scale else None,
+    )
     ax.set_xlabel(rf"${x}$ [GeV$^2$]")
     ax.set_ylabel(rf"${y}$ [GeV$^2$]")
     if title is not None:
@@ -112,8 +145,13 @@ def plot_square_dalitz(
     ax=None,
     title: str | None = None,
     colorbar: bool = True,
+    log_scale: bool = False,
 ):
-    """Plot a Square-Dalitz histogram from ordinary invariant coordinates."""
+    """Plot a Square-Dalitz histogram from ordinary invariant coordinates.
+
+    Set ``log_scale=True`` to display the bin contents with logarithmic color
+    normalization.
+    """
 
     data = sample.as_dict() if hasattr(sample, "as_dict") else sample
     mp, tp = invariants_to_square_dalitz(
@@ -130,6 +168,7 @@ def plot_square_dalitz(
         bins=bins,
         weights=weights,
         range=((0, 1), (0, 1)),
+        norm=LogNorm() if log_scale else None,
     )
     ax.set_xlabel(r"$m'$")
     ax.set_ylabel(r"$\theta'$")
