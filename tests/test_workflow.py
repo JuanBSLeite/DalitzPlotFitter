@@ -62,3 +62,10 @@ def test_fit_session_adds_external_constraints():
     base = FitSession(model, _data())
     constrained = base.with_constraint(constraint)
     assert jnp.allclose(constrained.objective({"NR.x": 1.2}) - base.objective({"NR.x": 1.2}), 0.5)
+
+
+def test_fit_session_projection_weights_reproduce_expected_events():
+    session = FitSession(_model(), _data())
+    components = session._projection_components({"NR.x": 1.0})
+    assert len(components) == 1
+    assert jnp.allclose(jnp.sum(jnp.asarray(components[0][2])), session.data.size, rtol=1e-6)
