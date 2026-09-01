@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import erf, pi, sqrt
 from typing import Mapping
 
 import jax.numpy as jnp
@@ -15,6 +14,11 @@ Parameters = Mapping[str, object]
 def _resolve(value: object, parameters: Parameters | None):
     resolver = getattr(value, "resolve", None)
     return resolver(parameters) if resolver is not None else value
+
+
+def jax_erf(x: Array) -> Array:
+    from jax.scipy.special import erf as _erf
+    return _erf(x)
 
 
 @dataclass(frozen=True)
@@ -32,14 +36,15 @@ class Gaussian1D:
             raise ValueError("Gaussian1D requires low < high")
 
     def __call__(self, x: Array, parameters: Parameters | None = None) -> Array:
+        x = jnp.asarray(x)
         mu = jnp.asarray(_resolve(self.mean, parameters))
         sigma = jnp.asarray(_resolve(self.sigma, parameters))
-        z = (jnp.asarray(x) - mu) / sigma
+        z = (x - mu) / sigma
         raw = jnp.exp(-0.5 * z**2) / (jnp.sqrt(2.0 * jnp.pi) * sigma)
         a = (self.low - mu) / (jnp.sqrt(2.0) * sigma)
         b = (self.high - mu) / (jnp.sqrt(2.0) * sigma)
         norm = 0.5 * (jax_erf(b) - jax_erf(a))
-        inside = (x >= self.low) & (x <= self.high) & (sigma > 0.0)
+        inside = (x >= self.low) & (x <= self.high) & (sigma > 0.0) & (norm > 0.0)
         return jnp.where(inside, jnp.clip(raw / norm, min=self.floor), 0.0)
 
 
@@ -67,13 +72,8 @@ class Exponential1D:
             (jnp.exp(slope * self.high) - jnp.exp(slope * self.low)) / slope,
         )
         raw = jnp.exp(slope * x)
-        inside = (x >= self.low) & (x <= self.high)
+        inside = (x >= self.low) & (x <= self.high) & (norm > 0.0)
         return jnp.where(inside, jnp.clip(raw / norm, min=self.floor), 0.0)
-
-
-def jax_erf(x: Array) -> Array:
-    from jax.scipy.special import erf as _erf
-    return _erf(x)
 
 
 @dataclass(frozen=True)
