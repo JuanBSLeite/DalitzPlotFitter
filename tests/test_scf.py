@@ -1,6 +1,12 @@
 import jax.numpy as jnp
 
-from dalitzplotfitter import SCFSignalPDF, SquareDalitzGrid, SquareDalitzSCFMap, enable_x64
+from dalitzplotfitter import (
+    FunctionalVeto,
+    SCFSignalPDF,
+    SquareDalitzGrid,
+    SquareDalitzSCFMap,
+    enable_x64,
+)
 from dalitzplotfitter.integration import GridIntegrator
 
 
@@ -68,6 +74,43 @@ def test_scf_signal_pdf_reduces_to_unsmeared_signal_for_identity_migration():
     expected = base / integrator.integrate(lambda d: intensity(d, {}))
 
     assert jnp.allclose(pdf(data, {}), expected, rtol=1e-12, atol=1e-12)
+
+
+def test_scf_veto_is_applied_in_reconstructed_space_and_renormalized():
+    grid = SquareDalitzGrid(
+        mother_mass=1.86966,
+        masses=(0.13957, 0.13957, 0.13957),
+        resolution=2,
+        pair=(0, 1),
+        quadrature="midpoint",
+    ).sample()
+    migration = jnp.asarray(
+        [
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+        ]
+    )
+    scf = _map(migration, jnp.ones(4) * 0.5)
+
+    veto = FunctionalVeto(lambda data: data["s13"] < jnp.median(grid.s13))
+
+    def intensity(data, parameters):
+        return jnp.ones_like(data["s12"])
+
+    pdf = SCFSignalPDF(
+        intensity=intensity,
+        integrator=GridIntegrator(grid),
+        scf_map=scf,
+        veto=veto,
+    )
+    data = scf.true_bin_data()
+    values = pdf(data, {})
+    accepted = veto(data)
+
+    assert jnp.all(values[~accepted] == 0.0)
+    assert pdf.normalization({}) > 0.0
 
 
 def test_scf_map_rejects_non_normalized_true_rows():
