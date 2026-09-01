@@ -210,5 +210,8 @@ The preferred method should be chosen from matrix-element accuracy versus number
 - `notebooks/16_laura_e791_genfit.ipynb`: E791 Fit 2 generation and unbinned
   coefficient-fit closure using the Laura++-style grid throughout the cached
   likelihood.
+- `notebooks/17_laura_e791_genfit_ensemble.ipynb`: configurable ensemble of
+  E791 Fit 2 pseudoexperiments for central-value bias and pull calibration with
+  Laura++-style normalization.
 
 `PhaseSpaceMC` is retained for generating event pools and pseudo-data.

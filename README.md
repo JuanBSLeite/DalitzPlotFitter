@@ -158,6 +158,9 @@ Current validation examples use deterministic grid normalization:
   including matrix-element convergence and direct/cache closure.
 - `notebooks/16_laura_e791_genfit.ipynb`: end-to-end E791 Fit 2 pseudo-data
   generation and Cartesian-coefficient fit with Laura++-style normalization.
+- `notebooks/17_laura_e791_genfit_ensemble.ipynb`: repeated E791 Fit 2
+  pseudoexperiment generation and fitting, with bias compatibility, fit-validity
+  and pull mean/width diagnostics.
 
 ## Coefficients
 
