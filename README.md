@@ -1,6 +1,6 @@
 # DalitzPlotFitter
 
-DalitzPlotFitter is a Python package under development for unbinned amplitude fits of three-body decays. The numerical pipeline is JAX end to end: phase-space generation, kinematics, amplitudes, normalization, likelihoods and gradients all run on the active JAX device. `iminuit` performs minimization and `particle` supplies standard particle properties.
+DalitzPlotFitter is a Python package under development for unbinned amplitude fits of three-body decays. The numerical pipeline is JAX end to end: phase-space generation, kinematics, amplitudes, normalization, likelihoods and gradients all run on the active JAX device. `iminuit` performs minimization, `particle` supplies standard particle properties, and `uproot` provides ROOT-file input without requiring PyROOT.
 
 There is no TensorFlow dependency or mixed TensorFlow/JAX numerical path.
 
@@ -45,6 +45,52 @@ Resonance(
 )
 ```
 
+## ROOT input with uproot
+
+ROOT files are supported directly through `uproot`, with no PyROOT dependency.
+
+A fit sample can be read from a TTree with
+
+```python
+from dalitzplotfitter import read_phase_space_sample
+
+data = read_phase_space_sample(
+    "data.root",
+    "DecayTree",
+    s12="S12",
+    s13="S13",
+    s23="S23",
+    weight="eventWeight",  # optional
+)
+```
+
+For arbitrary observables and branch renaming use `read_root_tree`. Optional `cut`, `entry_start` and `entry_stop` arguments are forwarded to uproot.
+
+ROOT TH2 maps can be converted directly into the package histogram models:
+
+```python
+from dalitzplotfitter import (
+    histogram_background_from_root,
+    histogram_efficiency_from_root,
+)
+
+efficiency = histogram_efficiency_from_root(
+    "maps.root",
+    "efficiency_s13_s23",
+    x_variable="s13",
+    y_variable="s23",
+)
+
+background = histogram_background_from_root(
+    "maps.root",
+    "background_s13_s23",
+    x_variable="s13",
+    y_variable="s23",
+)
+```
+
+See `docs/root_io.md` for details, including optional four-momentum branches.
+
 ## Normalization
 
 Amplitude and PDF normalization use deterministic quadrature. The supported
@@ -77,27 +123,7 @@ The quadrature sample is created lazily and reused for the lifetime of the model
 
 There is no Monte Carlo normalization path in the supported API.
 
-The mass-plane Gauss--Legendre implementation uses
-
-```python
-model = DecayModel(
-    channel,
-    components,
-    normalization_method="gauss-legendre",
-    normalization_bin_width=0.005,  # GeV; Laura++ default is 5 MeV
-)
-```
-
-It constructs a tensor-product rule in `m13` and `m23`,
-keeps the nodes inside the physical Dalitz boundary and includes the Jacobian
-`4*m13*m23`. The resulting sample is used unchanged by `SignalPDF` and
-`PreparedAmplitudeCache`, so direct and matrix normalizations share the same
-quadrature points and weights. Explicit `normalization_order_m13` and
-`normalization_order_m23` values can be supplied for convergence studies.
-
-This numerical prescription is the same base normalization method used by
-Laura++. The implementation name describes the quadrature and does not encode
-the name of the reference package.
+The mass-plane Gauss--Legendre implementation constructs a tensor-product rule in `m13` and `m23`, keeps the nodes inside the physical Dalitz boundary and includes the Jacobian `4*m13*m23`. The resulting sample is used unchanged by `SignalPDF` and `PreparedAmplitudeCache`, so direct and matrix normalizations share the same quadrature points and weights.
 
 Square-Dalitz normalization is selected with
 
@@ -111,9 +137,6 @@ model = DecayModel(
 )
 ```
 
-The former equal-area and adaptive normalization methods are not part of the
-supported first-version API.
-
 ## Component normalization convention
 
 Every dynamical component is normalized before applying its complex coefficient:
@@ -122,23 +145,23 @@ Every dynamical component is normalized before applying its complex coefficient:
 integral dPhi |F_j|^2 = 1
 ```
 
-This keeps coefficient scales stable when dynamical parameters such as resonance masses or widths float. Detector efficiency is excluded from the individual component normalization and enters only the total PDF normalization.
+Detector efficiency is excluded from the individual component normalization and enters only the total PDF normalization.
 
 ## Architecture
 
 ```text
-DecayChannel + amplitude-component declarations
-        -> particle masses / widths / spins
+ROOT TTree / arrays / generated sample
+        -> PhaseSpaceSample
+        -> DecayChannel + amplitude-component declarations
         -> pure-JAX kinematics
         -> resonance lineshape
         -> Blatt-Weisskopf factors
         -> angular factor
         -> automatic identical-particle symmetrization
         -> deterministic Gauss-Legendre or Square-Dalitz normalization
-        -> RealImag coefficient
         -> coherent amplitude
-        -> the same quadrature for PDF normalization
-        -> optional efficiency / veto / SCF / background mixture
+        -> optional ROOT/array efficiency maps
+        -> optional veto / SCF / background mixture
         -> optional factorized discriminating-variable PDFs
         -> optional external Gaussian constraints
         -> JAX NLL + automatic gradients
@@ -147,62 +170,23 @@ DecayChannel + amplitude-component declarations
 
 ## Additional discriminating variables
 
-Basic observables beyond the Dalitz plot can be added with factorized PDFs,
-for example reconstructed mass or a BDT output:
+Basic observables beyond the Dalitz plot can be added with factorized PDFs, for example reconstructed mass or a BDT output, using `FactorizedDensity`, `Gaussian1D`, `Exponential1D` and `Histogram1D`.
 
-```python
-from dalitzplotfitter import FactorizedDensity, Gaussian1D, Histogram1D
-
-signal_full = FactorizedDensity(
-    base_density=lambda values: signal_dp(data, values),
-    observables={"mass": mass, "bdt": bdt},
-    pdfs={
-        "mass": Gaussian1D(mass_mean, 0.014, 5.20, 5.35),
-        "bdt": Histogram1D(edges, signal_bdt_shape),
-    },
-)
-```
-
-This implements the usual approximation
+The factorized approximation is
 
 ```text
 P(DP, x1, x2, ...) = P(DP) P(x1) P(x2) ...
 ```
 
-for each signal or background category. `Gaussian1D`, `Exponential1D` and
-`Histogram1D` are normalized on their declared fit ranges.
+for each signal or background category.
 
 ## External constraints
 
-Gaussian external measurements can be added directly to any likelihood:
-
-```python
-from dalitzplotfitter import ConstrainedNLL, GaussianConstraint
-
-constraint = GaussianConstraint(signal_fraction, mean=0.70, sigma=0.04)
-constrained_nll = ConstrainedNLL(base_nll, constraint)
-```
-
-The Gaussian contributes, up to a parameter-independent constant,
-
-```text
-0.5 * ((x - mean)/sigma)^2
-```
-
-to the total NLL. Multiple constraints can be combined in the same
-`ConstrainedNLL`.
+Gaussian external measurements can be added directly to any likelihood with `GaussianConstraint` and `ConstrainedNLL`.
 
 ## Phase-space Monte Carlo is for toys only
 
 `PhaseSpaceMC` remains available for event/proposal generation. It implements three-body Lorentz-invariant phase space directly in JAX and returns the corresponding phase-space importance weight.
-
-Toy generation can use a weighted pool:
-
-```text
-w_target(k) = w_PS(k) |A(x_k; theta_gen)|^2
-```
-
-followed by `weighted_resample()`.
 
 `PhaseSpaceMC` is **not** used for amplitude or PDF normalization.
 
@@ -221,7 +205,9 @@ The repository contains a progressive set of end-to-end examples:
 - `notebooks/09_b2kpipi_veto_maps.ipynb`: Laura++-style mass-window and functional veto maps applied consistently to data, signal and background normalization;
 - `notebooks/10_b2kpipi_discriminating_variables.ipynb`: joint Dalitz + reconstructed-mass + BDT fit with factorized PDFs and mass/BDT projections;
 - `notebooks/11_b2kpipi_gaussian_constraints.ipynb`: external Gaussian constraint on a fit parameter, including an NLL scan showing the effect of the constraint;
-- `notebooks/12_b2kpipi_scf_with_veto.ipynb`: SCF migration combined with a veto applied in reconstructed Dalitz coordinates, with before/after density plots.
+- `notebooks/12_b2kpipi_scf_with_veto.ipynb`: SCF migration combined with a veto applied in reconstructed Dalitz coordinates;
+- `notebooks/13_b2kpipi_root_tree_input.ipynb`: synthetic ROOT TTree read with uproot and used directly as amplitude-fit input, with Dalitz and fitted projections;
+- `notebooks/14_b2kpipi_root_hist_eff_background.ipynb`: ROOT TH2 efficiency and background maps loaded into `HistogramEfficiency` and `HistogramBackground`, with map and projection plots.
 
 The B-to-Kpipi examples consistently use
 
@@ -234,32 +220,7 @@ for the particle ordering `(K+, pi+, pi-)`.
 
 ## Fit fractions
 
-Fit fractions are evaluated with the same component convention and
-normalization matrix used by the model:
-
-```python
-fractions = model.fit_fractions(fit_values)
-model.print_fit_fractions(
-    fit_values,
-    include_interference=True,
-)
-```
-
-The default gives physical fractions without detector efficiency. Supplying
-`efficiency=efficiency_model` gives acceptance-weighted fractions explicitly.
-Fit fractions need not sum to one because interference is coherent.
-
-## Coefficients
-
-The supported complex coefficient parameterization is
-
-```text
-c = x + i y
-```
-
-through `RealImag`. `x` and `y` may be constants or fit `Parameter` objects.
-
-Direct-CP examples use `CPRealImag` with shared CP-even and CP-odd Cartesian parameters.
+Fit fractions are evaluated with the same component convention and normalization matrix used by the model. The default gives physical fractions without detector efficiency; supplying an efficiency gives acceptance-weighted fractions explicitly.
 
 ## Installation
 
