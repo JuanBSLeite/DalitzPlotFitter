@@ -7,10 +7,12 @@ This module only composes them for common analysis workflows with less boilerpla
 from __future__ import annotations
 
 from dataclasses import dataclass, fields, is_dataclass, replace
+from functools import cached_property
 from pathlib import Path
 from typing import Mapping, Sequence
 
 import jax.numpy as jnp
+import numpy as np
 
 from dalitzplotfitter.background import BackgroundCategory
 from dalitzplotfitter.constraints import ConstrainedNLL
@@ -72,15 +74,14 @@ def _collect_parameters(value: object) -> tuple[Parameter, ...]:
     return ()
 
 
+def _resolve(value: object, parameters: Mapping[str, object]):
+    resolver = getattr(value, "resolve", None)
+    return resolver(parameters) if resolver is not None else value
+
+
 @dataclass(frozen=True)
 class FitSession:
-    """Compose a common single-sample amplitude fit in a few lines.
-
-    The session can include efficiency, vetoes, one or more backgrounds,
-    extended yields and external constraints. Background shapes supplied through
-    :class:`BackgroundSpec` are evaluated on the data and automatically
-    normalized with the model's deterministic quadrature sample.
-    """
+    """Compose a common single-sample amplitude fit in a few lines."""
 
     model: object
     data: PhaseSpaceSample
@@ -108,8 +109,6 @@ class FitSession:
         constraints: Sequence[object] = (),
         **root_kwargs,
     ) -> "FitSession":
-        """Create a fit session directly from a ROOT TTree."""
-
         data = read_phase_space_sample(file_path, tree, **root_kwargs)
         return cls(
             model=model,
@@ -152,7 +151,7 @@ class FitSession:
     def with_constraint(self, constraint: object) -> "FitSession":
         return replace(self, constraints=self.constraints + (constraint,))
 
-    @property
+    @cached_property
     def signal_pdf(self) -> SignalPDF:
         sample = self.model.normalization_sample
 
@@ -179,21 +178,14 @@ class FitSession:
     def _build_background(self, background: BackgroundSpec | BackgroundCategory) -> BackgroundCategory:
         if isinstance(background, BackgroundCategory):
             return background
-
         data_dict = self.data.as_dict()
-        norm_sample = (
-            self.model.normalization_sample
-            if background.normalization_sample is None
-            else background.normalization_sample
-        )
+        norm_sample = self.model.normalization_sample if background.normalization_sample is None else background.normalization_sample
         norm_dict = norm_sample.as_dict()
         data_values = self._evaluate_shape(background.shape, data_dict)
         norm_values = self._evaluate_shape(background.shape, norm_dict)
-
         if self.veto is not None and background.apply_veto:
             data_values = data_values * jnp.asarray(self.veto(data_dict), dtype=data_values.dtype)
             norm_values = norm_values * jnp.asarray(self.veto(norm_dict), dtype=norm_values.dtype)
-
         normalization = jnp.mean(jnp.asarray(norm_sample.weights) * norm_values)
         return BackgroundCategory(
             name=background.name,
@@ -203,26 +195,26 @@ class FitSession:
             yield_=background.yield_,
         )
 
-    @property
+    @cached_property
     def background_categories(self) -> tuple[BackgroundCategory, ...]:
         return tuple(self._build_background(background) for background in self.backgrounds)
 
-    @property
-    def objective(self):
+    @cached_property
+    def base_objective(self):
         data = self.data.as_dict()
-        signal_pdf = self.signal_pdf
-        backgrounds = self.background_categories
+        if not self.background_categories and not self.extended:
+            return UnbinnedNLL(self.signal_pdf.logpdf, data)
+        return MultiBackgroundNLL(
+            signal_density=lambda parameters: self.signal_pdf(data, parameters),
+            backgrounds=self.background_categories,
+            signal_fraction=self.signal_fraction,
+            extended=self.extended,
+            signal_yield=self.signal_yield,
+        )
 
-        if not backgrounds and not self.extended:
-            nll: object = UnbinnedNLL(signal_pdf.logpdf, data)
-        else:
-            nll = MultiBackgroundNLL(
-                signal_density=lambda parameters: signal_pdf(data, parameters),
-                backgrounds=backgrounds,
-                signal_fraction=self.signal_fraction,
-                extended=self.extended,
-                signal_yield=self.signal_yield,
-            )
+    @cached_property
+    def objective(self):
+        nll: object = self.base_objective
         if self.constraints:
             nll = ConstrainedNLL(nll, *self.constraints)
         return nll
@@ -234,7 +226,6 @@ class FitSession:
         candidates.extend(_collect_parameters(self.signal_yield))
         candidates.extend(_collect_parameters(self.backgrounds))
         candidates.extend(_collect_parameters(self.constraints))
-
         unique: dict[str, Parameter] = {}
         for parameter in candidates:
             previous = unique.get(parameter.name)
@@ -243,20 +234,8 @@ class FitSession:
             unique[parameter.name] = parameter
         return tuple(unique.values())
 
-    def minimizer(
-        self,
-        *,
-        tolerance: float = 1e-4,
-        verbose: int = 0,
-    ) -> Minimizer:
-        """Construct the configured iminuit/JAX minimizer."""
-
-        return Minimizer(
-            self.objective,
-            self.parameters,
-            tolerance=tolerance,
-            verbose=verbose,
-        )
+    def minimizer(self, *, tolerance: float = 1e-4, verbose: int = 0) -> Minimizer:
+        return Minimizer(self.objective, self.parameters, tolerance=tolerance, verbose=verbose)
 
     def fit(
         self,
@@ -267,8 +246,6 @@ class FitSession:
         tolerance: float = 1e-4,
         verbose: int = 0,
     ):
-        """Run a standard fit without manually constructing an NLL/minimizer."""
-
         return self.minimizer(tolerance=tolerance, verbose=verbose).fit(
             start_values=start_values,
             simplex=simplex,
@@ -285,8 +262,6 @@ class FitSession:
         tolerance: float = 1e-4,
         verbose: int = 0,
     ):
-        """Run the existing multistart machinery through the high-level session."""
-
         return self.minimizer(tolerance=tolerance, verbose=verbose).fit_multistart(
             n_starts=n_starts,
             seed=seed,
@@ -295,19 +270,12 @@ class FitSession:
         )
 
     def result_values(self, result) -> dict[str, float]:
-        """Return a complete parameter mapping, including fixed parameters."""
-
         values: dict[str, float] = {}
         for parameter in self.parameters:
-            if parameter.fixed:
-                values[parameter.name] = float(parameter.value)
-            else:
-                values[parameter.name] = float(result.values[parameter.name])
+            values[parameter.name] = float(parameter.value) if parameter.fixed else float(result.values[parameter.name])
         return values
 
     def print_result(self, result, *, precision: int = 6) -> dict[str, float]:
-        """Print a compact parameter table and return fitted values."""
-
         if precision < 0:
             raise ValueError("precision must be non-negative")
         values = self.result_values(result)
@@ -327,14 +295,126 @@ class FitSession:
         include_interference: bool = False,
         precision: int = 3,
     ):
-        """Print model fit fractions directly from a fit result."""
-
         return self.model.print_fit_fractions(
             self.result_values(result),
             efficiency=self.efficiency if acceptance_weighted else None,
             include_interference=include_interference,
             precision=precision,
         )
+
+    def report(
+        self,
+        result,
+        *,
+        include_fit_fractions: bool = True,
+        acceptance_weighted_fractions: bool = False,
+        include_correlation: bool = True,
+    ) -> dict[str, object]:
+        """Print and return a compact fit summary."""
+
+        values = self.print_result(result)
+        errors = {
+            p.name: (0.0 if p.fixed else float(result.errors[p.name])) for p in self.parameters
+        }
+        report: dict[str, object] = {
+            "valid": bool(result.valid),
+            "nll": float(result.fval),
+            "edm": float(result.fmin.edm),
+            "nfcn": int(result.nfcn),
+            "values": values,
+            "errors": errors,
+        }
+        if include_fit_fractions:
+            report["fit_fractions"] = self.print_fit_fractions(
+                result,
+                acceptance_weighted=acceptance_weighted_fractions,
+            )
+        if include_correlation and getattr(result, "covariance", None) is not None:
+            correlation = result.covariance.correlation()
+            free = [p.name for p in self.parameters if not p.fixed]
+            report["correlation"] = {
+                first: {second: float(correlation[first, second]) for second in free}
+                for first in free
+            }
+        return report
+
+    def _projection_components(
+        self, values: Mapping[str, float]
+    ) -> list[tuple[str, PhaseSpaceSample, np.ndarray]]:
+        norm = self.model.normalization_sample
+        signal_density = jnp.asarray(self.signal_pdf(norm.as_dict(), values))
+        if self.extended:
+            signal_scale = float(_resolve(self.signal_yield, values))
+        elif self.background_categories:
+            signal_scale = self.data.size * float(_resolve(self.signal_fraction, values))
+        else:
+            signal_scale = float(self.data.size)
+        components = [
+            (
+                "signal",
+                norm,
+                np.asarray(signal_scale * norm.weights * signal_density / norm.size),
+            )
+        ]
+        if not self.background_categories:
+            return components
+
+        if self.extended:
+            bg_scales = [float(_resolve(category.yield_, values)) for category in self.background_categories]
+        else:
+            bg_total = self.data.size * (1.0 - float(_resolve(self.signal_fraction, values)))
+            weights = np.asarray(self.base_objective.background_weights(values), dtype=float)
+            bg_scales = [bg_total * float(weight) for weight in weights]
+
+        for source, category, scale in zip(self.backgrounds, self.background_categories, bg_scales):
+            if not isinstance(source, BackgroundSpec):
+                continue
+            bg_norm_sample = source.normalization_sample or self.model.normalization_sample
+            raw = jnp.asarray(source.shape(bg_norm_sample.as_dict()))
+            if self.veto is not None and source.apply_veto:
+                raw = raw * jnp.asarray(self.veto(bg_norm_sample.as_dict()))
+            density = raw / category.normalization
+            components.append(
+                (
+                    category.name,
+                    bg_norm_sample,
+                    np.asarray(scale * bg_norm_sample.weights * density / bg_norm_sample.size),
+                )
+            )
+        return components
+
+    def plot_projection(
+        self,
+        result,
+        variable: str = "s13",
+        *,
+        bins: int = 60,
+        range: tuple[float, float] | None = None,
+        show_components: bool = True,
+        ax=None,
+    ):
+        """Plot data and fitted signal/background projections in event units."""
+
+        import matplotlib.pyplot as plt
+
+        values = self.result_values(result)
+        data_values = np.asarray(getattr(self.data, variable))
+        hist_range = range or (float(np.min(data_values)), float(np.max(data_values)))
+        edges = np.linspace(hist_range[0], hist_range[1], bins + 1)
+        if ax is None:
+            _, ax = plt.subplots(figsize=(7, 5))
+        ax.hist(data_values, bins=edges, histtype="step", label="data")
+        total = np.zeros(bins, dtype=float)
+        for name, sample, weights in self._projection_components(values):
+            counts, _ = np.histogram(np.asarray(getattr(sample, variable)), bins=edges, weights=weights)
+            total += counts
+            if show_components:
+                ax.stairs(counts, edges, label=name)
+        ax.stairs(total, edges, label="total fit", linewidth=2.0)
+        ax.set_xlabel(rf"${variable}$ [GeV$^2$]")
+        ax.set_ylabel("events / bin")
+        ax.legend()
+        return ax
 
 
 __all__ = ["BackgroundSpec", "FitSession"]
