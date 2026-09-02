@@ -39,6 +39,22 @@ def test_fit_session_signal_only_collects_model_parameters():
     assert jnp.isfinite(value)
 
 
+def test_fit_session_cold_fit_materializes_cache_before_jit():
+    session = FitSession(_model(), _data())
+
+    # This deliberately calls fit() without touching objective or signal_cache
+    # first.  The prepared cache must be built outside the Minimizer JIT trace.
+    result = session.fit(
+        {"NR.x": 0.9},
+        simplex=False,
+        ncall=100,
+    )
+
+    assert result.valid
+    assert "signal_cache" in session.__dict__
+    assert "acceptance_data" in session.__dict__
+
+
 def test_fit_session_cached_signal_matches_generic_pdf():
     session = FitSession(_model(), _data())
     values = {"NR.x": 1.3}
