@@ -3,29 +3,26 @@
 `generate_signal_toy`, `generate_toy` and `generate_cp_toy` generate unweighted pseudo-data. There are exactly two public sampling methods:
 
 ```text
-accept-reject
 inverse-transform
+accept-reject
 ```
 
-`accept-reject` remains the default because it is direct and follows the Laura++-style envelope logic. `inverse-transform` prepares numerical inverse CDFs on the physical Dalitz plane and is intended for fast generation, especially when many toys share the same truth parameters.
+`inverse-transform` is the default because it is dramatically faster for the full amplitude model while retaining continuous, duplicate-free events. `accept-reject` remains available explicitly as an independent reference and validation method.
 
-## Accept-reject
+## Default: inverse transform on the Dalitz plane
+
+The simplest call now uses inverse transform automatically:
 
 ```python
 toy = generate_toy(
     model,
     100_000,
     parameters=truth,
-    method="accept-reject",
-    seed=1,
+    seed=2,
 )
 ```
 
-The accept-reject implementation follows the Laura++ safety principle: if a proposal exceeds the current envelope, already accepted events from that component are discarded and generation restarts with a larger envelope. Probabilities are never clipped.
-
-The current accept-reject proposal is `PhaseSpaceMC`. A previous CPU benchmark on the full paper-inspired `B+ -> K+ pi+ pi-` model showed that this proposal is inefficient with one global envelope: 1,000,000 accepted events required about 116 million weighted phase-space proposals and approximately 96 s on GitHub Actions CPU. This is a proposal/envelope limitation rather than a problem with the accept-reject principle itself.
-
-## Inverse transform on the Dalitz plane
+This is equivalent to
 
 ```python
 toy = generate_toy(
@@ -86,9 +83,39 @@ The amplitude, efficiency and veto are evaluated on the CDF grid only during pre
 
 If model parameters change, the prepared generator must be rebuilt because the target CDFs change.
 
+## Accept-reject reference sampler
+
+```python
+toy = generate_toy(
+    model,
+    100_000,
+    parameters=truth,
+    method="accept-reject",
+    seed=1,
+)
+```
+
+The accept-reject implementation follows the Laura++ safety principle: if a proposal exceeds the current envelope, already accepted events from that component are discarded and generation restarts with a larger envelope. Probabilities are never clipped.
+
+The current accept-reject proposal is `PhaseSpaceMC`. It is intentionally retained as an independent validation path, but its single global envelope is inefficient for strongly structured amplitude models.
+
+## Performance
+
+On GitHub Actions CPU with the full paper-inspired `B+ -> K+ pi+ pi-` model and `inverse_resolution=1024`, the benchmark gave:
+
+| Events | Accept-reject | Inverse total | Inverse prepared |
+|---:|---:|---:|---:|
+| 10,000 | 3.49 s | 1.63 s | 0.0235 s |
+| 100,000 | 15.74 s | 1.84 s | 0.115 s |
+| 1,000,000 | 93.01 s | 3.28 s | 1.245 s |
+
+For one million events, inverse transform was about 28x faster including CDF preparation and about 75x faster once the sampler had already been prepared. The prepared rate was approximately `8.0e5 events/s` on CPU.
+
 ## Accuracy and validation
 
-Inverse-transform sampling is interpolated rather than analytically exact. Its numerical accuracy is controlled by the preparation resolution and must be validated against accept-reject with one- and two-dimensional closure tests. The repository benchmark compares the two methods using the full B+ -> K+ pi+ pi- model:
+Inverse-transform sampling is interpolated rather than analytically exact. Its numerical accuracy is controlled by the preparation resolution and should be validated against deterministic projections and the accept-reject reference sampler.
+
+The repository benchmark compares the two methods using the full B+ -> K+ pi+ pi- model:
 
 ```bash
 python benchmarks/benchmark_toy_generation.py --size 100000
@@ -109,7 +136,7 @@ The benchmark workflow is manual (`workflow_dispatch`) because the 1,000,000-eve
 
 `inverse_resolution` and `inverse_quantile_resolution` belong to `inverse-transform`.
 
-Passing `pool_size` or `batch_size` together with `method="inverse-transform"` is rejected rather than silently ignored.
+Passing `pool_size` or `batch_size` together with the default inverse-transform method is rejected rather than silently ignored. If those options are needed, set `method="accept-reject"` explicitly.
 
 ## Save a non-CP toy to ROOT
 
@@ -120,7 +147,6 @@ toy = generate_toy(
     model,
     100_000,
     parameters=truth,
-    method="inverse-transform",
     seed=1,
     output_root="toy.root",
 )
@@ -144,13 +170,12 @@ plus_toy, minus_toy = generate_cp_toy(
     minus_model,
     100_000,
     parameters=truth,
-    method="inverse-transform",
     seed=2,
     output_root="cp_toy.root",
 )
 ```
 
-The signal and background charge splits use the same deterministic accepted-integral convention as the accept-reject path. Both charges are written to the same `DecayTree`. A signed integer branch named `charge` identifies the sample:
+The signal and background charge splits use the same deterministic accepted-integral convention in both sampling paths. Both charges are written to the same `DecayTree`. A signed integer branch named `charge` identifies the sample:
 
 ```text
 charge = +1  -> B+
