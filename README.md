@@ -1,6 +1,6 @@
 # DalitzPlotFitter
 
-DalitzPlotFitter is a Python package under development for unbinned amplitude fits of three-body decays. The numerical pipeline is JAX end to end: phase-space generation, kinematics, amplitudes, normalization, likelihoods and gradients all run on the active JAX device. `iminuit` performs minimization, `particle` supplies standard particle properties, and `uproot` provides ROOT-file input without requiring PyROOT.
+DalitzPlotFitter is a Python package under development for unbinned amplitude fits of three-body decays. The numerical pipeline is JAX end to end: phase-space generation, kinematics, amplitudes, normalization, likelihoods and gradients all run on the active JAX device. `iminuit` performs minimization, `particle` supplies standard particle properties, and `uproot` provides ROOT-file input/output without requiring PyROOT.
 
 There is no TensorFlow dependency or mixed TensorFlow/JAX numerical path.
 
@@ -75,7 +75,19 @@ toy = generate_toy(
 )
 ```
 
-For simultaneous direct-CP pseudoexperiments, `generate_cp_toy` computes the accepted B+/B- charge split from the model integrals automatically:
+Toy samples can be written directly to ROOT:
+
+```python
+toy = generate_toy(
+    model,
+    100_000,
+    parameters=fit_values,
+    seed=3,
+    output_root="toy.root",
+)
+```
+
+For simultaneous direct-CP pseudoexperiments, `generate_cp_toy` computes the accepted B+/B- charge split from the model integrals automatically. When ROOT output is requested, both charges are written to one TTree with `charge=+1` for B+ and `charge=-1` for B-:
 
 ```python
 plus_toy, minus_toy = generate_cp_toy(
@@ -83,9 +95,12 @@ plus_toy, minus_toy = generate_cp_toy(
     minus_model,
     50_000,
     parameters=fit_values,
-    seed=3,
+    seed=4,
+    output_root="cp_toy.root",
 )
 ```
+
+See `docs/toy_generation.md` and `notebooks/19_toy_root_output.ipynb`.
 
 ## Simultaneous CP fits
 
@@ -125,7 +140,9 @@ plot_square_dalitz(
 )
 ```
 
-## ROOT input with uproot
+One-dimensional fitted projections use a separate weighted phase-space rendering sample so arbitrary histogram bins remain smooth. This rendering sample does not replace the deterministic quadrature used for likelihood normalization or fit fractions.
+
+## ROOT input/output with uproot
 
 ROOT files are supported directly through `uproot`, with no PyROOT dependency.
 
@@ -193,6 +210,37 @@ integral dPhi |F_j|^2 = 1
 
 Detector efficiency is excluded from individual component normalization and enters only total PDF normalization.
 
+## Detector-resolution convolution
+
+A generic one-dimensional convolution layer is available for continuously smeared observables. The same relativistic resonance lineshape used by the amplitude model can be converted into an isolated normalized intensity and convolved with a Gaussian detector response:
+
+```python
+from dalitzplotfitter import (
+    ConvolvedPDF1D,
+    GaussianResolution1D,
+    LineshapeIntensity1D,
+    RelativisticBreitWigner,
+)
+
+true_mass = LineshapeIntensity1D.from_context(
+    RelativisticBreitWigner(),
+    context,
+    quadrature_order=512,
+)
+
+reco_mass = ConvolvedPDF1D(
+    true_mass,
+    GaussianResolution1D(sigma=0.008),
+    true_low=true_mass.low,
+    true_high=true_mass.high,
+    observed_low=true_mass.low,
+    observed_high=true_mass.high,
+    quadrature_order=192,
+)
+```
+
+For interfering amplitudes, detector resolution must act on the full coherent intensity rather than on each component intensity independently. See `docs/convolution_resolution.md` and `notebooks/20_pdf_convolution_resolution.ipynb`.
+
 ## Architecture
 
 ```text
@@ -204,7 +252,7 @@ ROOT TTree / arrays / generated sample
         -> coherent amplitude
         -> optional ordinary-Dalitz or Square-Dalitz efficiency/background maps
         -> optional veto / SCF / multiple backgrounds
-        -> optional discriminating-variable PDFs
+        -> optional discriminating-variable PDFs / 1D resolution convolution
         -> optional Gaussian constraints
         -> FitSession / CPFitSession convenience layer (optional)
         -> JAX NLL + automatic gradients
@@ -221,9 +269,9 @@ Basic observables beyond the Dalitz plot can be added with factorized PDFs using
 
 Gaussian external measurements can be added with `GaussianConstraint` and `ConstrainedNLL`, or attached directly to a fit session.
 
-## Phase-space Monte Carlo is for toys only
+## Phase-space Monte Carlo
 
-`PhaseSpaceMC` remains available for event/proposal generation and is not used for amplitude or PDF normalization.
+`PhaseSpaceMC` is used for proposal/event generation and for weighted rendering samples used by smooth fitted projections. It is **not** used for amplitude/PDF normalization or fit fractions, which remain deterministic.
 
 ## Tutorial notebooks
 
@@ -245,8 +293,10 @@ The repository contains a progressive set of examples:
 - `notebooks/14_b2kpipi_root_hist_eff_background.ipynb`: ROOT TH2 maps in ordinary Dalitz coordinates;
 - `notebooks/15_b2kpipi_square_dalitz_eff_background.ipynb`: ROOT TH2 efficiency/background maps in `(m', theta')`;
 - `notebooks/16_user_friendly_quickstart.ipynb`: concise non-CP `FitSession` workflow;
-- `notebooks/17_b2kpipi_cp_user_friendly.ipynb`: concise `CPFitSession` workflow, automatic report and charge-separated fitted projections;
-- `notebooks/18_user_friendly_toy_generation.ipynb`: signal/background and CP pseudo-data generation in a few lines, with Dalitz and Square-Dalitz plots.
+- `notebooks/17_b2kpipi_cp_user_friendly.ipynb`: concise `CPFitSession` workflow and charge-separated fitted projections;
+- `notebooks/18_user_friendly_toy_generation.ipynb`: signal/background and CP pseudo-data generation;
+- `notebooks/19_toy_root_output.ipynb`: non-CP and CP toy generation with ROOT TTree output;
+- `notebooks/20_pdf_convolution_resolution.ipynb`: relativistic Breit-Wigner intensity convolved with Gaussian detector resolution.
 
 The B-to-Kpipi examples consistently use
 
