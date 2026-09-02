@@ -12,7 +12,7 @@ from .config import enable_x64
 from .constraints import ConstrainedNLL, GaussianConstraint
 from .cp_workflow import CPBackgroundSpec, CPFitSession
 from .decay import DalitzAmplitude, DecayChannel, DecayModel, NonResonant, Resonance
-from .discriminants import Exponential1D, FactorizedDensity, Gaussian1D, Histogram1D
+from .discriminants import BreitWigner1D, Exponential1D, FactorizedDensity, Gaussian1D, Histogram1D
 from .dynamics import (
     LASS,
     QMI,
@@ -82,7 +82,7 @@ from .veto import (
 from .workflow import BackgroundSpec, FitSession
 
 __all__ = [
-    "AmplitudeComponent", "BackgroundCategory", "BackgroundSpec", "CPBackgroundCategory",
+    "AmplitudeComponent", "BackgroundCategory", "BackgroundSpec", "BreitWigner1D", "CPBackgroundCategory",
     "CPBackgroundSpec", "CPFitSession", "CPToyBackground", "BaBarFlatte", "CPRealImag",
     "CoherentAmplitudeModel", "CompositeVeto", "ConstrainedNLL", "ConstantAmplitude",
     "ConvolvedPDF1D", "CovariantAngular", "CovariantKinematics", "DalitzAmplitude",
