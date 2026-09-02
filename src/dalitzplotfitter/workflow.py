@@ -289,6 +289,14 @@ class FitSession:
 
     @cached_property
     def base_objective(self):
+        # Materialize all parameter-independent signal arrays before the
+        # minimizer JIT traces the objective.  Creating a cached_property while
+        # tracing would otherwise store JAX tracers in the session and makes
+        # host-side cache validation (for example positive normalization
+        # diagonals) illegal inside the traced function.
+        _ = self.signal_cache
+        _ = self.acceptance_data
+
         data = self.data.as_dict()
         if not self.background_categories and not self.extended:
             return UnbinnedNLL(self._cached_signal_logpdf, data)
