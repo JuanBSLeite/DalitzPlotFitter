@@ -28,7 +28,7 @@ def test_breit_wigner_is_normalized_on_finite_interval():
     assert jnp.isclose(_trapz(pdf(x), x), 1.0, rtol=2e-4, atol=2e-4)
 
 
-def test_relativistic_lineshape_intensity_is_normalized():
+def test_relativistic_lineshape_intensity_uses_context_mass_range_and_is_normalized():
     context = ResonanceContext(
         parent_mass=5.27934,
         daughter_masses=(0.493677, 0.13957039),
@@ -39,11 +39,16 @@ def test_relativistic_lineshape_intensity_is_normalized():
         resonance_radius=4.0,
         parent_radius=4.0,
     )
-    pdf = LineshapeIntensity1D(
-        RelativisticBreitWigner(), context, low=0.64, high=1.20, order=512
+    pdf = LineshapeIntensity1D.from_context(
+        RelativisticBreitWigner(), context, order=512
     )
-    x = jnp.linspace(0.64, 1.20, 40001)
-    assert jnp.isclose(_trapz(pdf(x), x), 1.0, rtol=5e-4, atol=5e-4)
+    expected_low = 0.493677 + 0.13957039
+    expected_high = 5.27934 - 0.13957039
+    assert jnp.isclose(pdf.low, expected_low)
+    assert jnp.isclose(pdf.high, expected_high)
+
+    x = jnp.linspace(pdf.low, pdf.high, 60001)
+    assert jnp.isclose(_trapz(pdf(x), x), 1.0, rtol=8e-4, atol=8e-4)
     assert jnp.all(pdf(x) >= 0.0)
 
 
