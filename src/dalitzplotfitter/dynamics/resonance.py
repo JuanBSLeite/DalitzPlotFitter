@@ -20,8 +20,6 @@ from .context import ResonanceContext, resolve_value
 from .lineshape import (
     RelativisticBreitWigner,
     bachelor_momentum_resonance_frame,
-    blatt_weisskopf_denominator,
-    blatt_weisskopf_from_denominator,
     blatt_weisskopf_from_momenta,
     breakup_momentum,
     effective_pole_mass,
@@ -59,45 +57,6 @@ def _kinematics_prefix(
 
 def _lineshape_prepared_key(prefix: str) -> str:
     return f"{prefix}_lineshape_prepared"
-
-
-def _angular_prepared_key(prefix: str) -> str:
-    return f"{prefix}_angular_prepared"
-
-
-def _resonance_barrier_prepared_key(prefix: str) -> str:
-    return f"{prefix}_res_barrier_denominator"
-
-
-def _parent_barrier_prepared_key(prefix: str) -> str:
-    return f"{prefix}_parent_barrier_denominator"
-
-
-def _floating_parameter_key(value: object) -> str | None:
-    if not hasattr(value, "fixed") or bool(getattr(value, "fixed")):
-        return None
-    backend_name = getattr(value, "backend_name", None)
-    name = getattr(value, "name", None)
-    return backend_name or name
-
-
-def _mass_only_dynamic_key(context: ResonanceContext) -> str | None:
-    """Return the pole-mass backend key when it is the only floating context value."""
-
-    mass_key = _floating_parameter_key(context.pole_mass)
-    if mass_key is None:
-        return None
-    other_values = (
-        context.parent_mass,
-        *context.daughter_masses,
-        context.bachelor_mass,
-        context.pole_width,
-        context.resonance_radius,
-        context.parent_radius,
-    )
-    if any(_floating_parameter_key(value) is not None for value in other_values):
-        return None
-    return mass_key
 
 
 def _identical_permutations(
@@ -202,17 +161,11 @@ class ResonanceAmplitude:
         )
 
     def prepare_data(self, data: Mapping[str, Array]) -> dict[str, Array]:
-        """Attach parameter-independent kinematics and reusable dynamics factors."""
+        """Attach parameter-independent kinematics and lineshape response data."""
 
         prepared = dict(data)
         context = self.context.resolve(None)
         prepare_lineshape = getattr(self.lineshape, "prepare_mass", None)
-        mass_only_key = _mass_only_dynamic_key(self.context)
-        can_prepare_mass_only = (
-            mass_only_key is not None
-            and isinstance(self.lineshape, RelativisticBreitWigner)
-            and isinstance(self.angular, CovariantAngular)
-        )
         for daughter_key, partner_key, bachelor_key in self._pairings():
             prefix = _kinematics_prefix(daughter_key, partner_key, bachelor_key)
             if f"{prefix}_mass" in prepared:
@@ -246,25 +199,6 @@ class ResonanceAmplitude:
                     kin.resonance_mass,
                     context,
                 )
-
-            if can_prepare_mass_only:
-                angular_key = _angular_prepared_key(prefix)
-                if angular_key not in prepared:
-                    prepared[angular_key] = self.angular(kin, context)
-                res_barrier_key = _resonance_barrier_prepared_key(prefix)
-                if res_barrier_key not in prepared:
-                    prepared[res_barrier_key] = blatt_weisskopf_denominator(
-                        kin.q,
-                        int(context.spin),
-                        context.resonance_radius,
-                    )
-                parent_barrier_key = _parent_barrier_prepared_key(prefix)
-                if parent_barrier_key not in prepared:
-                    prepared[parent_barrier_key] = blatt_weisskopf_denominator(
-                        kin.p,
-                        int(context.spin),
-                        context.parent_radius,
-                    )
         return prepared
 
     def _evaluate_pairing(
@@ -295,40 +229,14 @@ class ResonanceAmplitude:
             pole_mass_for_momenta,
             context.bachelor_mass,
         )
+        x_res = blatt_weisskopf_from_momenta(
+            kin.q, q0, l, context.resonance_radius
+        )
+        x_parent = blatt_weisskopf_from_momenta(
+            kin.p, p0, l, context.parent_radius
+        )
 
         prefix = _kinematics_prefix(daughter_key, partner_key, bachelor_key)
-        mass_only_key = _mass_only_dynamic_key(self.context)
-        use_mass_only_prepared = (
-            mass_only_key is not None
-            and parameters is not None
-            and mass_only_key in parameters
-            and isinstance(lineshape, RelativisticBreitWigner)
-            and isinstance(angular_model, CovariantAngular)
-            and _resonance_barrier_prepared_key(prefix) in data
-            and _parent_barrier_prepared_key(prefix) in data
-            and _angular_prepared_key(prefix) in data
-        )
-        if use_mass_only_prepared:
-            x_res = blatt_weisskopf_from_denominator(
-                q0,
-                data[_resonance_barrier_prepared_key(prefix)],
-                l,
-                context.resonance_radius,
-            )
-            x_parent = blatt_weisskopf_from_denominator(
-                p0,
-                data[_parent_barrier_prepared_key(prefix)],
-                l,
-                context.parent_radius,
-            )
-        else:
-            x_res = blatt_weisskopf_from_momenta(
-                kin.q, q0, l, context.resonance_radius
-            )
-            x_parent = blatt_weisskopf_from_momenta(
-                kin.p, p0, l, context.parent_radius
-            )
-
         prepared_key = _lineshape_prepared_key(prefix)
         evaluate_prepared = getattr(lineshape, "evaluate_prepared", None)
         if evaluate_prepared is not None and prepared_key in data:
@@ -340,10 +248,7 @@ class ResonanceAmplitude:
         else:
             resonance = lineshape(kin.resonance_mass, context)
 
-        if use_mass_only_prepared:
-            angular = data[_angular_prepared_key(prefix)]
-        else:
-            angular = angular_model(kin, context)
+        angular = angular_model(kin, context)
         return resonance * x_parent * x_res * angular
 
     def __call__(
