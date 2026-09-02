@@ -23,7 +23,18 @@ Efficiency and veto values on the data and normalization sample are also evaluat
 
 ## Compact coefficient-only cache
 
-If no dynamical parameter is floating, `PreparedAmplitudeCache` uses a dedicated compact preparation path. Kinematic preparation, all fixed component evaluations, component normalization and construction of the final normalization matrix are traced as one JAX program and executed through a single `jax.jit` boundary. This avoids a long sequence of eager GPU kernel launches during cold start.
+If no dynamical parameter is floating, `PreparedAmplitudeCache` uses a dedicated compact preparation path. Fixed component evaluations, component normalization and construction of the normalization matrix are compiled with JAX, while the large normalization sample is processed in fixed-size chunks.
+
+The default normalization chunk size is 100,000 points. For a one-million-point Square-Dalitz grid, ten chunks therefore reuse the same XLA executable instead of compiling one very large graph specialized to one million points.
+
+The matrix is accumulated as sums over chunks,
+
+\[
+M_{ij}=\frac{1}{N}\sum_k\sum_{n\in k}
+ w_n F_i^*(x_n)F_j(x_n),
+\]
+
+so chunking changes only the execution schedule, not the quadrature convention. A partial final chunk is padded with a valid physical event and zero integration weights, so padded entries do not contribute.
 
 When no efficiency map is present, the bare component matrix is needed to normalize individual components. After obtaining scales
 
@@ -37,9 +48,11 @@ the normalized matrix is obtained algebraically as
 M'_{ij}=s_i M_{ij}s_j.
 \]
 
-The code therefore no longer performs a second full normalization-grid reduction after scaling. With an efficiency map, the efficiency-weighted matrix is still integrated explicitly because in general it cannot be derived from the bare matrix by per-component scaling alone.
+The code therefore does not perform a second full normalization-grid reduction after scaling. With an efficiency map, the efficiency-weighted matrix is accumulated explicitly because in general it cannot be derived from the bare matrix by per-component scaling alone.
 
-After preparation, the compact cache releases the large prepared normalization-event mapping and the per-point normalization component array. Only the data component matrix and the small fixed normalization matrix remain resident for coefficient-only minimization.
+After preparation, the compact cache releases the large prepared normalization-event mapping and the per-point normalization component array. Only the data component matrix, the small fixed normalization matrix and the per-component scales remain resident for coefficient-only minimization.
+
+The fixed model normalization is also retained by `DecayModel`. Subsequent `FitSession` objects using the same model but different datasets reuse the same normalization matrix and component scales and only evaluate the data-side amplitudes. This is particularly useful for toy, bootstrap and repeated-fit campaigns.
 
 If a mass, width, radius, lineshape parameter, or other `ParameterKind.DYNAMICS` quantity floats, the relevant prepared data are retained. Only components owned by floating dynamical parameters are reevaluated.
 
@@ -115,6 +128,30 @@ python benchmarks/benchmark_scf_migration.py \
 
 The output reports storage reduction, first JIT call, steady-state execution time and the sparse/dense speed ratio. The best representation can be device- and sparsity-dependent; sparse storage is primarily essential for controlling memory at fine binning.
 
+## Benchmarking cache compilation stages
+
+Use the dedicated cache-stage benchmark to separate XLA lowering, compilation and execution:
+
+```bash
+python benchmarks/benchmark_cache_stages.py \
+  --events 100000 \
+  --normalization-resolution 1000 \
+  --repeats 5
+```
+
+For the realistic five-component B+ -> K+ pi+ pi- model, one CUDA benchmark with one million normalization points showed the original full-grid normalization graph spending about 15.2 s in XLA compilation while the actual one-million-point execution took only about 0.25 s. This identified compilation, not arithmetic throughput, as the dominant cold-start cost.
+
+With 100,000-point normalization chunks, the same device measured approximately:
+
+- 3.18 s to compile the normalization chunk kernel;
+- 0.034 s for the first 100,000-point chunk execution;
+- 0.029 s per warm chunk;
+- about 0.43 s for a warm traversal of all ten chunks;
+- 1.30 s to compile the separate 100,000-event data kernel;
+- about 0.026 s for a warm 100,000-event data evaluation.
+
+These numbers are hardware- and load-dependent; they are provided as a representative diagnostic, not a guaranteed performance target.
+
 ## Benchmarking the full fit on the target GPU
 
 Use the realistic five-component B+ -> K+ pi+ pi- benchmark:
@@ -135,10 +172,13 @@ The JSON output reports:
 - phase-space data generation time;
 - `prepared_cache_seconds`, including first compact-cache compilation and execution;
 - `prepared_cache_reuse_seconds`, the cost of accessing the already prepared session cache;
+- preparation times for second and third datasets sharing the same `DecayModel` normalization;
 - first value+gradient time, which includes likelihood JIT compilation;
 - steady-state value+gradient timing after compilation;
 - whether the amplitude cache is compact;
 - minimum and maximum normalization-matrix diagonal values as a quick component-normalization sanity check.
+
+On the same representative CUDA setup with 100,000 data events and one million normalization points, the coefficient-only cache preparation improved from an initial baseline of about 28.95 s to about 7.24 s after compact-cache fusion, elimination of the redundant matrix reduction, model-level normalization reuse and chunked normalization compilation. The steady-state value+gradient time remained about 4.8 ms, and the normalized matrix diagonal stayed at unity to floating-point precision.
 
 The first compiled call should not be confused with steady-state fit throughput. GPU/XLA compilation can be significant, while subsequent iterations are much faster.
 
