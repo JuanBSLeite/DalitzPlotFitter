@@ -18,6 +18,8 @@ from dalitzplotfitter.observables import (
 
 from .components import AmplitudeComponent
 
+DEFAULT_NORMALIZATION_CHUNK_SIZE = 100_000
+
 
 def _component_scales(matrix: Array) -> Array:
     diagonal = jnp.real(jnp.diag(matrix))
@@ -47,13 +49,66 @@ def _scaled_matrix_from_raw(raw_matrix: Array, scales: Array) -> Array:
     return scales[:, None] * raw_matrix * scales[None, :]
 
 
-def _compact_normalization_kernel(
+def _padded_mapping_chunk(
+    data: Mapping[str, Array],
+    start: int,
+    stop: int,
+    chunk_size: int,
+) -> dict[str, Array]:
+    """Slice one normalization chunk and pad its tail with a valid event.
+
+    The accompanying padded integration weights are zero, so the repeated event
+    does not contribute to the integral. Repeating a physical point instead of
+    padding kinematic coordinates with zeros avoids evaluating resonance
+    dynamics at unphysical coordinates in the final partial chunk.
+    """
+
+    count = stop - start
+    if count < 1:
+        raise ValueError("normalization chunks must contain at least one point")
+    result: dict[str, Array] = {}
+    padding = chunk_size - count
+    for key, value in data.items():
+        array = jnp.asarray(value)
+        piece = array[start:stop]
+        if padding:
+            filler = jnp.broadcast_to(
+                piece[:1],
+                (padding,) + piece.shape[1:],
+            )
+            piece = jnp.concatenate((piece, filler), axis=0)
+        result[key] = piece
+    return result
+
+
+def _padded_vector_chunk(
+    values: Array,
+    start: int,
+    stop: int,
+    chunk_size: int,
+    *,
+    padding_value: float,
+) -> Array:
+    piece = jnp.asarray(values)[start:stop]
+    padding = chunk_size - (stop - start)
+    if padding:
+        filler = jnp.full((padding,), padding_value, dtype=piece.dtype)
+        piece = jnp.concatenate((piece, filler), axis=0)
+    return piece
+
+
+def _compact_normalization_chunk_kernel(
     components: tuple[AmplitudeComponent, ...],
     *,
-    normalize_components: bool,
     has_efficiency: bool,
 ):
-    """Build the normalization-only XLA program for coefficient-only fits."""
+    """Compile one fixed-size normalization chunk.
+
+    Returning matrix *sums* rather than means lets the caller combine an
+    arbitrary number of chunks and divide only once by the true total number of
+    quadrature points.  The physics is therefore identical to evaluating the
+    full normalization array in a single call.
+    """
 
     def kernel(normalization_data, weights, efficiency):
         prepared_norm = _prepare_component_data(components, normalization_data)
@@ -61,32 +116,110 @@ def _compact_normalization_kernel(
             [jnp.asarray(c.function(prepared_norm, None)) for c in components],
             axis=1,
         )
-        raw_matrix = normalization_matrix(raw_norm, weights, None)
+        raw_sum = jnp.einsum(
+            "n,ni,nj->ij",
+            weights,
+            jnp.conj(raw_norm),
+            raw_norm,
+        )
+        if has_efficiency:
+            efficient_sum = jnp.einsum(
+                "n,ni,nj->ij",
+                weights * efficiency,
+                jnp.conj(raw_norm),
+                raw_norm,
+            )
+        else:
+            efficient_sum = raw_sum
+        return raw_sum, efficient_sum
+
+    return jax.jit(kernel)
+
+
+def _compact_normalization_kernel(
+    components: tuple[AmplitudeComponent, ...],
+    *,
+    normalize_components: bool,
+    has_efficiency: bool,
+    chunk_size: int = DEFAULT_NORMALIZATION_CHUNK_SIZE,
+):
+    """Build a chunked normalization program for coefficient-only fits.
+
+    XLA compilation time grows strongly with the static normalization-array
+    shape.  Evaluating a million-point grid in fixed-size chunks keeps the
+    compiled graph at the much smaller chunk shape while preserving the exact
+    weighted matrix integral.  All chunks reuse the same executable.
+    """
+
+    if chunk_size < 1:
+        raise ValueError("normalization chunk_size must be positive")
+
+    chunk_kernel = _compact_normalization_chunk_kernel(
+        components,
+        has_efficiency=has_efficiency,
+    )
+
+    def kernel(normalization_data, weights, efficiency):
+        weights_array = jnp.asarray(weights)
+        n_points = int(weights_array.shape[0])
+        if n_points < 1:
+            raise ValueError("normalization sample must contain at least one point")
+        active_chunk_size = min(int(chunk_size), n_points)
+
+        raw_parts = []
+        efficient_parts = []
+        for start in range(0, n_points, active_chunk_size):
+            stop = min(start + active_chunk_size, n_points)
+            data_chunk = _padded_mapping_chunk(
+                normalization_data,
+                start,
+                stop,
+                active_chunk_size,
+            )
+            weight_chunk = _padded_vector_chunk(
+                weights_array,
+                start,
+                stop,
+                active_chunk_size,
+                padding_value=0.0,
+            )
+            efficiency_chunk = _padded_vector_chunk(
+                efficiency,
+                start,
+                stop,
+                active_chunk_size,
+                padding_value=1.0,
+            )
+            raw_part, efficient_part = chunk_kernel(
+                data_chunk,
+                weight_chunk,
+                efficiency_chunk,
+            )
+            raw_parts.append(raw_part)
+            efficient_parts.append(efficient_part)
+
+        raw_matrix = jnp.sum(jnp.stack(raw_parts, axis=0), axis=0) / n_points
+        efficient_matrix = (
+            jnp.sum(jnp.stack(efficient_parts, axis=0), axis=0) / n_points
+        )
 
         if normalize_components:
             scales, diagonal = _component_scales_unchecked(raw_matrix)
-            norm_components = raw_norm * scales
+            fixed_matrix = _scaled_matrix_from_raw(efficient_matrix, scales)
         else:
             scales = jnp.ones(
-                (raw_norm.shape[1],), dtype=jnp.real(raw_matrix).dtype
+                (raw_matrix.shape[0],),
+                dtype=jnp.real(raw_matrix).dtype,
             )
             diagonal = jnp.real(jnp.diag(raw_matrix))
-            norm_components = raw_norm
-
-        if has_efficiency:
-            fixed_matrix = normalization_matrix(
-                norm_components,
-                weights,
-                efficiency,
-            )
-        elif normalize_components:
-            fixed_matrix = _scaled_matrix_from_raw(raw_matrix, scales)
-        else:
-            fixed_matrix = raw_matrix
+            fixed_matrix = efficient_matrix
 
         return fixed_matrix, diagonal, scales
 
-    return jax.jit(kernel)
+    # Expose the reusable compiled chunk function for diagnostics/benchmarks.
+    kernel.chunk_kernel = chunk_kernel
+    kernel.chunk_size = int(chunk_size)
+    return kernel
 
 
 def _compact_data_kernel(
@@ -112,20 +245,15 @@ def _compact_prepare_kernel(
     *,
     normalize_components: bool,
     has_efficiency: bool,
+    normalization_chunk_size: int = DEFAULT_NORMALIZATION_CHUNK_SIZE,
 ):
-    """Compose smaller normalization- and data-side XLA programs.
-
-    Earlier versions placed both the data and normalization evaluation in one
-    JIT graph. That duplicated the complete resonance-dynamics graph inside XLA
-    and increased first-session compilation time. The split keeps the same
-    numerical operations but lets the compiler optimize two substantially
-    smaller programs.
-    """
+    """Compose normalization- and data-side coefficient-only programs."""
 
     normalization_kernel = _compact_normalization_kernel(
         components,
         normalize_components=normalize_components,
         has_efficiency=has_efficiency,
+        chunk_size=normalization_chunk_size,
     )
     data_kernel = _compact_data_kernel(
         components,
@@ -141,6 +269,8 @@ def _compact_prepare_kernel(
         data_components = data_kernel(data, scales)
         return data_components, fixed_matrix, diagonal, scales
 
+    kernel.normalization_kernel = normalization_kernel
+    kernel.data_kernel = data_kernel
     return kernel
 
 
@@ -148,11 +278,10 @@ def _compact_prepare_kernel(
 class PreparedAmplitudeCache:
     """Pre-evaluated amplitude components and normalization matrix.
 
-    The first coefficient-only cache prepares the model normalization and the
-    dataset amplitudes in separate XLA programs. Its tiny per-component scales
-    and fixed normalization matrix can then be reused by the parent
-    ``DecayModel`` so later datasets only need the data-side amplitude
-    evaluation.
+    The coefficient-only normalization is evaluated in fixed-size chunks to
+    bound XLA compilation cost.  Its tiny per-component scales and fixed
+    normalization matrix can then be reused by the parent ``DecayModel`` so
+    later datasets only need the data-side amplitude evaluation.
     """
 
     components: tuple[AmplitudeComponent, ...]
@@ -173,11 +302,13 @@ class PreparedAmplitudeCache:
         *,
         normalize_components: bool,
         has_efficiency: bool,
+        normalization_chunk_size: int = DEFAULT_NORMALIZATION_CHUNK_SIZE,
     ):
         return _compact_prepare_kernel(
             tuple(components),
             normalize_components=bool(normalize_components),
             has_efficiency=bool(has_efficiency),
+            normalization_chunk_size=int(normalization_chunk_size),
         )
 
     @staticmethod
@@ -247,6 +378,7 @@ class PreparedAmplitudeCache:
         efficiency_normalization: Array | None = None,
         normalize_components: bool = True,
         compact_prepare_kernel=None,
+        normalization_chunk_size: int = DEFAULT_NORMALIZATION_CHUNK_SIZE,
     ) -> "PreparedAmplitudeCache":
         components = tuple(components)
         parameters = tuple(parameters)
@@ -271,6 +403,7 @@ class PreparedAmplitudeCache:
                     components,
                     normalize_components=normalize_components,
                     has_efficiency=efficiency_normalization is not None,
+                    normalization_chunk_size=normalization_chunk_size,
                 )
             data_components, fixed_matrix, diagonal, scales = kernel(
                 data,
