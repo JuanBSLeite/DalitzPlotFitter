@@ -62,9 +62,9 @@ class Minimizer:
     cache, so when Minuit asks for both at identical parameters the expensive
     device evaluation and device-to-host synchronization occur only once.
 
-    A refined fit normally performs one MIGRAD followed by HESSE. A second
-    MIGRAD is used only if the first attempt is not valid, preserving the older
-    robust fallback without paying for it on already-converged fits.
+    The established strategy-2 refinement remains unchanged: refined fits run
+    two MIGRAD passes before HESSE. This deliberately preserves convergence and
+    numerical precision while the accelerator-side evaluation path is optimized.
 
     Verbosity levels are:
 
@@ -300,9 +300,7 @@ class Minimizer:
             minuit.simplex()
         minuit.migrad(ncall=ncall)
         if run_hesse:
-            if not bool(minuit.valid):
-                self._log("first MIGRAD was not valid; retrying before HESSE")
-                minuit.migrad(ncall=ncall)
+            minuit.migrad(ncall=ncall)
             minuit.hesse()
         return minuit
 
@@ -313,7 +311,7 @@ class Minimizer:
         simplex: bool = False,
         ncall: int | None = None,
     ):
-        """Run MIGRAD with a conditional retry, then HESSE."""
+        """Run the established strategy-2 MIGRAD refinement followed by HESSE."""
 
         ncall = self._validate_ncall(ncall)
         free, names, fcn, grad = self._backend()
