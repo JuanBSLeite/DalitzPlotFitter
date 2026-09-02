@@ -1,4 +1,7 @@
+import inspect
+
 import jax.numpy as jnp
+import pytest
 
 from dalitzplotfitter import (
     CPToyBackground,
@@ -24,10 +27,33 @@ def _model():
     )
 
 
+def test_accept_reject_is_default_toy_method():
+    assert inspect.signature(generate_signal_toy).parameters["method"].default == "accept-reject"
+    assert inspect.signature(generate_toy).parameters["method"].default == "accept-reject"
+    assert inspect.signature(generate_cp_toy).parameters["method"].default == "accept-reject"
+
+
 def test_generate_signal_toy_returns_requested_unweighted_size():
     toy = generate_signal_toy(_model(), 60, seed=10, pool_size=500)
     assert toy.size == 60
     assert jnp.allclose(toy.weights, 1.0)
+
+
+def test_generate_signal_toy_keeps_resample_fallback():
+    toy = generate_signal_toy(
+        _model(),
+        40,
+        seed=101,
+        pool_size=500,
+        method="resample",
+    )
+    assert toy.size == 40
+    assert jnp.allclose(toy.weights, 1.0)
+
+
+def test_generate_toy_rejects_unknown_sampling_method():
+    with pytest.raises(ValueError, match="method must be one of"):
+        generate_toy(_model(), 20, method="inverse")
 
 
 def test_generate_toy_supports_signal_background_mixture():
