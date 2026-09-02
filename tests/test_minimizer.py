@@ -42,6 +42,38 @@ def test_minimizer_reuses_compiled_backend_and_shared_value_gradient_point():
     assert math.isclose(fcn(1.5), 0.25, abs_tol=1e-12)
 
 
+def test_minimizer_reuses_backend_across_instances_for_same_objective():
+    parameter = Parameter("x", 0.0, bounds=(-5.0, 5.0))
+
+    def objective(values):
+        return (values["x"] - 1.0) ** 2
+
+    first = Minimizer(objective, (parameter,))
+    second = Minimizer(objective, (parameter,), tolerance=1e-6, verbose=1)
+    assert first._backend() is second._backend()
+
+
+def test_minimizer_does_not_share_backend_when_fixed_value_changes():
+    def objective(values):
+        return (values["x"] - values["offset"]) ** 2
+
+    first = Minimizer(
+        objective,
+        (
+            Parameter("x", 0.0, bounds=(-5.0, 5.0)),
+            Parameter("offset", 1.0, fixed=True),
+        ),
+    )
+    second = Minimizer(
+        objective,
+        (
+            Parameter("x", 0.0, bounds=(-5.0, 5.0)),
+            Parameter("offset", 2.0, fixed=True),
+        ),
+    )
+    assert first._backend() is not second._backend()
+
+
 def test_multistart_selects_global_minimum_of_multimodal_objective():
     parameters = (
         Parameter("x", -1.4, bounds=(-2.0, 2.0), step=0.05),
