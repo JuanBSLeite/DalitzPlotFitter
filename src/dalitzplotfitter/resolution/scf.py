@@ -10,6 +10,7 @@ reconstructed-bin phase-space area.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 
 import jax.numpy as jnp
 from jax import Array
@@ -24,6 +25,10 @@ from dalitzplotfitter.kinematics import (
 @dataclass(frozen=True)
 class SquareDalitzSCFMap:
     """Uniform Square-Dalitz SCF fraction and migration map.
+
+    Fixed Square-Dalitz bin centres, invariant coordinates and phase-space
+    areas are cached after their first construction.  They depend only on the
+    map geometry and therefore must not be rebuilt on every likelihood call.
 
     Parameters
     ----------
@@ -95,16 +100,23 @@ class SquareDalitzSCFMap:
     def bin_widths(self) -> tuple[float, float]:
         return 1.0 / self.bins_mprime, 1.0 / self.bins_thetaprime
 
-    def square_centers(self) -> tuple[Array, Array]:
-        mp = (jnp.arange(self.bins_mprime, dtype=jnp.float64) + 0.5) / self.bins_mprime
-        tp = (jnp.arange(self.bins_thetaprime, dtype=jnp.float64) + 0.5) / self.bins_thetaprime
+    @cached_property
+    def _square_centers(self) -> tuple[Array, Array]:
+        mp = (
+            jnp.arange(self.bins_mprime, dtype=jnp.float64) + 0.5
+        ) / self.bins_mprime
+        tp = (
+            jnp.arange(self.bins_thetaprime, dtype=jnp.float64) + 0.5
+        ) / self.bins_thetaprime
         grid_mp, grid_tp = jnp.meshgrid(mp, tp, indexing="ij")
         return grid_mp.reshape(-1), grid_tp.reshape(-1)
 
-    def true_bin_data(self) -> dict[str, Array]:
-        """Return invariant coordinates at the centres of all true bins."""
+    def square_centers(self) -> tuple[Array, Array]:
+        return self._square_centers
 
-        mp, tp = self.square_centers()
+    @cached_property
+    def _true_bin_data(self) -> dict[str, Array]:
+        mp, tp = self._square_centers
         s12, s13, s23 = square_dalitz_to_invariants(
             mp,
             tp,
@@ -114,15 +126,14 @@ class SquareDalitzSCFMap:
         )
         return {"s12": s12, "s13": s13, "s23": s23}
 
-    def phase_space_areas(self) -> Array:
-        """Approximate ``Delta Omega`` of every uniform SDP bin.
+    def true_bin_data(self) -> dict[str, Array]:
+        """Return cached invariant coordinates at all true-bin centres."""
 
-        For uniform ``m'``/``theta'`` binning this is
-        ``Delta m' Delta theta' |J|``, exactly the factor entering Laura++'s
-        discretized SCF expression.
-        """
+        return self._true_bin_data
 
-        mp, tp = self.square_centers()
+    @cached_property
+    def _phase_space_areas(self) -> Array:
+        mp, tp = self._square_centers
         jacobian = square_dalitz_jacobian(
             mp,
             tp,
@@ -132,6 +143,11 @@ class SquareDalitzSCFMap:
         )
         dmp, dtp = self.bin_widths
         return jacobian * dmp * dtp
+
+    def phase_space_areas(self) -> Array:
+        """Return cached ``Delta Omega`` for every uniform SDP bin."""
+
+        return self._phase_space_areas
 
     def bin_indices(self, mprime: Array, thetaprime: Array) -> Array:
         mp = jnp.asarray(mprime)
@@ -145,7 +161,10 @@ class SquareDalitzSCFMap:
         return i * self.bins_thetaprime + j
 
     def bin_indices_from_invariants(
-        self, s12: Array, s13: Array, s23: Array
+        self,
+        s12: Array,
+        s13: Array,
+        s23: Array,
     ) -> Array:
         mp, tp = invariants_to_square_dalitz(
             s12,
@@ -158,7 +177,10 @@ class SquareDalitzSCFMap:
         return self.bin_indices(mp, tp)
 
     def scf_fraction_at(
-        self, s12: Array, s13: Array, s23: Array
+        self,
+        s12: Array,
+        s13: Array,
+        s23: Array,
     ) -> Array:
         indices = self.bin_indices_from_invariants(s12, s13, s23)
         return self.scf_fraction[indices]
@@ -178,7 +200,7 @@ class SquareDalitzSCFMap:
             raise ValueError(
                 f"true_density must have shape ({self.n_bins},), got {density.shape}"
             )
-        areas = self.phase_space_areas()
+        areas = self._phase_space_areas
         true_scf_mass = self.scf_fraction * density * areas
         reco_scf_mass = self.migration.T @ true_scf_mass
         return jnp.where(areas > 0.0, reco_scf_mass / areas, 0.0)
