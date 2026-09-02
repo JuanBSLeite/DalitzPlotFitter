@@ -1,7 +1,7 @@
 """Benchmark preparation, JIT compilation and steady-state Dalitz-fit evaluation.
 
 This benchmark uses the realistic five-component B+ -> K+ pi+ pi- model used
-throughout the example notebooks.  It is intended to be run on the actual CPU
+throughout the example notebooks. It is intended to be run on the actual CPU
 or GPU used for fits; it does not form part of the unit-test suite.
 
 Example
@@ -107,11 +107,20 @@ def make_model(normalization_resolution: int) -> DecayModel:
     )
 
 
+def _block_tree(value):
+    """Synchronize every JAX array leaf so timings include device execution."""
+
+    for leaf in jax.tree_util.tree_leaves(value):
+        blocker = getattr(leaf, "block_until_ready", None)
+        if blocker is not None:
+            blocker()
+    return value
+
+
 def _seconds(function):
     start = time.perf_counter()
     result = function()
-    if hasattr(result, "block_until_ready"):
-        result.block_until_ready()
+    _block_tree(result)
     return result, time.perf_counter() - start
 
 
@@ -135,8 +144,10 @@ def main() -> None:
     )
     session = FitSession(model, data)
 
-    cache, cache_seconds = _seconds(lambda: session.signal_cache.data_components)
-    del cache
+    # This is the main cold-start metric. In coefficient-only fits it includes
+    # XLA compilation plus execution of the fused cache-preparation program.
+    cache, cache_seconds = _seconds(lambda: session.signal_cache)
+    _, cache_reuse_seconds = _seconds(lambda: session.signal_cache)
 
     minimizer = session.minimizer()
     free, names, fcn, grad = minimizer._backend()
@@ -159,6 +170,7 @@ def main() -> None:
         grad(*shifted)
         times.append(time.perf_counter() - start)
 
+    diagonal = jnp.real(jnp.diag(cache.normalization_matrix_fixed))
     payload = {
         "device": str(jax.devices()[0]),
         "platform": jax.default_backend(),
@@ -171,7 +183,10 @@ def main() -> None:
         "normalization_grid_seconds": normalization_seconds,
         "data_generation_seconds": data_seconds,
         "prepared_cache_seconds": cache_seconds,
-        "cache_is_compact": bool(session.signal_cache.is_compact),
+        "prepared_cache_reuse_seconds": cache_reuse_seconds,
+        "cache_is_compact": bool(cache.is_compact),
+        "normalization_matrix_diagonal_min": float(jnp.min(diagonal)),
+        "normalization_matrix_diagonal_max": float(jnp.max(diagonal)),
         "first_value_and_gradient_seconds": first_seconds,
         "steady_value_and_gradient_seconds_mean": float(jnp.mean(jnp.asarray(times))),
         "steady_value_and_gradient_seconds_min": float(jnp.min(jnp.asarray(times))),
