@@ -1,5 +1,7 @@
 import math
 
+import numpy as np
+
 from dalitzplotfitter import Minimizer, Parameter, enable_x64
 
 
@@ -23,6 +25,23 @@ def test_minimizer_recovers_quadratic_minimum_from_displaced_start():
     assert math.isclose(float(result.values["y"]), -0.75, abs_tol=1e-8)
 
 
+def test_minimizer_reuses_compiled_backend_and_shared_value_gradient_point():
+    parameter = Parameter("x", 0.0, bounds=(-5.0, 5.0))
+
+    def objective(values):
+        return (values["x"] - 2.0) ** 2
+
+    minimizer = Minimizer(objective, (parameter,))
+    backend1 = minimizer._backend()
+    backend2 = minimizer._backend()
+    assert backend1 is backend2
+
+    _, _, fcn, grad = backend1
+    assert math.isclose(fcn(1.5), 0.25, abs_tol=1e-12)
+    assert np.allclose(grad(1.5), np.asarray([-1.0]), rtol=0.0, atol=1e-12)
+    assert math.isclose(fcn(1.5), 0.25, abs_tol=1e-12)
+
+
 def test_multistart_selects_global_minimum_of_multimodal_objective():
     parameters = (
         Parameter("x", -1.4, bounds=(-2.0, 2.0), step=0.05),
@@ -42,7 +61,9 @@ def test_multistart_selects_global_minimum_of_multimodal_objective():
     assert len(scan.valid_results) >= 1
     assert float(scan.best.fval) < 1e-10
     assert math.isclose(float(scan.best.values["x"]), 1.0, abs_tol=1e-5)
-    assert float(scan.best.fval) <= min(float(result.fval) for result in scan.valid_results) + 1e-8
+    assert float(scan.best.fval) <= min(
+        float(result.fval) for result in scan.valid_results
+    ) + 1e-8
 
 
 def test_multistart_trial_does_not_depend_on_number_of_later_starts():
@@ -86,7 +107,11 @@ def test_multistart_trial_does_not_depend_on_number_of_later_starts():
         assert scan.starts[0] == reference_start
         result = scan.results[0]
         assert bool(result.valid) == bool(reference_result.valid)
-        assert math.isclose(float(result.fval), float(reference_result.fval), abs_tol=1e-12)
+        assert math.isclose(
+            float(result.fval),
+            float(reference_result.fval),
+            abs_tol=1e-12,
+        )
         for name in ("x", "y", "z"):
             assert math.isclose(
                 float(result.values[name]),
