@@ -10,9 +10,7 @@ from jax import Array
 
 from dalitzplotfitter.fit import Parameter, ParameterKind
 from dalitzplotfitter.integration import matrix_normalization, normalization_matrix
-from dalitzplotfitter.observables import (
-    fit_fractions as matrix_fit_fractions,
-)
+from dalitzplotfitter.observables import fit_fractions as matrix_fit_fractions
 from dalitzplotfitter.observables import (
     interference_fractions as matrix_interference_fractions,
 )
@@ -41,15 +39,22 @@ def _prepare_component_data(
 
 @dataclass(frozen=True)
 class PreparedAmplitudeCache:
-    """Pre-evaluated amplitude components and normalization matrix."""
+    """Pre-evaluated amplitude components and normalization matrix.
+
+    Coefficient-only fits use a compact representation: after preparation the
+    large prepared event/normalization mappings and normalization-component
+    matrix are released because only ``data_components`` and the fixed small
+    normalization matrix are needed during minimization.  Those large arrays are
+    retained only when at least one dynamical parameter floats.
+    """
 
     components: tuple[AmplitudeComponent, ...]
-    data: Mapping[str, Array]
-    normalization_data: Mapping[str, Array]
+    data: Mapping[str, Array] | None
+    normalization_data: Mapping[str, Array] | None
     normalization_weights: Array
     parameters: tuple[Parameter, ...]
     data_components: Array
-    normalization_components: Array
+    normalization_components: Array | None
     normalization_matrix_fixed: Array
     efficiency_normalization: Array | None = None
     normalize_components: bool = True
@@ -67,44 +72,48 @@ class PreparedAmplitudeCache:
         normalize_components: bool = True,
     ) -> "PreparedAmplitudeCache":
         components = tuple(components)
+        parameters = tuple(parameters)
         if not components:
             raise ValueError("At least one amplitude component is required")
 
-        data = _prepare_component_data(components, data)
-        normalization_data = _prepare_component_data(components, normalization_data)
+        prepared_data = _prepare_component_data(components, data)
+        prepared_norm = _prepare_component_data(components, normalization_data)
 
         raw_data = jnp.stack(
-            [jnp.asarray(c.function(data, None)) for c in components], axis=1
+            [jnp.asarray(c.function(prepared_data, None)) for c in components], axis=1
         )
         raw_norm = jnp.stack(
-            [jnp.asarray(c.function(normalization_data, None)) for c in components],
-            axis=1,
+            [jnp.asarray(c.function(prepared_norm, None)) for c in components], axis=1
         )
 
-        raw_component_matrix = normalization_matrix(
-            raw_norm, normalization_weights, None
-        )
+        weights = jnp.asarray(normalization_weights)
+        raw_component_matrix = normalization_matrix(raw_norm, weights, None)
         if normalize_components:
             scales = _component_scales(raw_component_matrix)
             data_components = raw_data * scales
-            normalization_components = raw_norm * scales
+            norm_components = raw_norm * scales
         else:
             data_components = raw_data
-            normalization_components = raw_norm
+            norm_components = raw_norm
 
         fixed_matrix = normalization_matrix(
-            normalization_components,
-            normalization_weights,
+            norm_components,
+            weights,
             efficiency_normalization,
+        )
+
+        has_floating_dynamics = any(
+            parameter.kind is ParameterKind.DYNAMICS and not parameter.fixed
+            for parameter in parameters
         )
         return cls(
             components=components,
-            data=data,
-            normalization_data=normalization_data,
-            normalization_weights=jnp.asarray(normalization_weights),
-            parameters=tuple(parameters),
+            data=prepared_data if has_floating_dynamics else None,
+            normalization_data=prepared_norm if has_floating_dynamics else None,
+            normalization_weights=weights,
+            parameters=parameters,
             data_components=data_components,
-            normalization_components=normalization_components,
+            normalization_components=(norm_components if has_floating_dynamics else None),
             normalization_matrix_fixed=fixed_matrix,
             efficiency_normalization=efficiency_normalization,
             normalize_components=normalize_components,
@@ -123,6 +132,12 @@ class PreparedAmplitudeCache:
         return frozenset(
             p.owner for p in self.floating_dynamics if p.owner is not None
         )
+
+    @property
+    def is_compact(self) -> bool:
+        """Whether large normalization-evaluation arrays were released."""
+
+        return not self.floating_dynamic_owners
 
     def coefficient_vector(self, fit_values: Mapping[str, object]) -> Array:
         return jnp.asarray(
@@ -151,11 +166,17 @@ class PreparedAmplitudeCache:
         return 1.0 / jnp.sqrt(integral)
 
     def _evaluate_components(
-        self, fit_values: Mapping[str, object]
-    ) -> tuple[Array, Array]:
+        self,
+        fit_values: Mapping[str, object],
+    ) -> tuple[Array, Array | None]:
         owners = self.floating_dynamic_owners
         if not owners:
-            return self.data_components, self.normalization_components
+            return self.data_components, None
+        if self.data is None or self.normalization_data is None:
+            raise RuntimeError("Dynamic cache is missing prepared event data")
+        if self.normalization_components is None:
+            raise RuntimeError("Dynamic cache is missing normalization components")
+
         data_columns = []
         norm_columns = []
         for i, component in enumerate(self.components):
@@ -174,28 +195,35 @@ class PreparedAmplitudeCache:
             norm_columns.append(norm_values)
         return jnp.stack(data_columns, axis=1), jnp.stack(norm_columns, axis=1)
 
-    def _matrix_with_dynamic_blocks(self, norm_components: Array) -> Array:
+    def _matrix_with_dynamic_blocks(self, norm_components: Array | None) -> Array:
         owners = self.floating_dynamic_owners
         if not owners:
             return self.normalization_matrix_fixed
+        if norm_components is None:
+            raise RuntimeError("Dynamic normalization components are required")
+
         dynamic_indices = tuple(
             i for i, component in enumerate(self.components) if component.name in owners
         )
+        index = jnp.asarray(dynamic_indices, dtype=jnp.int32)
+        dynamic = norm_components[:, index]
         weights = self._pdf_weights()
-        matrix = self.normalization_matrix_fixed
 
-        # One vectorized reduction per dynamic component instead of one full
-        # normalization-sample pass for every matrix element in its row.
-        for i in dynamic_indices:
-            fi = norm_components[:, i]
-            row = jnp.mean(
-                weights[:, None] * jnp.conj(fi)[:, None] * norm_components,
-                axis=0,
-            )
-            matrix = matrix.at[i, :].set(row)
-            matrix = matrix.at[:, i].set(jnp.conj(row))
-            # The diagonal is real by construction; avoid tiny round-off phases.
-            matrix = matrix.at[i, i].set(jnp.real(row[i]))
+        # Compute all rows touching floating components in one batched reduction.
+        # This replaces one normalization-grid reduction per floating component
+        # and maps efficiently to accelerator matrix operations.
+        rows = jnp.einsum(
+            "n,nd,nj->dj",
+            weights,
+            jnp.conj(dynamic),
+            norm_components,
+        ) / norm_components.shape[0]
+
+        matrix = self.normalization_matrix_fixed
+        matrix = matrix.at[index, :].set(rows)
+        matrix = matrix.at[:, index].set(jnp.conj(rows).T)
+        diagonal = jnp.real(rows[jnp.arange(index.shape[0]), index])
+        matrix = matrix.at[index, index].set(diagonal)
         return matrix
 
     def evaluate(self, fit_values: Mapping[str, object]) -> tuple[Array, Array]:
@@ -204,7 +232,8 @@ class PreparedAmplitudeCache:
         amplitude = data_components @ coefficients
         intensity = jnp.abs(amplitude) ** 2
         normalization = matrix_normalization(
-            coefficients, self._matrix_with_dynamic_blocks(norm_components)
+            coefficients,
+            self._matrix_with_dynamic_blocks(norm_components),
         )
         return intensity, normalization
 
@@ -220,7 +249,8 @@ class PreparedAmplitudeCache:
         coefficients = self.coefficient_vector(fit_values)
         _, norm_components = self._evaluate_components(fit_values)
         return matrix_normalization(
-            coefficients, self._matrix_with_dynamic_blocks(norm_components)
+            coefficients,
+            self._matrix_with_dynamic_blocks(norm_components),
         )
 
     def normalization_matrix(self, fit_values: Mapping[str, object]) -> Array:
