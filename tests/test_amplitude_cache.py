@@ -3,6 +3,7 @@ import jax.numpy as jnp
 from dalitzplotfitter import RealImag, enable_x64
 from dalitzplotfitter.amplitude import AmplitudeComponent, PreparedAmplitudeCache
 from dalitzplotfitter.fit import Parameter
+from dalitzplotfitter.integration import normalization_matrix
 
 
 enable_x64()
@@ -43,6 +44,10 @@ def test_coefficient_only_fit_never_reevaluates_dynamics():
         parameters=(*c1.parameters, *c2.parameters),
     )
     assert (f1.calls, f2.calls) == (2, 2)
+    assert cache.is_compact
+    assert cache.data is None
+    assert cache.normalization_data is None
+    assert cache.normalization_components is None
     intensity1, norm1 = cache.evaluate({"b.x": 0.4, "b.y": 0.1})
     intensity2, norm2 = cache.evaluate({"b.x": 0.8, "b.y": -0.5})
     assert (f1.calls, f2.calls) == (2, 2)
@@ -66,6 +71,7 @@ def test_only_component_with_floating_dynamics_is_reevaluated():
         normalization_weights=jnp.ones(32),
         parameters=(*c1.parameters, *c2.parameters, dynamic),
     )
+    assert not cache.is_compact
     assert (f1.calls, f2.calls) == (2, 2)
     cache.evaluate({"a.scale": 1.2, "b.x": 0.6, "b.y": 0.4})
     assert f1.calls == 4
@@ -109,3 +115,34 @@ def test_floating_component_is_renormalized_after_dynamic_change():
     matrix = cache._matrix_with_dynamic_blocks(norm_components)
     diagonal = jnp.real(jnp.diag(matrix))
     assert jnp.allclose(diagonal, jnp.ones(2), rtol=1e-12, atol=1e-12)
+
+
+def test_multiple_dynamic_rows_match_full_matrix_recomputation():
+    f1 = CountingAmplitude([1.0 + 0.0j, 2.0 - 0.2j, 0.3 + 0.4j])
+    f2 = CountingAmplitude([0.2 + 0.1j, 0.4 - 0.2j, -0.7 + 0.3j])
+    f3 = CountingAmplitude([0.8 - 0.4j, 0.1 + 0.6j, 0.5 + 0.2j])
+    c1 = _coefficient("a", 1.0, 0.0)
+    c2 = _coefficient("b", 0.5, 0.3)
+    c3 = _coefficient("c", 0.2, -0.1, fixed=True)
+    d1 = Parameter.dynamics("a.scale", 1.0, backend_name="scale", owner="a")
+    d2 = Parameter.dynamics("b.scale", 1.0, backend_name="scale", owner="b")
+    weights = jnp.linspace(0.5, 1.5, 48)
+    efficiency = jnp.linspace(0.7, 1.0, 48)
+    cache = PreparedAmplitudeCache.prepare(
+        (
+            AmplitudeComponent("a", f1, c1),
+            AmplitudeComponent("b", f2, c2),
+            AmplitudeComponent("c", f3, c3),
+        ),
+        data={"x": jnp.arange(12.0)},
+        normalization_data={"x": jnp.arange(48.0)},
+        normalization_weights=weights,
+        efficiency_normalization=efficiency,
+        parameters=(*c1.parameters, *c2.parameters, *c3.parameters, d1, d2),
+    )
+    _, norm_components = cache._evaluate_components(
+        {"a.scale": 1.4, "b.scale": 0.8}
+    )
+    matrix = cache._matrix_with_dynamic_blocks(norm_components)
+    expected = normalization_matrix(norm_components, weights, efficiency)
+    assert jnp.allclose(matrix, expected, rtol=1e-12, atol=1e-12)
