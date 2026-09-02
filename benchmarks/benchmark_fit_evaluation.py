@@ -12,8 +12,10 @@ python benchmarks/benchmark_fit_evaluation.py --events 100000 --normalization-re
 from __future__ import annotations
 
 import argparse
+from dataclasses import fields, is_dataclass
 import json
 import time
+from collections.abc import Mapping
 
 import jax
 import jax.numpy as jnp
@@ -33,6 +35,8 @@ from dalitzplotfitter import (
 
 
 enable_x64()
+
+_BENCHMARK_VERSION = 2
 
 
 def _coefficient(name: str, x: float, y: float, *, fixed: bool = False):
@@ -107,13 +111,43 @@ def make_model(normalization_resolution: int) -> DecayModel:
     )
 
 
-def _block_tree(value):
-    """Synchronize every JAX array leaf so timings include device execution."""
+def _block_tree(value, _seen: set[int] | None = None):
+    """Synchronize all device arrays reachable from a benchmark result.
 
-    for leaf in jax.tree_util.tree_leaves(value):
-        blocker = getattr(leaf, "block_until_ready", None)
-        if blocker is not None:
-            blocker()
+    JAX only traverses explicitly registered pytrees. Several fitter objects are
+    ordinary dataclasses, so relying on ``jax.tree_util.tree_leaves`` alone can
+    leave their arrays executing asynchronously and under-report timings. This
+    recursive walker handles dataclasses and standard containers explicitly.
+    """
+
+    if _seen is None:
+        _seen = set()
+
+    object_id = id(value)
+    if object_id in _seen:
+        return value
+    _seen.add(object_id)
+
+    blocker = getattr(value, "block_until_ready", None)
+    if blocker is not None:
+        blocker()
+        return value
+
+    if is_dataclass(value) and not isinstance(value, type):
+        for field in fields(value):
+            _block_tree(getattr(value, field.name), _seen)
+        return value
+
+    if isinstance(value, Mapping):
+        for item in value.values():
+            _block_tree(item, _seen)
+        return value
+
+    if isinstance(value, (tuple, list)):
+        for item in value:
+            _block_tree(item, _seen)
+        return value
+
     return value
 
 
@@ -138,7 +172,7 @@ def main() -> None:
 
     model = make_model(args.normalization_resolution)
 
-    _, normalization_seconds = _seconds(lambda: model.normalization_sample.weights)
+    _, normalization_seconds = _seconds(lambda: model.normalization_sample)
     data, data_seconds = _seconds(
         lambda: model.generate_phase_space(args.events, seed=args.seed)
     )
@@ -195,6 +229,7 @@ def main() -> None:
     second_diagonal = jnp.real(jnp.diag(second_cache.normalization_matrix_fixed))
     third_diagonal = jnp.real(jnp.diag(third_cache.normalization_matrix_fixed))
     payload = {
+        "benchmark_version": _BENCHMARK_VERSION,
         "device": str(jax.devices()[0]),
         "platform": jax.default_backend(),
         "jax_enable_x64": bool(jax.config.jax_enable_x64),
