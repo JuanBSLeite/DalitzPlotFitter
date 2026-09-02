@@ -63,11 +63,43 @@ as a five-term complex contraction rather than repeating a 5x5 linear solve for 
 
 Only five complex values per point are retained, rather than the full 5x5 inverse matrix. This keeps the GPU memory cost substantially lower while removing the dominant repeated K-matrix linear algebra. The ordinary standalone `KMatrix.amplitude_vector()` API still performs the full solve because it returns all five output channels.
 
-## SCF preparation
+## Sparse SCF migration
 
-`SquareDalitzSCFMap` caches its fixed Square-Dalitz bin centres, corresponding invariant coordinates, and phase-space areas. The dense migration matrix is still supported as before. Very fine SCF maps can remain memory intensive; a sparse migration representation is a separate future optimization because it changes storage and execution semantics.
+`SquareDalitzSCFMap` caches its fixed Square-Dalitz bin centres, invariant coordinates and phase-space areas. It now also supports sparse migration storage.
 
-## Benchmarking on the target GPU
+A dense migration matrix has memory complexity
+
+\[
+O(N_{\rm bin}^2),
+\]
+
+which becomes costly very quickly. A `100 x 100` Square-Dalitz map has 10,000 bins and therefore 100 million migration elements, or roughly 800 MB in float64.
+
+For local SCF migration, most of those elements are zero. `SparseMigration` stores only
+
+```text
+true bin index
+reconstructed bin index
+probability
+```
+
+for non-zero transitions, so memory becomes `O(nnz)`. Migration is evaluated with JAX gather/scatter operations and remains JIT-compatible and differentiable.
+
+Dense input remains supported. `SquareDalitzSCFMap(storage="auto")`, the default, compresses a dense matrix when its non-zero fraction is at most 25%. For very large maps, construct `SparseMigration` directly so the dense matrix never exists.
+
+A dedicated benchmark compares dense and sparse execution on the active JAX device:
+
+```bash
+python benchmarks/benchmark_scf_migration.py \
+  --bins-mprime 40 \
+  --bins-thetaprime 40 \
+  --neighbors 9 \
+  --repeats 50
+```
+
+The output reports storage reduction, first JIT call, steady-state execution time and the sparse/dense speed ratio. The best representation can be device- and sparsity-dependent; sparse storage is primarily essential for controlling memory at fine binning.
+
+## Benchmarking the full fit on the target GPU
 
 Use the realistic five-component B+ -> K+ pi+ pi- benchmark:
 
