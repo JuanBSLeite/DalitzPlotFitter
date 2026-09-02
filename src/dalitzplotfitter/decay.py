@@ -223,6 +223,8 @@ class DecayModel:
     _normalization_sample: PhaseSpaceSample | None
     _amplitude_model: CoherentAmplitudeModel | None
     _compact_prepare_kernels: dict[tuple[bool, bool], object]
+    _compact_data_kernels: dict[bool, object]
+    _fixed_normalization_templates: dict[bool, tuple[object, object]]
 
     def __init__(
         self,
@@ -267,6 +269,8 @@ class DecayModel:
         object.__setattr__(self, "_normalization_sample", None)
         object.__setattr__(self, "_amplitude_model", None)
         object.__setattr__(self, "_compact_prepare_kernels", {})
+        object.__setattr__(self, "_compact_data_kernels", {})
+        object.__setattr__(self, "_fixed_normalization_templates", {})
         if not self.components:
             raise ValueError("DecayModel requires at least one amplitude component")
         names = [component.name for component in self.components]
@@ -398,6 +402,17 @@ class DecayModel:
             self._compact_prepare_kernels[key] = kernel
         return kernel
 
+    def _compact_data_kernel(self, *, normalize_components: bool):
+        key = bool(normalize_components)
+        kernel = self._compact_data_kernels.get(key)
+        if kernel is None:
+            kernel = PreparedAmplitudeCache.build_compact_data_kernel(
+                self.amplitude_model.components,
+                normalize_components=normalize_components,
+            )
+            self._compact_data_kernels[key] = kernel
+        return kernel
+
     def generate_phase_space(self, size: int, *, seed: int | None = None) -> PhaseSpaceSample:
         return PhaseSpaceMC(self.channel.parent_mass, self.channel.daughter_masses).generate(size, seed=seed)
 
@@ -445,13 +460,41 @@ class DecayModel:
             parameter.kind is ParameterKind.DYNAMICS and not parameter.fixed
             for parameter in self.parameters
         )
+
+        # The common coefficient-only/no-efficiency case has a normalization
+        # that depends only on the model and its fixed quadrature sample. Cache
+        # the tiny scales and M_ij once, then later FitSessions evaluate only the
+        # new dataset amplitudes.
+        template_key = bool(normalize)
+        can_reuse_normalization = (
+            not has_floating_dynamics
+            and efficiency_normalization is None
+            and sample is self.normalization_sample
+        )
+        if can_reuse_normalization:
+            template = self._fixed_normalization_templates.get(template_key)
+            if template is not None:
+                scales, matrix = template
+                return PreparedAmplitudeCache.prepare_from_fixed_normalization(
+                    self.amplitude_model.components,
+                    data=data_sample.as_dict(),
+                    normalization_weights=sample.weights,
+                    parameters=self.parameters,
+                    normalization_matrix_fixed=matrix,
+                    component_scales=scales,
+                    normalize_components=normalize,
+                    compact_data_kernel=self._compact_data_kernel(
+                        normalize_components=normalize
+                    ),
+                )
+
         compact_kernel = None
         if not has_floating_dynamics:
             compact_kernel = self._compact_prepare_kernel(
                 normalize_components=normalize,
                 has_efficiency=efficiency_normalization is not None,
             )
-        return PreparedAmplitudeCache.prepare(
+        cache = PreparedAmplitudeCache.prepare(
             self.amplitude_model.components,
             data=data_sample.as_dict(),
             normalization_data=sample.as_dict(),
@@ -461,6 +504,12 @@ class DecayModel:
             normalize_components=normalize,
             compact_prepare_kernel=compact_kernel,
         )
+        if can_reuse_normalization:
+            self._fixed_normalization_templates[template_key] = (
+                cache.component_scales,
+                cache.normalization_matrix_fixed,
+            )
+        return cache
 
     def _fraction_cache(
         self,
