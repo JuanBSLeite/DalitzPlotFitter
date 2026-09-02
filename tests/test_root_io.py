@@ -24,11 +24,7 @@ def test_read_root_tree_and_phase_space(tmp_path):
             "W": np.asarray([1.0, 0.5, 2.0]),
         }
 
-    arrays = read_root_tree(
-        path,
-        "DecayTree",
-        {"s13": "S13", "weight": "W"},
-    )
+    arrays = read_root_tree(path, "DecayTree", {"s13": "S13", "weight": "W"})
     assert jnp.allclose(arrays["s13"], jnp.asarray([2.0, 2.1, 2.2]))
     assert jnp.allclose(arrays["weight"], jnp.asarray([1.0, 0.5, 2.0]))
 
@@ -56,6 +52,7 @@ def test_write_phase_space_sample(tmp_path):
     write_phase_space_sample(path, sample)
     with uproot.open(path) as root_file:
         tree = root_file["DecayTree"]
+        assert tree.classname == "TTree"
         assert tree.num_entries == 2
         arrays = tree.arrays(["s12", "s13", "s23", "weight"], library="np")
         assert np.allclose(arrays["s13"], [2.0, 2.1])
@@ -81,6 +78,7 @@ def test_write_cp_sample_uses_one_tree_with_charge_branch(tmp_path):
     with uproot.open(path) as root_file:
         assert "DecayTree" in root_file
         tree = root_file["DecayTree"]
+        assert tree.classname == "TTree"
         assert tree.num_entries == 5
         arrays = tree.arrays(["charge", "s13"], library="np")
         assert np.array_equal(arrays["charge"], np.asarray([1, 1, 1, -1, -1], dtype=np.int8))
