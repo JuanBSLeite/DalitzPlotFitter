@@ -85,8 +85,10 @@ def write_phase_space_samples(
 ) -> Path:
     """Write one or more ``PhaseSpaceSample`` objects to ROOT TTrees with uproot.
 
-    ``samples`` maps tree names to samples. The file is recreated atomically by
-    uproot, so an existing file at the same path is replaced.
+    ``samples`` maps tree names to samples. The file is recreated by uproot, so
+    an existing file at the same path is replaced. ``mktree`` is used explicitly
+    so the output remains a TTree even though recent uproot versions default to
+    RNTuple for dict-style assignment.
     """
 
     path = Path(file_path)
@@ -97,11 +99,12 @@ def write_phase_space_samples(
     path.parent.mkdir(parents=True, exist_ok=True)
     with uproot.recreate(path) as root_file:
         for tree, sample in samples.items():
-            root_file[str(tree)] = _sample_tree_arrays(
+            arrays = _sample_tree_arrays(
                 sample,
                 include_weights=include_weights,
                 include_momenta=include_momenta,
             )
+            root_file.mktree(str(tree), arrays)
     return path
 
 
