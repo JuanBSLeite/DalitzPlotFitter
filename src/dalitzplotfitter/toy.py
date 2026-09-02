@@ -13,6 +13,9 @@ from dalitzplotfitter.kinematics import PhaseSpaceSample
 from dalitzplotfitter.sampling import weighted_resample
 
 
+_TOY_METHODS = ("accept-reject", "resample")
+
+
 def _acceptance(efficiency, veto, data: dict[str, object]) -> jnp.ndarray:
     size = int(jnp.asarray(next(iter(data.values()))).shape[0])
     result = jnp.ones((size,), dtype=jnp.float64)
@@ -31,6 +34,22 @@ def _pool_size(size: int, pool_size: int | None) -> int:
     if pool_size <= 0:
         raise ValueError("pool_size must be positive")
     return int(pool_size)
+
+
+def _pilot_size(size: int, pool_size: int | None) -> int:
+    if size <= 0:
+        raise ValueError("toy size must be positive")
+    if pool_size is not None:
+        if pool_size <= 0:
+            raise ValueError("pool_size must be positive")
+        return int(pool_size)
+    return max(20_000, min(100_000, 2 * size))
+
+
+def _derived_seed(seed: int | None, offset: int) -> int | None:
+    if seed is None:
+        return None
+    return (int(seed) + int(offset)) % (2**32)
 
 
 def _merge_samples(samples: Sequence[PhaseSpaceSample]) -> PhaseSpaceSample:
@@ -60,6 +79,180 @@ def _merge_samples(samples: Sequence[PhaseSpaceSample]) -> PhaseSpaceSample:
         p1=concat("p1"),
         p2=concat("p2"),
         p3=concat("p3"),
+    )
+
+
+def _empty_sample(model, seed: int | None = None) -> PhaseSpaceSample:
+    sample = model.generate_phase_space(1, seed=seed)
+    return PhaseSpaceSample(
+        s12=sample.s12[:0],
+        s13=sample.s13[:0],
+        s23=sample.s23[:0],
+        weights=jnp.ones((0,), dtype=sample.s12.dtype),
+        p1=None if sample.p1 is None else sample.p1[:0],
+        p2=None if sample.p2 is None else sample.p2[:0],
+        p3=None if sample.p3 is None else sample.p3[:0],
+    )
+
+
+def _scores(pool: PhaseSpaceSample, density) -> np.ndarray:
+    values = np.asarray(
+        jax.device_get(jnp.asarray(pool.weights) * jnp.asarray(density)),
+        dtype=float,
+    )
+    if values.shape != (pool.size,):
+        raise ValueError(
+            f"toy density must return one value per event, got {values.shape} for {pool.size} events"
+        )
+    if np.any(~np.isfinite(values)) or np.any(values < 0.0):
+        raise ValueError("toy generation weights must be finite and non-negative")
+    return values
+
+
+def _accept_reject_component(
+    model,
+    size: int,
+    density_function,
+    *,
+    seed: int | None,
+    pool_size: int | None,
+    batch_size: int | None,
+    envelope_safety: float,
+    max_restarts: int,
+) -> PhaseSpaceSample:
+    """Generate one unweighted component with a Laura++-style envelope.
+
+    A pilot sample estimates the maximum proposal weight. If a later proposal
+    exceeds that envelope, all events accepted so far are discarded, the
+    envelope is enlarged, and generation restarts. This avoids clipping the
+    acceptance probability and therefore avoids the corresponding bias.
+    """
+
+    if size <= 0:
+        raise ValueError("toy size must be positive")
+    if envelope_safety <= 1.0:
+        raise ValueError("envelope_safety must be greater than one")
+    if max_restarts < 0:
+        raise ValueError("max_restarts must be non-negative")
+
+    n_pilot = _pilot_size(size, pool_size)
+    pilot = model.generate_phase_space(n_pilot, seed=_derived_seed(seed, 1))
+    pilot_scores = _scores(pilot, density_function(pilot.as_dict()))
+    observed_max = float(np.max(pilot_scores))
+    if observed_max <= 0.0:
+        raise ValueError("toy density is zero over the pilot phase-space sample")
+    envelope = envelope_safety * observed_max
+
+    estimated_efficiency = float(np.mean(pilot_scores) / envelope)
+    estimated_efficiency = min(max(estimated_efficiency, 1e-4), 1.0)
+    if batch_size is None:
+        batch_size = int(
+            min(
+                500_000,
+                max(4_096, np.ceil(1.25 * size / estimated_efficiency)),
+            )
+        )
+    elif batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    else:
+        batch_size = int(batch_size)
+
+    rng = np.random.default_rng(_derived_seed(seed, 913_579))
+    accepted: list[PhaseSpaceSample] = []
+    n_accepted = 0
+    restarts = 0
+    proposal_index = 0
+
+    while n_accepted < size:
+        proposal_index += 1
+        if proposal_index > 10_000:
+            raise RuntimeError("accept-reject toy generation did not converge")
+
+        pool = model.generate_phase_space(
+            batch_size,
+            seed=_derived_seed(seed, 10_000 + proposal_index),
+        )
+        score = _scores(pool, density_function(pool.as_dict()))
+        batch_max = float(np.max(score))
+
+        if batch_max > envelope:
+            restarts += 1
+            if restarts > max_restarts:
+                raise RuntimeError(
+                    "accept-reject envelope was exceeded too many times; "
+                    "increase pool_size or envelope_safety"
+                )
+            envelope = envelope_safety * batch_max
+            accepted.clear()
+            n_accepted = 0
+            continue
+
+        probabilities = score / envelope
+        indices = np.flatnonzero(rng.random(pool.size) < probabilities)
+        if indices.size == 0:
+            continue
+        needed = size - n_accepted
+        selected = indices[:needed]
+        accepted.append(pool.take(jnp.asarray(selected)))
+        n_accepted += int(selected.size)
+
+    toy = _merge_samples(accepted)
+    if toy.size != size:
+        raise RuntimeError("internal accept-reject toy generation count mismatch")
+    return toy
+
+
+def _resample_component(
+    model,
+    size: int,
+    density_function,
+    *,
+    seed: int | None,
+    pool_size: int | None,
+) -> PhaseSpaceSample:
+    n_pool = _pool_size(size, pool_size)
+    pool = model.generate_phase_space(n_pool, seed=seed)
+    weights = _scores(pool, density_function(pool.as_dict()))
+    return weighted_resample(
+        jax.random.key(0 if seed is None else (int(seed) + 1) % (2**32)),
+        pool,
+        jnp.asarray(weights),
+        size,
+        replace=True,
+    )
+
+
+def _sample_component(
+    model,
+    size: int,
+    density_function,
+    *,
+    method: str,
+    seed: int | None,
+    pool_size: int | None,
+    batch_size: int | None,
+    envelope_safety: float,
+    max_restarts: int,
+) -> PhaseSpaceSample:
+    if method not in _TOY_METHODS:
+        raise ValueError(f"method must be one of {_TOY_METHODS}, got {method!r}")
+    if method == "resample":
+        return _resample_component(
+            model,
+            size,
+            density_function,
+            seed=seed,
+            pool_size=pool_size,
+        )
+    return _accept_reject_component(
+        model,
+        size,
+        density_function,
+        seed=seed,
+        pool_size=pool_size,
+        batch_size=batch_size,
+        envelope_safety=envelope_safety,
+        max_restarts=max_restarts,
     )
 
 
@@ -142,20 +335,38 @@ def generate_signal_toy(
     veto=None,
     seed: int | None = None,
     pool_size: int | None = None,
+    method: str = "accept-reject",
+    batch_size: int | None = None,
+    envelope_safety: float = 1.20,
+    max_restarts: int = 10,
 ) -> PhaseSpaceSample:
-    """Generate unweighted signal pseudo-data from an already configured model."""
+    """Generate unweighted signal pseudo-data from a configured model.
 
-    n_pool = _pool_size(size, pool_size)
-    pool = model.generate_phase_space(n_pool, seed=seed)
-    data = pool.as_dict()
+    ``method='accept-reject'`` is the default and follows the Laura++ strategy.
+    ``pool_size`` is then the pilot-sample size used to estimate the envelope.
+    ``method='resample'`` retains the previous fixed-pool weighted-resampling
+    implementation, where ``pool_size`` has its historical meaning.
+    """
+
     values = {} if parameters is None else parameters
-    weights = (
-        jnp.asarray(pool.weights)
-        * _acceptance(efficiency, veto, data)
-        * jnp.asarray(model.intensity(data, values))
+
+    def signal_density(data):
+        return (
+            _acceptance(efficiency, veto, data)
+            * jnp.asarray(model.intensity(data, values))
+        )
+
+    return _sample_component(
+        model,
+        size,
+        signal_density,
+        method=method,
+        seed=seed,
+        pool_size=pool_size,
+        batch_size=batch_size,
+        envelope_safety=envelope_safety,
+        max_restarts=max_restarts,
     )
-    key = jax.random.key(0 if seed is None else int(seed) + 1)
-    return weighted_resample(key, pool, weights, size, replace=True)
 
 
 def generate_toy(
@@ -170,12 +381,16 @@ def generate_toy(
     seed: int | None = None,
     pool_size: int | None = None,
     shuffle: bool = True,
+    method: str = "accept-reject",
+    batch_size: int | None = None,
+    envelope_safety: float = 1.20,
+    max_restarts: int = 10,
 ) -> PhaseSpaceSample:
     """Generate signal or signal+background pseudo-data in one call.
 
-    ``signal_fraction`` is the total signal fraction. Background ``fraction``
-    values describe the relative composition of the total background, with the
-    final background acting as the remainder.
+    Accept-reject is the default. The envelope is checked while generating; if
+    it is exceeded, accepted events from that component are discarded and the
+    generation restarts with a larger envelope rather than clipping weights.
     """
 
     if not 0.0 <= float(signal_fraction) <= 1.0:
@@ -185,8 +400,9 @@ def generate_toy(
         raise ValueError("signal_fraction < 1 requires at least one background")
     if backgrounds and float(signal_fraction) >= 1.0:
         raise ValueError("backgrounds require signal_fraction < 1")
+    if method not in _TOY_METHODS:
+        raise ValueError(f"method must be one of {_TOY_METHODS}, got {method!r}")
 
-    n_pool = _pool_size(size, pool_size)
     rng = np.random.default_rng(seed)
     n_signal = int(rng.binomial(size, float(signal_fraction))) if backgrounds else size
     n_background = size - n_signal
@@ -196,51 +412,62 @@ def generate_toy(
         if n_background > 0
         else np.zeros(len(backgrounds), dtype=int)
     )
-
-    pool = model.generate_phase_space(n_pool, seed=seed)
-    data = pool.as_dict()
     values = {} if parameters is None else parameters
-    accepted = _acceptance(efficiency, veto, data)
     samples: list[PhaseSpaceSample] = []
 
     if n_signal > 0:
-        signal_weights = (
-            jnp.asarray(pool.weights)
-            * accepted
-            * jnp.asarray(model.intensity(data, values))
-        )
+        def signal_density(data):
+            return (
+                _acceptance(efficiency, veto, data)
+                * jnp.asarray(model.intensity(data, values))
+            )
+
         samples.append(
-            weighted_resample(
-                jax.random.key(1 if seed is None else int(seed) + 1),
-                pool,
-                signal_weights,
+            _sample_component(
+                model,
                 n_signal,
-                replace=True,
+                signal_density,
+                method=method,
+                seed=_derived_seed(seed, 1),
+                pool_size=pool_size,
+                batch_size=batch_size,
+                envelope_safety=envelope_safety,
+                max_restarts=max_restarts,
             )
         )
 
     for index, (background, count) in enumerate(zip(backgrounds, bg_counts)):
         if int(count) == 0:
             continue
-        background_weights = jnp.asarray(pool.weights) * jnp.asarray(background.shape(data))
-        if veto is not None and background.apply_veto:
-            background_weights = background_weights * jnp.asarray(veto(data))
+
+        def background_density(data, background=background):
+            result = jnp.asarray(background.shape(data))
+            if veto is not None and background.apply_veto:
+                result = result * jnp.asarray(veto(data))
+            return result
+
         samples.append(
-            weighted_resample(
-                jax.random.key((10 if seed is None else int(seed) + 10) + index),
-                pool,
-                background_weights,
+            _sample_component(
+                model,
                 int(count),
-                replace=True,
+                background_density,
+                method=method,
+                seed=_derived_seed(seed, 100 + index),
+                pool_size=pool_size,
+                batch_size=batch_size,
+                envelope_safety=envelope_safety,
+                max_restarts=max_restarts,
             )
         )
 
     toy = _merge_samples(samples)
     if shuffle and toy.size > 1:
-        indices = jax.random.permutation(
-            jax.random.key(100 if seed is None else int(seed) + 100), toy.size
+        toy = toy.take(
+            jax.random.permutation(
+                jax.random.key(100 if seed is None else (int(seed) + 100) % (2**32)),
+                toy.size,
+            )
         )
-        toy = toy.take(indices)
         toy = PhaseSpaceSample(
             s12=toy.s12,
             s13=toy.s13,
@@ -279,12 +506,16 @@ def generate_cp_toy(
     seed: int | None = None,
     pool_size: int | None = None,
     shuffle: bool = True,
+    method: str = "accept-reject",
+    batch_size: int | None = None,
+    envelope_safety: float = 1.20,
+    max_restarts: int = 10,
 ) -> tuple[PhaseSpaceSample, PhaseSpaceSample]:
     """Generate a simultaneous ``(B+, B-)`` pseudoexperiment.
 
-    Signal and background charge splits are computed from their deterministic
-    accepted integrals, so the generated charge asymmetry follows the same joint
-    normalization convention used by ``CPJointNLL``.
+    Signal/background charge splits continue to come from deterministic accepted
+    integrals. Within each charge and category, unweighted candidates are now
+    generated with accept-reject by default.
     """
 
     if not 0.0 <= float(signal_fraction) <= 1.0:
@@ -294,9 +525,10 @@ def generate_cp_toy(
         raise ValueError("signal_fraction < 1 requires at least one CP background")
     if backgrounds and float(signal_fraction) >= 1.0:
         raise ValueError("CP backgrounds require signal_fraction < 1")
+    if method not in _TOY_METHODS:
+        raise ValueError(f"method must be one of {_TOY_METHODS}, got {method!r}")
 
     values = {} if parameters is None else parameters
-    n_pool = _pool_size(size, pool_size)
     rng = np.random.default_rng(seed)
     n_signal = int(rng.binomial(size, float(signal_fraction))) if backgrounds else size
     n_background = size - n_signal
@@ -314,51 +546,54 @@ def generate_cp_toy(
         else np.zeros(len(backgrounds), dtype=int)
     )
 
-    plus_pool = plus_model.generate_phase_space(n_pool, seed=seed)
-    minus_pool = minus_model.generate_phase_space(
-        n_pool, seed=None if seed is None else int(seed) + 1
-    )
-    plus_data = plus_pool.as_dict()
-    minus_data = minus_pool.as_dict()
     plus_samples: list[PhaseSpaceSample] = []
     minus_samples: list[PhaseSpaceSample] = []
 
     if n_signal_plus > 0:
-        plus_signal_weights = (
-            jnp.asarray(plus_pool.weights)
-            * _acceptance(plus_efficiency, plus_veto, plus_data)
-            * jnp.asarray(plus_model.intensity(plus_data, values))
-        )
+        def plus_signal_density(data):
+            return (
+                _acceptance(plus_efficiency, plus_veto, data)
+                * jnp.asarray(plus_model.intensity(data, values))
+            )
+
         plus_samples.append(
-            weighted_resample(
-                jax.random.key(1 if seed is None else int(seed) + 2),
-                plus_pool,
-                plus_signal_weights,
+            _sample_component(
+                plus_model,
                 n_signal_plus,
-                replace=True,
+                plus_signal_density,
+                method=method,
+                seed=_derived_seed(seed, 10),
+                pool_size=pool_size,
+                batch_size=batch_size,
+                envelope_safety=envelope_safety,
+                max_restarts=max_restarts,
             )
         )
+
     if n_signal_minus > 0:
-        minus_signal_weights = (
-            jnp.asarray(minus_pool.weights)
-            * _acceptance(minus_efficiency, minus_veto, minus_data)
-            * jnp.asarray(minus_model.intensity(minus_data, values))
-        )
+        def minus_signal_density(data):
+            return (
+                _acceptance(minus_efficiency, minus_veto, data)
+                * jnp.asarray(minus_model.intensity(data, values))
+            )
+
         minus_samples.append(
-            weighted_resample(
-                jax.random.key(2 if seed is None else int(seed) + 3),
-                minus_pool,
-                minus_signal_weights,
+            _sample_component(
+                minus_model,
                 n_signal_minus,
-                replace=True,
+                minus_signal_density,
+                method=method,
+                seed=_derived_seed(seed, 20),
+                pool_size=pool_size,
+                batch_size=batch_size,
+                envelope_safety=envelope_safety,
+                max_restarts=max_restarts,
             )
         )
 
     for index, (background, count) in enumerate(zip(backgrounds, bg_counts)):
         if int(count) == 0:
             continue
-        plus_shape = jnp.asarray(background.plus_shape(plus_data))
-        minus_shape = jnp.asarray(background.resolved_minus_shape(minus_data))
         plus_norm_sample = plus_model.normalization_sample
         minus_norm_sample = minus_model.normalization_sample
         plus_norm_data = plus_norm_sample.as_dict()
@@ -367,55 +602,66 @@ def generate_cp_toy(
         j_minus_values = jnp.asarray(background.resolved_minus_shape(minus_norm_data))
         if background.apply_veto:
             if plus_veto is not None:
-                plus_shape = plus_shape * jnp.asarray(plus_veto(plus_data))
                 j_plus_values = j_plus_values * jnp.asarray(plus_veto(plus_norm_data))
             if minus_veto is not None:
-                minus_shape = minus_shape * jnp.asarray(minus_veto(minus_data))
                 j_minus_values = j_minus_values * jnp.asarray(minus_veto(minus_norm_data))
         j_plus = float(jnp.mean(jnp.asarray(plus_norm_sample.weights) * j_plus_values))
         j_minus = float(jnp.mean(jnp.asarray(minus_norm_sample.weights) * j_minus_values))
         plus_probability = j_plus / (j_plus + j_minus)
         count_plus = int(rng.binomial(int(count), plus_probability))
         count_minus = int(count) - count_plus
+
         if count_plus > 0:
+            def plus_background_density(data, background=background):
+                result = jnp.asarray(background.plus_shape(data))
+                if background.apply_veto and plus_veto is not None:
+                    result = result * jnp.asarray(plus_veto(data))
+                return result
+
             plus_samples.append(
-                weighted_resample(
-                    jax.random.key((20 if seed is None else int(seed) + 20) + index),
-                    plus_pool,
-                    jnp.asarray(plus_pool.weights) * plus_shape,
+                _sample_component(
+                    plus_model,
                     count_plus,
-                    replace=True,
-                )
-            )
-        if count_minus > 0:
-            minus_samples.append(
-                weighted_resample(
-                    jax.random.key((40 if seed is None else int(seed) + 40) + index),
-                    minus_pool,
-                    jnp.asarray(minus_pool.weights) * minus_shape,
-                    count_minus,
-                    replace=True,
+                    plus_background_density,
+                    method=method,
+                    seed=_derived_seed(seed, 100 + index),
+                    pool_size=pool_size,
+                    batch_size=batch_size,
+                    envelope_safety=envelope_safety,
+                    max_restarts=max_restarts,
                 )
             )
 
-    def finish(samples: list[PhaseSpaceSample], key_seed: int) -> PhaseSpaceSample:
-        if not samples:
-            empty_pool = plus_pool if key_seed == 0 else minus_pool
-            return PhaseSpaceSample(
-                s12=empty_pool.s12[:0],
-                s13=empty_pool.s13[:0],
-                s23=empty_pool.s23[:0],
-                weights=jnp.ones((0,), dtype=empty_pool.s12.dtype),
-                p1=None if empty_pool.p1 is None else empty_pool.p1[:0],
-                p2=None if empty_pool.p2 is None else empty_pool.p2[:0],
-                p3=None if empty_pool.p3 is None else empty_pool.p3[:0],
+        if count_minus > 0:
+            def minus_background_density(data, background=background):
+                result = jnp.asarray(background.resolved_minus_shape(data))
+                if background.apply_veto and minus_veto is not None:
+                    result = result * jnp.asarray(minus_veto(data))
+                return result
+
+            minus_samples.append(
+                _sample_component(
+                    minus_model,
+                    count_minus,
+                    minus_background_density,
+                    method=method,
+                    seed=_derived_seed(seed, 200 + index),
+                    pool_size=pool_size,
+                    batch_size=batch_size,
+                    envelope_safety=envelope_safety,
+                    max_restarts=max_restarts,
+                )
             )
+
+    def finish(samples: list[PhaseSpaceSample], model, key_seed: int) -> PhaseSpaceSample:
+        if not samples:
+            return _empty_sample(model, _derived_seed(seed, 500 + key_seed))
         toy = _merge_samples(samples)
         if shuffle and toy.size > 1:
             toy = toy.take(
                 jax.random.permutation(
                     jax.random.key(
-                        (200 if seed is None else int(seed) + 200) + key_seed
+                        (200 if seed is None else int(seed) + 200 + key_seed) % (2**32)
                     ),
                     toy.size,
                 )
@@ -431,8 +677,8 @@ def generate_cp_toy(
             )
         return toy
 
-    plus_toy = finish(plus_samples, 0)
-    minus_toy = finish(minus_samples, 1)
+    plus_toy = finish(plus_samples, plus_model, 0)
+    minus_toy = finish(minus_samples, minus_model, 1)
     if plus_toy.size + minus_toy.size != size:
         raise RuntimeError("internal CP toy generation count mismatch")
     return plus_toy, minus_toy
