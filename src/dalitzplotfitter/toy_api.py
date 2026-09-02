@@ -10,12 +10,32 @@ from dalitzplotfitter.kinematics import PhaseSpaceSample
 from dalitzplotfitter.toy import (
     CPToyBackground,
     ToyBackground,
-    generate_cp_toy as _generate_cp_toy,
-    generate_signal_toy as _generate_signal_toy,
-    generate_toy as _generate_toy,
+    generate_cp_toy as _generate_cp_toy_accept,
+    generate_signal_toy as _generate_signal_toy_accept,
+    generate_toy as _generate_toy_accept,
+)
+from dalitzplotfitter.toy_inverse import (
+    PreparedInverseToyGenerator,
+    generate_cp_toy_inverse,
+    generate_signal_toy_inverse,
+    generate_toy_inverse,
+    prepare_inverse_toy_generator,
 )
 
 PathLike = str | Path
+_PUBLIC_METHODS = ("accept-reject", "inverse-transform")
+
+
+def _validate_method(method: str) -> None:
+    if method not in _PUBLIC_METHODS:
+        raise ValueError(f"method must be one of {_PUBLIC_METHODS}, got {method!r}")
+
+
+def _validate_inverse_options(method: str, pool_size: int | None, batch_size: int | None) -> None:
+    if method == "inverse-transform" and pool_size is not None:
+        raise ValueError("pool_size applies only to method='accept-reject'")
+    if method == "inverse-transform" and batch_size is not None:
+        raise ValueError("batch_size applies only to method='accept-reject'")
 
 
 def generate_signal_toy(
@@ -31,26 +51,42 @@ def generate_signal_toy(
     batch_size: int | None = None,
     envelope_safety: float = 1.20,
     max_restarts: int = 10,
+    inverse_resolution: int = 1024,
+    inverse_quantile_resolution: int | None = None,
     output_root: PathLike | None = None,
     output_tree: str = "DecayTree",
     root_include_weights: bool = True,
     root_include_momenta: bool = True,
 ) -> PhaseSpaceSample:
-    """Generate a signal toy and optionally persist it to one ROOT TTree."""
+    """Generate an unweighted signal toy with accept-reject or inverse transform."""
 
-    toy = _generate_signal_toy(
-        model,
-        size,
-        parameters=parameters,
-        efficiency=efficiency,
-        veto=veto,
-        seed=seed,
-        pool_size=pool_size,
-        method=method,
-        batch_size=batch_size,
-        envelope_safety=envelope_safety,
-        max_restarts=max_restarts,
-    )
+    _validate_method(method)
+    _validate_inverse_options(method, pool_size, batch_size)
+    if method == "inverse-transform":
+        toy = generate_signal_toy_inverse(
+            model,
+            size,
+            parameters=parameters,
+            efficiency=efficiency,
+            veto=veto,
+            seed=seed,
+            resolution=inverse_resolution,
+            quantile_resolution=inverse_quantile_resolution,
+        )
+    else:
+        toy = _generate_signal_toy_accept(
+            model,
+            size,
+            parameters=parameters,
+            efficiency=efficiency,
+            veto=veto,
+            seed=seed,
+            pool_size=pool_size,
+            method="accept-reject",
+            batch_size=batch_size,
+            envelope_safety=envelope_safety,
+            max_restarts=max_restarts,
+        )
     if output_root is not None:
         write_phase_space_sample(
             output_root,
@@ -78,29 +114,48 @@ def generate_toy(
     batch_size: int | None = None,
     envelope_safety: float = 1.20,
     max_restarts: int = 10,
+    inverse_resolution: int = 1024,
+    inverse_quantile_resolution: int | None = None,
     output_root: PathLike | None = None,
     output_tree: str = "DecayTree",
     root_include_weights: bool = True,
     root_include_momenta: bool = True,
 ) -> PhaseSpaceSample:
-    """Generate a toy and optionally persist it to one ROOT TTree with uproot."""
+    """Generate signal/background pseudo-data with one of two sampling methods."""
 
-    toy = _generate_toy(
-        model,
-        size,
-        parameters=parameters,
-        efficiency=efficiency,
-        veto=veto,
-        signal_fraction=signal_fraction,
-        backgrounds=backgrounds,
-        seed=seed,
-        pool_size=pool_size,
-        shuffle=shuffle,
-        method=method,
-        batch_size=batch_size,
-        envelope_safety=envelope_safety,
-        max_restarts=max_restarts,
-    )
+    _validate_method(method)
+    _validate_inverse_options(method, pool_size, batch_size)
+    if method == "inverse-transform":
+        toy = generate_toy_inverse(
+            model,
+            size,
+            parameters=parameters,
+            efficiency=efficiency,
+            veto=veto,
+            signal_fraction=signal_fraction,
+            backgrounds=backgrounds,
+            seed=seed,
+            shuffle=shuffle,
+            resolution=inverse_resolution,
+            quantile_resolution=inverse_quantile_resolution,
+        )
+    else:
+        toy = _generate_toy_accept(
+            model,
+            size,
+            parameters=parameters,
+            efficiency=efficiency,
+            veto=veto,
+            signal_fraction=signal_fraction,
+            backgrounds=backgrounds,
+            seed=seed,
+            pool_size=pool_size,
+            shuffle=shuffle,
+            method="accept-reject",
+            batch_size=batch_size,
+            envelope_safety=envelope_safety,
+            max_restarts=max_restarts,
+        )
     if output_root is not None:
         write_phase_space_sample(
             output_root,
@@ -131,37 +186,55 @@ def generate_cp_toy(
     batch_size: int | None = None,
     envelope_safety: float = 1.20,
     max_restarts: int = 10,
+    inverse_resolution: int = 1024,
+    inverse_quantile_resolution: int | None = None,
     output_root: PathLike | None = None,
     output_tree: str = "DecayTree",
     charge_branch: str = "charge",
     root_include_weights: bool = True,
     root_include_momenta: bool = True,
 ) -> tuple[PhaseSpaceSample, PhaseSpaceSample]:
-    """Generate a CP toy and optionally save both charges in one ROOT TTree.
+    """Generate a CP toy and optionally save both charges in one ROOT TTree."""
 
-    The ROOT convention is ``charge=+1`` for the B+ sample and ``charge=-1``
-    for the B- sample. The in-memory return value remains ``(plus, minus)``.
-    """
-
-    plus_toy, minus_toy = _generate_cp_toy(
-        plus_model,
-        minus_model,
-        size,
-        parameters=parameters,
-        plus_efficiency=plus_efficiency,
-        minus_efficiency=minus_efficiency,
-        plus_veto=plus_veto,
-        minus_veto=minus_veto,
-        signal_fraction=signal_fraction,
-        backgrounds=backgrounds,
-        seed=seed,
-        pool_size=pool_size,
-        shuffle=shuffle,
-        method=method,
-        batch_size=batch_size,
-        envelope_safety=envelope_safety,
-        max_restarts=max_restarts,
-    )
+    _validate_method(method)
+    _validate_inverse_options(method, pool_size, batch_size)
+    if method == "inverse-transform":
+        plus_toy, minus_toy = generate_cp_toy_inverse(
+            plus_model,
+            minus_model,
+            size,
+            parameters=parameters,
+            plus_efficiency=plus_efficiency,
+            minus_efficiency=minus_efficiency,
+            plus_veto=plus_veto,
+            minus_veto=minus_veto,
+            signal_fraction=signal_fraction,
+            backgrounds=backgrounds,
+            seed=seed,
+            shuffle=shuffle,
+            resolution=inverse_resolution,
+            quantile_resolution=inverse_quantile_resolution,
+        )
+    else:
+        plus_toy, minus_toy = _generate_cp_toy_accept(
+            plus_model,
+            minus_model,
+            size,
+            parameters=parameters,
+            plus_efficiency=plus_efficiency,
+            minus_efficiency=minus_efficiency,
+            plus_veto=plus_veto,
+            minus_veto=minus_veto,
+            signal_fraction=signal_fraction,
+            backgrounds=backgrounds,
+            seed=seed,
+            pool_size=pool_size,
+            shuffle=shuffle,
+            method="accept-reject",
+            batch_size=batch_size,
+            envelope_safety=envelope_safety,
+            max_restarts=max_restarts,
+        )
     if output_root is not None:
         write_cp_phase_space_sample(
             output_root,
@@ -177,8 +250,10 @@ def generate_cp_toy(
 
 __all__ = [
     "CPToyBackground",
+    "PreparedInverseToyGenerator",
     "ToyBackground",
     "generate_cp_toy",
     "generate_signal_toy",
     "generate_toy",
+    "prepare_inverse_toy_generator",
 ]
