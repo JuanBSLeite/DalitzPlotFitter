@@ -8,6 +8,8 @@ from .root import (
     read_root_tree,
     square_dalitz_background_from_root,
     square_dalitz_efficiency_from_root,
+    write_phase_space_sample,
+    write_phase_space_samples,
 )
 
 __all__ = [
@@ -18,4 +20,6 @@ __all__ = [
     "read_root_tree",
     "square_dalitz_background_from_root",
     "square_dalitz_efficiency_from_root",
+    "write_phase_space_sample",
+    "write_phase_space_samples",
 ]
