@@ -65,6 +65,25 @@ def test_qmi2d_cubic_reproduces_all_bin_center_values():
     assert bool(jnp.allclose(phase.reshape(4, 4), jnp.asarray(phases), atol=1e-12))
 
 
+def test_qmi2d_caches_fixed_interpolation_geometry():
+    model = QMI2D(
+        s12_edges=(0.0, 1.0, 2.0),
+        s13_edges=(0.0, 1.0, 2.0),
+        magnitudes=((1.0, 2.0), (3.0, 4.0)),
+        phases=((0.0, 0.1), (0.2, 0.3)),
+        interpolation="linear",
+        active_mask=((True, False), (True, True)),
+    )
+    first_x = model._x_centers_fixed
+    first_y = model._y_centers_fixed
+    first_sources = model._ghost_sources
+    model.interpolated_magnitude_phase(_data([0.25, 1.25], [0.25, 1.25]))
+    assert model._x_centers_fixed is first_x
+    assert model._y_centers_fixed is first_y
+    assert model._ghost_sources is first_sources
+    assert first_sources == (0, 0, 2, 3)
+
+
 def test_qmi2d_folded_is_symmetric_under_s12_s13_exchange():
     model = QMI2D(
         s12_edges=(0.0, 1.0, 2.0),
@@ -92,9 +111,6 @@ def test_physical_bin_mask_keeps_endpoint_bins_and_rejects_external_cells():
         folded=True,
         samples_per_bin=257,
     )
-    # In folded coordinates x=s_low and y=s_high. The physical region reaches
-    # the high-s endpoint in the final y column, while the final x row need not
-    # be populated because both pair masses cannot simultaneously approach smax.
     assert any(row[-1] for row in mask)
     assert not mask[-1][-1]
 
