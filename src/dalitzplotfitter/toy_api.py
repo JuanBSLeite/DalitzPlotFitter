@@ -7,7 +7,7 @@ from typing import Mapping, Sequence
 
 from dalitzplotfitter.io import write_cp_phase_space_sample, write_phase_space_sample
 from dalitzplotfitter.kinematics import PhaseSpaceSample
-from dalitzplotfitter.toy import (
+from dalitzplotfitter.toy_accept import (
     CPToyBackground,
     ToyBackground,
     generate_cp_toy as _generate_cp_toy_accept,
@@ -82,7 +82,6 @@ def generate_signal_toy(
             veto=veto,
             seed=seed,
             pool_size=pool_size,
-            method="accept-reject",
             batch_size=batch_size,
             envelope_safety=envelope_safety,
             max_restarts=max_restarts,
@@ -151,7 +150,6 @@ def generate_toy(
             seed=seed,
             pool_size=pool_size,
             shuffle=shuffle,
-            method="accept-reject",
             batch_size=batch_size,
             envelope_safety=envelope_safety,
             max_restarts=max_restarts,
@@ -230,7 +228,6 @@ def generate_cp_toy(
             seed=seed,
             pool_size=pool_size,
             shuffle=shuffle,
-            method="accept-reject",
             batch_size=batch_size,
             envelope_safety=envelope_safety,
             max_restarts=max_restarts,
