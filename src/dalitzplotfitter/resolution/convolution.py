@@ -29,6 +29,13 @@ def _gauss_legendre_nodes(low: float, high: float, order: int) -> tuple[Array, A
     return jnp.asarray(scale * nodes + shift), jnp.asarray(scale * weights)
 
 
+def _gauss_hermite_nodes(order: int) -> tuple[Array, Array]:
+    if order < 2:
+        raise ValueError("Gauss-Hermite order must be at least two")
+    nodes, weights = np.polynomial.hermite.hermgauss(order)
+    return jnp.asarray(nodes), jnp.asarray(weights)
+
+
 @dataclass(frozen=True)
 class GaussianResolution1D:
     """Gaussian conditional resolution density ``R(x_obs | x_true)``.
@@ -37,6 +44,10 @@ class GaussianResolution1D:
     ``bias`` and ``sigma`` may be ordinary numbers or fit ``Parameter`` objects.
     The kernel itself is normalized on the full real line; ``interval_probability``
     supplies the exact probability retained by a finite observed fit window.
+
+    For convolution numerators this kernel provides a Gauss--Hermite path local
+    to each observed point. That avoids the poor resolution of a narrow Gaussian
+    kernel on a single global true-variable quadrature grid.
     """
 
     sigma: object
@@ -81,6 +92,35 @@ class GaussianResolution1D:
         probability = 0.5 * (erf(upper) - erf(lower))
         return jnp.where(sigma > 0.0, probability, 0.0)
 
+    def convolve_pdf(
+        self,
+        pdf,
+        observed: Array,
+        *,
+        true_low: float,
+        true_high: float,
+        nodes: Array,
+        weights: Array,
+        parameters: Parameters | None = None,
+    ) -> Array:
+        """Evaluate the raw Gaussian convolution with Gauss--Hermite quadrature."""
+
+        observed = jnp.asarray(observed)
+        sigma = jnp.asarray(_resolve(self.sigma, parameters))
+        bias = jnp.asarray(_resolve(self.bias, parameters))
+        true = (
+            observed[:, None]
+            - bias
+            + jnp.sqrt(2.0) * sigma * nodes[None, :]
+        )
+        density = jnp.asarray(pdf(true, parameters))
+        inside = (true >= true_low) & (true <= true_high)
+        numerator = jnp.sum(
+            weights[None, :] * jnp.where(inside, density, 0.0),
+            axis=1,
+        ) / jnp.sqrt(jnp.pi)
+        return jnp.where(sigma > 0.0, numerator, 0.0)
+
 
 @dataclass(frozen=True)
 class ConvolvedPDF1D:
@@ -91,11 +131,15 @@ class ConvolvedPDF1D:
     ``kernel(observed, true, parameters)`` and
     ``kernel.interval_probability(low, high, true, parameters)``.
 
-    The numerator is integrated over ``[true_low, true_high]`` with
-    Gauss--Legendre quadrature. The result is then normalized on the finite
-    observed fit range ``[observed_low, observed_high]``. This normalization is
-    parameter dependent whenever probability migrates across the observed
-    boundaries.
+    A generic kernel numerator uses Gauss--Legendre quadrature over the true
+    interval. Kernels may provide a specialized ``convolve_pdf`` method; the
+    Gaussian kernel uses Gauss--Hermite quadrature centered on each observed
+    value, which remains accurate for resolutions much narrower than the full
+    true-variable interval.
+
+    The result is normalized on the finite observed fit range. This
+    normalization is parameter dependent whenever probability migrates across
+    the observed boundaries.
     """
 
     pdf: object
@@ -113,8 +157,11 @@ class ConvolvedPDF1D:
         if self.observed_high <= self.observed_low:
             raise ValueError("ConvolvedPDF1D requires observed_low < observed_high")
         nodes, weights = _gauss_legendre_nodes(self.true_low, self.true_high, self.order)
+        hermite_nodes, hermite_weights = _gauss_hermite_nodes(self.order)
         object.__setattr__(self, "_true_nodes", nodes)
         object.__setattr__(self, "_true_weights", weights)
+        object.__setattr__(self, "_hermite_nodes", hermite_nodes)
+        object.__setattr__(self, "_hermite_weights", hermite_weights)
 
     def normalization(self, parameters: Parameters | None = None) -> Array:
         nodes = self._true_nodes
@@ -129,21 +176,41 @@ class ConvolvedPDF1D:
         )
         return jnp.sum(self._true_weights * true_density * retained)
 
-    def __call__(self, x: Array, parameters: Parameters | None = None) -> Array:
-        x = jnp.asarray(x)
+    def _numerator(self, x_flat: Array, parameters: Parameters | None) -> Array:
+        specialized = getattr(self.kernel, "convolve_pdf", None)
+        if specialized is not None:
+            return jnp.asarray(
+                specialized(
+                    self.pdf,
+                    x_flat,
+                    true_low=self.true_low,
+                    true_high=self.true_high,
+                    nodes=self._hermite_nodes,
+                    weights=self._hermite_weights,
+                    parameters=parameters,
+                )
+            )
+
         nodes = self._true_nodes
         true_density = jnp.asarray(self.pdf(nodes, parameters))
-
-        x_flat = jnp.ravel(x)
         response = jnp.asarray(
             self.kernel(x_flat[:, None], nodes[None, :], parameters)
         )
-        numerator = jnp.sum(
+        return jnp.sum(
             response * (self._true_weights * true_density)[None, :],
             axis=1,
         )
+
+    def __call__(self, x: Array, parameters: Parameters | None = None) -> Array:
+        x = jnp.asarray(x)
+        x_flat = jnp.ravel(x)
+        numerator = self._numerator(x_flat, parameters)
         norm = self.normalization(parameters)
-        inside = (x_flat >= self.observed_low) & (x_flat <= self.observed_high) & (norm > 0.0)
+        inside = (
+            (x_flat >= self.observed_low)
+            & (x_flat <= self.observed_high)
+            & (norm > 0.0)
+        )
         values = jnp.where(
             inside,
             jnp.clip(numerator / norm, min=self.floor),
