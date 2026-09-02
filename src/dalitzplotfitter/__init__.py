@@ -38,6 +38,8 @@ from .io import (
     read_root_tree,
     square_dalitz_background_from_root,
     square_dalitz_efficiency_from_root,
+    write_phase_space_sample,
+    write_phase_space_samples,
 )
 from .kinematics import (
     CovariantKinematics,
@@ -99,5 +101,5 @@ __all__ = [
     "plot_square_dalitz", "read_phase_space_sample", "read_root_histogram2d", "read_root_tree",
     "square_dalitz_background_from_root", "square_dalitz_efficiency_from_root",
     "square_dalitz_jacobian", "square_dalitz_to_invariants", "vetoed_signal_pdf",
-    "weighted_resample",
+    "weighted_resample", "write_phase_space_sample", "write_phase_space_samples",
 ]
