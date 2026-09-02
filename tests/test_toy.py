@@ -30,14 +30,26 @@ def _model():
     )
 
 
-def test_accept_reject_is_default_toy_method():
-    assert inspect.signature(generate_signal_toy).parameters["method"].default == "accept-reject"
-    assert inspect.signature(generate_toy).parameters["method"].default == "accept-reject"
-    assert inspect.signature(generate_cp_toy).parameters["method"].default == "accept-reject"
+def test_inverse_transform_is_default_toy_method():
+    assert inspect.signature(generate_signal_toy).parameters["method"].default == "inverse-transform"
+    assert inspect.signature(generate_toy).parameters["method"].default == "inverse-transform"
+    assert inspect.signature(generate_cp_toy).parameters["method"].default == "inverse-transform"
 
 
 def test_generate_signal_toy_returns_requested_unweighted_size():
-    toy = generate_signal_toy(_model(), 60, seed=10, pool_size=500)
+    toy = generate_signal_toy(_model(), 60, seed=10, inverse_resolution=64)
+    assert toy.size == 60
+    assert jnp.allclose(toy.weights, 1.0)
+
+
+def test_generate_signal_toy_supports_accept_reject():
+    toy = generate_signal_toy(
+        _model(),
+        60,
+        seed=10,
+        method="accept-reject",
+        pool_size=500,
+    )
     assert toy.size == 60
     assert jnp.allclose(toy.weights, 1.0)
 
@@ -85,6 +97,7 @@ def test_generate_toy_supports_signal_background_mixture():
         signal_fraction=0.7,
         backgrounds=(background,),
         seed=11,
+        method="accept-reject",
         pool_size=600,
     )
     assert toy.size == 80
@@ -99,7 +112,6 @@ def test_generate_toy_inverse_supports_signal_background_mixture():
         signal_fraction=0.7,
         backgrounds=(background,),
         seed=111,
-        method="inverse-transform",
         inverse_resolution=80,
     )
     assert toy.size == 120
@@ -139,7 +151,7 @@ def test_generate_cp_toy_preserves_total_event_count_and_charge_model():
         400,
         parameters={"NR.x": 1.0, "NR.dx": 0.25},
         seed=12,
-        pool_size=800,
+        inverse_resolution=80,
     )
     assert plus_toy.size + minus_toy.size == 400
     assert plus_toy.size > minus_toy.size
@@ -204,6 +216,7 @@ def test_generate_cp_toy_supports_backgrounds():
         signal_fraction=0.75,
         backgrounds=(background,),
         seed=13,
+        method="accept-reject",
         pool_size=500,
     )
     assert plus_toy.size + minus_toy.size == 120
@@ -231,7 +244,6 @@ def test_generate_cp_toy_can_write_one_root_tree_with_charge(tmp_path):
         minus,
         80,
         seed=42,
-        method="inverse-transform",
         inverse_resolution=64,
         output_root=path,
     )
