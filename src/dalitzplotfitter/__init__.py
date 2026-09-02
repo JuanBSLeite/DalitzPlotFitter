@@ -1,5 +1,12 @@
 """DalitzPlotFitter public API."""
 
+# JAX reads GPU allocator environment variables when its backend initializes.
+# Set the project default before importing any submodule that imports JAX. Using
+# setdefault keeps an explicit user/shell configuration authoritative.
+import os as _os
+
+_os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+
 from .amplitude import (
     AmplitudeComponent,
     CoherentAmplitudeModel,
