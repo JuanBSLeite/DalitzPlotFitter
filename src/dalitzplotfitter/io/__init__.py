@@ -11,6 +11,7 @@ from .root import (
     write_phase_space_sample,
     write_phase_space_samples,
 )
+from .toy_root import write_cp_phase_space_sample
 
 __all__ = [
     "histogram_background_from_root",
@@ -20,6 +21,7 @@ __all__ = [
     "read_root_tree",
     "square_dalitz_background_from_root",
     "square_dalitz_efficiency_from_root",
+    "write_cp_phase_space_sample",
     "write_phase_space_sample",
     "write_phase_space_samples",
 ]
