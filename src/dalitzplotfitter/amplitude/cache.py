@@ -126,6 +126,25 @@ class PreparedAmplitudeCache:
     efficiency_normalization: Array | None = None
     normalize_components: bool = True
 
+    @staticmethod
+    def build_compact_prepare_kernel(
+        components: Sequence[AmplitudeComponent],
+        *,
+        normalize_components: bool,
+        has_efficiency: bool,
+    ):
+        """Return a reusable JIT wrapper for coefficient-only preparation.
+
+        Keeping this wrapper alive lets JAX reuse the compiled executable for
+        later datasets with the same pytree structure, shapes and dtypes.
+        """
+
+        return _compact_prepare_kernel(
+            tuple(components),
+            normalize_components=bool(normalize_components),
+            has_efficiency=bool(has_efficiency),
+        )
+
     @classmethod
     def prepare(
         cls,
@@ -137,6 +156,7 @@ class PreparedAmplitudeCache:
         parameters: Sequence[Parameter] = (),
         efficiency_normalization: Array | None = None,
         normalize_components: bool = True,
+        compact_prepare_kernel=None,
     ) -> "PreparedAmplitudeCache":
         components = tuple(components)
         parameters = tuple(parameters)
@@ -152,17 +172,20 @@ class PreparedAmplitudeCache:
         if not has_floating_dynamics:
             # Coefficient-only fits are the common high-throughput path. Keep all
             # expensive preparation inside one compiled graph so GPU execution
-            # does not devolve into hundreds of eager kernel launches.
+            # does not devolve into hundreds of eager kernel launches. Callers
+            # such as DecayModel may keep the JIT wrapper alive across sessions.
             efficiency = (
                 jnp.asarray(efficiency_normalization)
                 if efficiency_normalization is not None
                 else jnp.ones_like(weights)
             )
-            kernel = _compact_prepare_kernel(
-                components,
-                normalize_components=normalize_components,
-                has_efficiency=efficiency_normalization is not None,
-            )
+            kernel = compact_prepare_kernel
+            if kernel is None:
+                kernel = cls.build_compact_prepare_kernel(
+                    components,
+                    normalize_components=normalize_components,
+                    has_efficiency=efficiency_normalization is not None,
+                )
             data_components, fixed_matrix, diagonal = kernel(
                 data,
                 normalization_data,
