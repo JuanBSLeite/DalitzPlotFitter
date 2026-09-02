@@ -12,7 +12,14 @@ from .config import enable_x64
 from .constraints import ConstrainedNLL, GaussianConstraint
 from .cp_workflow import CPBackgroundSpec, CPFitSession
 from .decay import DalitzAmplitude, DecayChannel, DecayModel, NonResonant, Resonance
-from .discriminants import BreitWigner1D, Exponential1D, FactorizedDensity, Gaussian1D, Histogram1D
+from .discriminants import (
+    BreitWigner1D,
+    Exponential1D,
+    FactorizedDensity,
+    Gaussian1D,
+    Histogram1D,
+    LineshapeIntensity1D,
+)
 from .dynamics import (
     LASS,
     QMI,
@@ -88,7 +95,7 @@ __all__ = [
     "ConvolvedPDF1D", "CovariantAngular", "CovariantKinematics", "DalitzAmplitude",
     "DecayChannel", "DecayModel", "Exponential1D", "FactorizedDensity", "FitSession",
     "Flatte", "FunctionalVeto", "Gaussian1D", "GaussianConstraint", "GaussianResolution1D",
-    "GounarisSakurai", "Histogram1D", "KMatrix", "LASS", "DalitzGaussLegendreGrid",
+    "GounarisSakurai", "Histogram1D", "KMatrix", "LASS", "LineshapeIntensity1D", "DalitzGaussLegendreGrid",
     "MassWindowVeto", "Minimizer", "MultiBackgroundNLL", "MultiStartResult", "NonResonant",
     "Parameter", "ParameterKind", "PhaseSpaceMC", "PhaseSpaceSample", "Pole",
     "PreparedAmplitudeCache", "QMI", "QMI2D", "RealImag", "RelativisticBreitWigner",
