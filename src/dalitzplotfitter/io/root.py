@@ -1,7 +1,7 @@
-"""ROOT-file input helpers based on uproot.
+"""ROOT-file input/output helpers based on uproot.
 
-No PyROOT dependency is required. Trees are converted to JAX arrays and ROOT
-TH2 histograms can be converted directly into ordinary- or Square-Dalitz
+No PyROOT dependency is required. Trees are converted to/from JAX arrays and
+ROOT TH2 histograms can be converted directly into ordinary- or Square-Dalitz
 histogram efficiency/background models.
 """
 
@@ -38,6 +38,89 @@ def _open_object(file_path: PathLike, object_path: str):
             f"ROOT object {object_path!r} was not found in {str(file_path)!r}; "
             f"available top-level keys include {available[:20]}"
         ) from exc
+
+
+def _sample_tree_arrays(
+    sample: PhaseSpaceSample,
+    *,
+    include_weights: bool = True,
+    include_momenta: bool = True,
+) -> dict[str, np.ndarray]:
+    """Convert a ``PhaseSpaceSample`` to flat uproot-writable branches."""
+
+    arrays: dict[str, np.ndarray] = {
+        "s12": np.asarray(sample.s12),
+        "s13": np.asarray(sample.s13),
+        "s23": np.asarray(sample.s23),
+    }
+    if include_weights:
+        arrays["weight"] = np.asarray(sample.weights)
+
+    momenta = {"p1": sample.p1, "p2": sample.p2, "p3": sample.p3}
+    have_momenta = [momentum is not None for momentum in momenta.values()]
+    if any(have_momenta) and not all(have_momenta):
+        raise ValueError("p1, p2 and p3 must all be present or all be absent")
+    if include_momenta and all(have_momenta):
+        labels = ("E", "PX", "PY", "PZ")
+        for name, momentum in momenta.items():
+            values = np.asarray(momentum)
+            if values.shape != (sample.size, 4):
+                raise ValueError(
+                    f"{name} must have shape ({sample.size}, 4), got {values.shape}"
+                )
+            for index, component in enumerate(labels):
+                arrays[f"{name}_{component}"] = values[:, index]
+
+    if any(values.shape[0] != sample.size for values in arrays.values()):
+        raise ValueError("phase-space sample contains arrays with inconsistent lengths")
+    return arrays
+
+
+def write_phase_space_samples(
+    file_path: PathLike,
+    samples: Mapping[str, PhaseSpaceSample],
+    *,
+    include_weights: bool = True,
+    include_momenta: bool = True,
+) -> Path:
+    """Write one or more ``PhaseSpaceSample`` objects to ROOT TTrees with uproot.
+
+    ``samples`` maps tree names to samples. The file is recreated atomically by
+    uproot, so an existing file at the same path is replaced.
+    """
+
+    path = Path(file_path)
+    if not samples:
+        raise ValueError("at least one ROOT tree/sample must be supplied")
+    if any(not str(tree) for tree in samples):
+        raise ValueError("ROOT tree names must be non-empty")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with uproot.recreate(path) as root_file:
+        for tree, sample in samples.items():
+            root_file[str(tree)] = _sample_tree_arrays(
+                sample,
+                include_weights=include_weights,
+                include_momenta=include_momenta,
+            )
+    return path
+
+
+def write_phase_space_sample(
+    file_path: PathLike,
+    sample: PhaseSpaceSample,
+    *,
+    tree: str = "DecayTree",
+    include_weights: bool = True,
+    include_momenta: bool = True,
+) -> Path:
+    """Write one ``PhaseSpaceSample`` to a ROOT TTree with uproot."""
+
+    return write_phase_space_samples(
+        file_path,
+        {tree: sample},
+        include_weights=include_weights,
+        include_momenta=include_momenta,
+    )
 
 
 def read_root_tree(
@@ -228,4 +311,6 @@ __all__ = [
     "read_root_tree",
     "square_dalitz_background_from_root",
     "square_dalitz_efficiency_from_root",
+    "write_phase_space_sample",
+    "write_phase_space_samples",
 ]
