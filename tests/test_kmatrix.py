@@ -64,6 +64,19 @@ def test_kmatrix_pvector_and_amplitude_are_finite():
     assert bool(jnp.all(jnp.isfinite(jnp.imag(amplitude))))
 
 
+def test_kmatrix_prepared_response_matches_full_solve_pipi_channel():
+    model = KMatrix(
+        betas=(1.0 + 0.2j, -0.3 + 0.1j, 0.15j, 0.0j, -0.05 + 0.02j),
+        f_prod=(0.1j, 0.0j, 0.04 - 0.02j, 0.0j, 0.03j),
+    )
+    masses = jnp.asarray([0.35, 0.65, 0.90, 1.20, 1.50, 1.75])
+    response = model.prepare_mass(masses)
+    prepared = model.evaluate_prepared(masses, response)
+    direct = model.amplitude_vector(masses)[..., 0]
+    assert response.shape == (masses.size, 5)
+    assert bool(jnp.allclose(prepared, direct, rtol=2e-11, atol=2e-11))
+
+
 def test_kmatrix_is_stable_exactly_at_bare_poles():
     model = KMatrix(
         betas=(1.0 + 0.2j, 0.3j, -0.2 + 0.1j, 0.1j, 0.05 + 0.02j)
