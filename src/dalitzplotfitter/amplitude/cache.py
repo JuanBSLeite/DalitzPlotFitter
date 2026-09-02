@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
+import jax
 import jax.numpy as jnp
 from jax import Array
 
@@ -25,6 +26,13 @@ def _component_scales(matrix: Array) -> Array:
     return 1.0 / jnp.sqrt(diagonal)
 
 
+def _component_scales_unchecked(matrix: Array) -> tuple[Array, Array]:
+    """JIT-compatible component scales plus their diagonal integrals."""
+
+    diagonal = jnp.real(jnp.diag(matrix))
+    return 1.0 / jnp.sqrt(diagonal), diagonal
+
+
 def _prepare_component_data(
     components: Sequence[AmplitudeComponent],
     data: Mapping[str, Array],
@@ -37,15 +45,74 @@ def _prepare_component_data(
     return prepared
 
 
+def _scaled_matrix_from_raw(raw_matrix: Array, scales: Array) -> Array:
+    """Apply real positive per-component amplitude scales to ``M_ij``."""
+
+    return scales[:, None] * raw_matrix * scales[None, :]
+
+
+def _compact_prepare_kernel(
+    components: tuple[AmplitudeComponent, ...],
+    *,
+    normalize_components: bool,
+    has_efficiency: bool,
+):
+    """Build one fused XLA program for coefficient-only cache preparation."""
+
+    def kernel(data, normalization_data, weights, efficiency):
+        prepared_data = _prepare_component_data(components, data)
+        prepared_norm = _prepare_component_data(components, normalization_data)
+
+        raw_data = jnp.stack(
+            [jnp.asarray(c.function(prepared_data, None)) for c in components],
+            axis=1,
+        )
+        raw_norm = jnp.stack(
+            [jnp.asarray(c.function(prepared_norm, None)) for c in components],
+            axis=1,
+        )
+        raw_matrix = normalization_matrix(raw_norm, weights, None)
+
+        if normalize_components:
+            scales, diagonal = _component_scales_unchecked(raw_matrix)
+            data_components = raw_data * scales
+            norm_components = raw_norm * scales
+        else:
+            scales = jnp.ones((raw_norm.shape[1],), dtype=jnp.real(raw_matrix).dtype)
+            diagonal = jnp.real(jnp.diag(raw_matrix))
+            data_components = raw_data
+            norm_components = raw_norm
+
+        # Without an efficiency map, the post-scale normalization matrix follows
+        # algebraically from the already-computed raw matrix. Avoid a second full
+        # million-point reduction over the normalization grid.
+        if has_efficiency:
+            fixed_matrix = normalization_matrix(
+                norm_components,
+                weights,
+                efficiency,
+            )
+        elif normalize_components:
+            fixed_matrix = _scaled_matrix_from_raw(raw_matrix, scales)
+        else:
+            fixed_matrix = raw_matrix
+
+        return data_components, fixed_matrix, diagonal
+
+    return jax.jit(kernel)
+
+
 @dataclass(frozen=True)
 class PreparedAmplitudeCache:
     """Pre-evaluated amplitude components and normalization matrix.
 
-    Coefficient-only fits use a compact representation: after preparation the
-    large prepared event/normalization mappings and normalization-component
-    matrix are released because only ``data_components`` and the fixed small
-    normalization matrix are needed during minimization.  Those large arrays are
-    retained only when at least one dynamical parameter floats.
+    Coefficient-only fits use a compact representation. Their kinematic
+    preparation, component evaluation, normalization and scaling are fused into
+    one JAX/XLA program, and only ``data_components`` plus the fixed small
+    normalization matrix survive preparation.
+
+    Large prepared event/normalization mappings and normalization-component
+    arrays are retained only when at least one dynamical parameter floats.
     """
 
     components: tuple[AmplitudeComponent, ...]
@@ -76,9 +143,54 @@ class PreparedAmplitudeCache:
         if not components:
             raise ValueError("At least one amplitude component is required")
 
+        weights = jnp.asarray(normalization_weights)
+        has_floating_dynamics = any(
+            parameter.kind is ParameterKind.DYNAMICS and not parameter.fixed
+            for parameter in parameters
+        )
+
+        if not has_floating_dynamics:
+            # Coefficient-only fits are the common high-throughput path. Keep all
+            # expensive preparation inside one compiled graph so GPU execution
+            # does not devolve into hundreds of eager kernel launches.
+            efficiency = (
+                jnp.asarray(efficiency_normalization)
+                if efficiency_normalization is not None
+                else jnp.ones_like(weights)
+            )
+            kernel = _compact_prepare_kernel(
+                components,
+                normalize_components=normalize_components,
+                has_efficiency=efficiency_normalization is not None,
+            )
+            data_components, fixed_matrix, diagonal = kernel(
+                data,
+                normalization_data,
+                weights,
+                efficiency,
+            )
+            # Preserve the original explicit validation outside the JIT trace.
+            if bool(jnp.any(diagonal <= 0.0)):
+                raise ValueError(
+                    "Component normalization requires positive diagonal integrals"
+                )
+            return cls(
+                components=components,
+                data=None,
+                normalization_data=None,
+                normalization_weights=weights,
+                parameters=parameters,
+                data_components=data_components,
+                normalization_components=None,
+                normalization_matrix_fixed=fixed_matrix,
+                efficiency_normalization=efficiency_normalization,
+                normalize_components=normalize_components,
+            )
+
+        # Dynamic fits retain the prepared coordinates and normalization
+        # components because selected component dynamics must be reevaluated.
         prepared_data = _prepare_component_data(components, data)
         prepared_norm = _prepare_component_data(components, normalization_data)
-
         raw_data = jnp.stack(
             [jnp.asarray(c.function(prepared_data, None)) for c in components], axis=1
         )
@@ -86,34 +198,35 @@ class PreparedAmplitudeCache:
             [jnp.asarray(c.function(prepared_norm, None)) for c in components], axis=1
         )
 
-        weights = jnp.asarray(normalization_weights)
         raw_component_matrix = normalization_matrix(raw_norm, weights, None)
         if normalize_components:
             scales = _component_scales(raw_component_matrix)
             data_components = raw_data * scales
             norm_components = raw_norm * scales
         else:
+            scales = None
             data_components = raw_data
             norm_components = raw_norm
 
-        fixed_matrix = normalization_matrix(
-            norm_components,
-            weights,
-            efficiency_normalization,
-        )
+        if efficiency_normalization is not None:
+            fixed_matrix = normalization_matrix(
+                norm_components,
+                weights,
+                efficiency_normalization,
+            )
+        elif normalize_components:
+            fixed_matrix = _scaled_matrix_from_raw(raw_component_matrix, scales)
+        else:
+            fixed_matrix = raw_component_matrix
 
-        has_floating_dynamics = any(
-            parameter.kind is ParameterKind.DYNAMICS and not parameter.fixed
-            for parameter in parameters
-        )
         return cls(
             components=components,
-            data=prepared_data if has_floating_dynamics else None,
-            normalization_data=prepared_norm if has_floating_dynamics else None,
+            data=prepared_data,
+            normalization_data=prepared_norm,
             normalization_weights=weights,
             parameters=parameters,
             data_components=data_components,
-            normalization_components=(norm_components if has_floating_dynamics else None),
+            normalization_components=norm_components,
             normalization_matrix_fixed=fixed_matrix,
             efficiency_normalization=efficiency_normalization,
             normalize_components=normalize_components,
@@ -209,9 +322,6 @@ class PreparedAmplitudeCache:
         dynamic = norm_components[:, index]
         weights = self._pdf_weights()
 
-        # Compute all rows touching floating components in one batched reduction.
-        # This replaces one normalization-grid reduction per floating component
-        # and maps efficiently to accelerator matrix operations.
         rows = jnp.einsum(
             "n,nd,nj->dj",
             weights,
