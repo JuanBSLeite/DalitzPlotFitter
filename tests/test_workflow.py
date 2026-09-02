@@ -43,7 +43,7 @@ def test_fit_session_cold_fit_materializes_cache_before_jit():
     session = FitSession(_model(), _data())
 
     # This deliberately calls fit() without touching objective or signal_cache
-    # first.  The prepared cache must be built outside the Minimizer JIT trace.
+    # first. The prepared cache must be built outside the Minimizer JIT trace.
     result = session.fit(
         {"NR.x": 0.9},
         simplex=False,
@@ -69,6 +69,32 @@ def test_fit_session_reuses_prepared_signal_cache():
     second = session.signal_cache
     assert first is second
     assert first.data_components.shape[0] == session.data.size
+
+
+def test_fit_session_reuses_projection_sample_for_same_size_and_seed():
+    session = FitSession(_model(), _data())
+    first = session._get_projection_sample(128, 1234)
+    second = session._get_projection_sample(128, 1234)
+    different = session._get_projection_sample(128, 1235)
+
+    assert first is second
+    assert different is not first
+
+
+def test_fit_session_projection_prepared_density_matches_generic_pdf():
+    session = FitSession(_model(), _data())
+    sample = session._get_projection_sample(128, 5678)
+    values = {"NR.x": 1.3}
+
+    prepared = session._projection_signal_density(sample, values)
+    generic = session.signal_pdf(sample.as_dict(), values)
+
+    assert jnp.allclose(prepared, generic, rtol=1e-12, atol=1e-12)
+    assert len(session._projection_prepared) == 1
+
+    again = session._projection_signal_density(sample, values)
+    assert jnp.allclose(again, prepared, rtol=1e-12, atol=1e-12)
+    assert len(session._projection_prepared) == 1
 
 
 def test_fit_session_automatically_normalizes_background_shape():
