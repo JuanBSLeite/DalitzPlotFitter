@@ -1,7 +1,9 @@
 import inspect
 
 import jax.numpy as jnp
+import numpy as np
 import pytest
+import uproot
 
 from dalitzplotfitter import (
     CPToyBackground,
@@ -129,3 +131,38 @@ def test_generate_cp_toy_supports_backgrounds():
         pool_size=500,
     )
     assert plus_toy.size + minus_toy.size == 120
+
+
+def test_generate_cp_toy_can_write_one_root_tree_with_charge(tmp_path):
+    cp = CPRealImag(1.0, 0.0, 0.0, 0.0)
+    plus = DecayModel(
+        DecayChannel("B+", ("K+", "pi+", "pi-")),
+        [NonResonant(cp.for_charge(+1))],
+        normalization_method="square-dalitz",
+        normalization_resolution=8,
+        normalization_pair=(0, 2),
+    )
+    minus = DecayModel(
+        DecayChannel("B-", ("K-", "pi-", "pi+")),
+        [NonResonant(cp.for_charge(-1))],
+        normalization_method="square-dalitz",
+        normalization_resolution=8,
+        normalization_pair=(0, 2),
+    )
+    path = tmp_path / "cp_toy.root"
+    plus_toy, minus_toy = generate_cp_toy(
+        plus,
+        minus,
+        80,
+        seed=42,
+        pool_size=400,
+        method="resample",
+        output_root=path,
+    )
+    with uproot.open(path) as root_file:
+        tree = root_file["DecayTree"]
+        arrays = tree.arrays(["charge"], library="np")
+        charge = arrays["charge"]
+        assert tree.num_entries == 80
+        assert np.count_nonzero(charge == 1) == plus_toy.size
+        assert np.count_nonzero(charge == -1) == minus_toy.size
