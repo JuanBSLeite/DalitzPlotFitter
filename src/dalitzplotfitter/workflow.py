@@ -14,6 +14,7 @@ from typing import Mapping, Sequence
 import jax.numpy as jnp
 import numpy as np
 
+from dalitzplotfitter.amplitude import PreparedAmplitudeCache
 from dalitzplotfitter.background import BackgroundCategory
 from dalitzplotfitter.constraints import ConstrainedNLL
 from dalitzplotfitter.efficiency import UnityEfficiency
@@ -39,7 +40,7 @@ class BackgroundSpec:
 
     def __post_init__(self) -> None:
         if not self.name:
-            raise ValueError("background name must be non-empty")
+            raise ValueError("BackgroundSpec name must be non-empty")
         if not callable(self.shape):
             raise TypeError("BackgroundSpec shape must be callable on an event-data mapping")
         if self.fraction is not None and self.yield_ is not None:
@@ -225,6 +226,91 @@ class FitSession:
             veto=self.veto,
         )
 
+    @cached_property
+    def _projection_samples(self) -> dict[tuple[int, int | None], PhaseSpaceSample]:
+        """Phase-space samples reused by repeated projection calls."""
+
+        return {}
+
+    @cached_property
+    def _projection_prepared(self) -> dict[int, tuple[PhaseSpaceSample, object | None, jnp.ndarray]]:
+        """Prepared amplitudes/acceptance keyed by live projection-sample identity."""
+
+        return {}
+
+    def _get_projection_sample(
+        self,
+        size: int,
+        seed: int | None,
+    ) -> PhaseSpaceSample:
+        size = int(size)
+        if size < 1:
+            raise ValueError("projection_size must be positive")
+        resolved_seed = None if seed is None else int(seed)
+        key = (size, resolved_seed)
+        sample = self._projection_samples.get(key)
+        if sample is None:
+            sample = self.model.generate_phase_space(size, seed=resolved_seed)
+            self._projection_samples[key] = sample
+        return sample
+
+    def _prepare_projection_sample(
+        self,
+        sample: PhaseSpaceSample,
+    ) -> tuple[object | None, jnp.ndarray]:
+        """Prepare projection amplitudes once and reuse the fit normalization.
+
+        Coefficient-only fits already have the exact fixed normalization matrix
+        and component scales in ``signal_cache``.  Projection rendering only
+        needs component values on a new phase-space sample, so rebuilding the
+        normalization integral (the old ``signal_pdf`` path) is unnecessary.
+        """
+
+        key = id(sample)
+        prepared = self._projection_prepared.get(key)
+        if prepared is not None and prepared[0] is sample:
+            return prepared[1], prepared[2]
+
+        acceptance = _acceptance(self.efficiency, self.veto, sample.as_dict())
+        template = self.signal_cache
+        projection_cache = None
+        if template.is_compact:
+            if template.component_scales is None:
+                raise RuntimeError("compact signal cache is missing component scales")
+            compact_data_kernel = None
+            kernel_builder = getattr(self.model, "_compact_data_kernel", None)
+            if callable(kernel_builder):
+                compact_data_kernel = kernel_builder(
+                    normalize_components=template.normalize_components
+                )
+            projection_cache = PreparedAmplitudeCache.prepare_from_fixed_normalization(
+                template.components,
+                data=sample.as_dict(),
+                normalization_weights=template.normalization_weights,
+                parameters=template.parameters,
+                normalization_matrix_fixed=template.normalization_matrix_fixed,
+                component_scales=template.component_scales,
+                normalize_components=template.normalize_components,
+                compact_data_kernel=compact_data_kernel,
+            )
+
+        self._projection_prepared[key] = (sample, projection_cache, acceptance)
+        return projection_cache, acceptance
+
+    def _projection_signal_density(
+        self,
+        sample: PhaseSpaceSample,
+        values: Mapping[str, object],
+    ) -> jnp.ndarray:
+        projection_cache, acceptance = self._prepare_projection_sample(sample)
+        if projection_cache is not None:
+            intensity, normalization = projection_cache.evaluate(values)
+            return acceptance * intensity / normalization
+
+        # Floating-dynamics caches cannot yet be cloned data-only. Keep the
+        # generic path for correctness until partial dynamic preparation exists.
+        return jnp.asarray(self.signal_pdf(sample.as_dict(), values))
+
     def _cached_signal_density(self, parameters: Mapping[str, object]) -> jnp.ndarray:
         intensity, normalization = self.signal_cache.evaluate(parameters)
         return self.acceptance_data * intensity / normalization
@@ -290,10 +376,9 @@ class FitSession:
     @cached_property
     def base_objective(self):
         # Materialize all parameter-independent signal arrays before the
-        # minimizer JIT traces the objective.  Creating a cached_property while
+        # minimizer JIT traces the objective. Creating a cached_property while
         # tracing would otherwise store JAX tracers in the session and makes
-        # host-side cache validation (for example positive normalization
-        # diagonals) illegal inside the traced function.
+        # host-side cache validation illegal inside the traced function.
         _ = self.signal_cache
         _ = self.acceptance_data
 
@@ -468,7 +553,7 @@ class FitSession:
             if projection_sample is None
             else projection_sample
         )
-        signal_density = jnp.asarray(self.signal_pdf(sample.as_dict(), values))
+        signal_density = self._projection_signal_density(sample, values)
         if self.extended:
             signal_scale = float(_resolve(self.signal_yield, values))
         elif self.background_categories:
@@ -531,15 +616,18 @@ class FitSession:
         range: tuple[float, float] | None = None,
         show_components: bool = True,
         log_scale: bool = False,
-        projection_size: int = 250_000,
+        projection_size: int = 100_000,
         projection_seed: int = 20260901,
+        projection_sample: PhaseSpaceSample | None = None,
         ax=None,
     ):
         """Plot data and a smooth fitted projection.
 
         Fit/PDF normalization remains deterministic. A weighted phase-space MC
-        sample is used only to render the one-dimensional model projection, which
-        avoids aliasing from directly histogramming Gauss--Legendre nodes.
+        sample is used only to render the one-dimensional model projection. The
+        generated sample and coefficient-only prepared amplitudes are cached by
+        the session, so plotting another invariant or changing bins does not
+        repeat phase-space generation or fixed resonance dynamics.
         """
 
         import matplotlib.pyplot as plt
@@ -562,17 +650,18 @@ class FitSession:
             unit=unit,
             log_scale=log_scale,
         )
-        projection_sample = self.model.generate_phase_space(
-            projection_size,
-            seed=projection_seed,
+        sample = (
+            self._get_projection_sample(projection_size, projection_seed)
+            if projection_sample is None
+            else projection_sample
         )
         total = np.zeros(bins, dtype=float)
-        for name, sample, weights in self._projection_components(
+        for name, component_sample, weights in self._projection_components(
             values,
-            projection_sample,
+            sample,
         ):
             counts, _ = np.histogram(
-                np.asarray(getattr(sample, variable)),
+                np.asarray(getattr(component_sample, variable)),
                 bins=edges,
                 weights=weights,
             )
