@@ -57,6 +57,11 @@ class Minimizer:
     provides a stricter convergence target than iminuit's generic default while
     remaining numerically practical for the amplitude-fit likelihoods used here.
 
+    The JAX value-and-gradient program is compiled lazily and retained by the
+    ``Minimizer`` instance. Value and gradient callbacks share a one-point host
+    cache, so when Minuit asks for both at identical parameters the expensive
+    device evaluation and device-to-host synchronization occur only once.
+
     Verbosity levels are:
 
     - ``verbose=0``: silent;
@@ -84,6 +89,7 @@ class Minimizer:
         self.errordef = float(errordef)
         self.tolerance = float(tolerance)
         self.verbose = int(verbose)
+        self._backend_cache = None
 
     def _log(self, message: str) -> None:
         if self.verbose >= 1:
@@ -99,6 +105,11 @@ class Minimizer:
         )
 
     def _backend(self):
+        """Return the persistent compiled JAX backend and Minuit callbacks."""
+
+        if self._backend_cache is not None:
+            return self._backend_cache
+
         free = tuple(parameter for parameter in self.parameters if not parameter.fixed)
         fixed = {
             parameter.name: parameter.value
@@ -116,15 +127,35 @@ class Minimizer:
 
         value_and_grad = jax.jit(jax.value_and_grad(vector_objective))
 
+        last_point: np.ndarray | None = None
+        last_value: float | None = None
+        last_gradient: np.ndarray | None = None
+
+        def evaluate(values):
+            nonlocal last_point, last_value, last_gradient
+            point = np.asarray(values, dtype=float)
+            if last_point is not None and np.array_equal(point, last_point):
+                return last_value, last_gradient
+
+            value_device, gradient_device = value_and_grad(jnp.asarray(point))
+            value_host, gradient_host = jax.device_get(
+                (value_device, gradient_device)
+            )
+            last_point = point.copy()
+            last_value = float(value_host)
+            last_gradient = np.asarray(gradient_host, dtype=float)
+            return last_value, last_gradient
+
         def fcn(*values):
-            value, _ = value_and_grad(jnp.asarray(values))
-            return float(value)
+            value, _ = evaluate(values)
+            return value
 
         def grad(*values):
-            _, gradient = value_and_grad(jnp.asarray(values))
-            return np.asarray(gradient, dtype=float)
+            _, gradient = evaluate(values)
+            return gradient
 
-        return free, names, fcn, grad
+        self._backend_cache = (free, names, fcn, grad)
+        return self._backend_cache
 
     def _validate_start_values(
         self,
@@ -143,11 +174,13 @@ class Minimizer:
             low, high = parameter.bounds
             if low is not None and value < low:
                 raise ValueError(
-                    f"starting value {value} is below the lower bound {low} for {parameter.name!r}"
+                    f"starting value {value} is below the lower bound {low} for "
+                    f"{parameter.name!r}"
                 )
             if high is not None and value > high:
                 raise ValueError(
-                    f"starting value {value} is above the upper bound {high} for {parameter.name!r}"
+                    f"starting value {value} is above the upper bound {high} for "
+                    f"{parameter.name!r}"
                 )
         return values
 
@@ -182,7 +215,10 @@ class Minimizer:
         free, names, fcn, grad = self._backend()
         supplied = self._validate_start_values(values)
         point = np.asarray(
-            [float(supplied.get(parameter.name, parameter.value)) for parameter in free],
+            [
+                float(supplied.get(parameter.name, parameter.value))
+                for parameter in free
+            ],
             dtype=float,
         )
 
@@ -265,7 +301,6 @@ class Minimizer:
             minuit.simplex()
         minuit.migrad(ncall=ncall)
         if run_hesse:
-            minuit.migrad(ncall=ncall)
             minuit.hesse()
         return minuit
 
@@ -276,7 +311,7 @@ class Minimizer:
         simplex: bool = False,
         ncall: int | None = None,
     ):
-        """Run one carefully refined MIGRAD/HESSE minimization."""
+        """Run one MIGRAD minimization followed by HESSE."""
 
         ncall = self._validate_ncall(ncall)
         free, names, fcn, grad = self._backend()
@@ -352,7 +387,9 @@ class Minimizer:
         rng = np.random.default_rng(seed)
         starts: list[dict[str, float]] = []
         if include_default:
-            starts.append({parameter.name: float(parameter.value) for parameter in free})
+            starts.append(
+                {parameter.name: float(parameter.value) for parameter in free}
+            )
         while len(starts) < n_starts:
             starts.append(
                 {
@@ -393,7 +430,10 @@ class Minimizer:
                 "No valid finite minimum was found across the multistart scan"
             )
 
-        best_index = min(valid_indices, key=lambda index: float(results[index].fval))
+        best_index = min(
+            valid_indices,
+            key=lambda index: float(results[index].fval),
+        )
         preliminary = results[best_index]
         self._log(
             f"selected start {best_index + 1}/{len(starts)} for strategy-2/HESSE "
