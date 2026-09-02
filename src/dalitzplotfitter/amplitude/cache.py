@@ -27,8 +27,6 @@ def _component_scales(matrix: Array) -> Array:
 
 
 def _component_scales_unchecked(matrix: Array) -> tuple[Array, Array]:
-    """JIT-compatible component scales plus their diagonal integrals."""
-
     diagonal = jnp.real(jnp.diag(matrix))
     return 1.0 / jnp.sqrt(diagonal), diagonal
 
@@ -46,8 +44,6 @@ def _prepare_component_data(
 
 
 def _scaled_matrix_from_raw(raw_matrix: Array, scales: Array) -> Array:
-    """Apply real positive per-component amplitude scales to ``M_ij``."""
-
     return scales[:, None] * raw_matrix * scales[None, :]
 
 
@@ -57,7 +53,7 @@ def _compact_prepare_kernel(
     normalize_components: bool,
     has_efficiency: bool,
 ):
-    """Build one fused XLA program for coefficient-only cache preparation."""
+    """Build one fused XLA program for first coefficient-only preparation."""
 
     def kernel(data, normalization_data, weights, efficiency):
         prepared_data = _prepare_component_data(components, data)
@@ -83,9 +79,6 @@ def _compact_prepare_kernel(
             data_components = raw_data
             norm_components = raw_norm
 
-        # Without an efficiency map, the post-scale normalization matrix follows
-        # algebraically from the already-computed raw matrix. Avoid a second full
-        # million-point reduction over the normalization grid.
         if has_efficiency:
             fixed_matrix = normalization_matrix(
                 norm_components,
@@ -97,7 +90,25 @@ def _compact_prepare_kernel(
         else:
             fixed_matrix = raw_matrix
 
-        return data_components, fixed_matrix, diagonal
+        return data_components, fixed_matrix, diagonal, scales
+
+    return jax.jit(kernel)
+
+
+def _compact_data_kernel(
+    components: tuple[AmplitudeComponent, ...],
+    *,
+    normalize_components: bool,
+):
+    """Build a data-only kernel for later datasets with fixed normalization."""
+
+    def kernel(data, scales):
+        prepared_data = _prepare_component_data(components, data)
+        raw_data = jnp.stack(
+            [jnp.asarray(c.function(prepared_data, None)) for c in components],
+            axis=1,
+        )
+        return raw_data * scales if normalize_components else raw_data
 
     return jax.jit(kernel)
 
@@ -106,13 +117,10 @@ def _compact_prepare_kernel(
 class PreparedAmplitudeCache:
     """Pre-evaluated amplitude components and normalization matrix.
 
-    Coefficient-only fits use a compact representation. Their kinematic
-    preparation, component evaluation, normalization and scaling are fused into
-    one JAX/XLA program, and only ``data_components`` plus the fixed small
-    normalization matrix survive preparation.
-
-    Large prepared event/normalization mappings and normalization-component
-    arrays are retained only when at least one dynamical parameter floats.
+    The first coefficient-only cache can prepare data and normalization in one
+    fused XLA graph. Its tiny per-component scales and fixed normalization matrix
+    can then be reused by the parent ``DecayModel`` so later datasets only need
+    the data-side amplitude evaluation.
     """
 
     components: tuple[AmplitudeComponent, ...]
@@ -125,6 +133,7 @@ class PreparedAmplitudeCache:
     normalization_matrix_fixed: Array
     efficiency_normalization: Array | None = None
     normalize_components: bool = True
+    component_scales: Array | None = None
 
     @staticmethod
     def build_compact_prepare_kernel(
@@ -133,16 +142,65 @@ class PreparedAmplitudeCache:
         normalize_components: bool,
         has_efficiency: bool,
     ):
-        """Return a reusable JIT wrapper for coefficient-only preparation.
-
-        Keeping this wrapper alive lets JAX reuse the compiled executable for
-        later datasets with the same pytree structure, shapes and dtypes.
-        """
-
         return _compact_prepare_kernel(
             tuple(components),
             normalize_components=bool(normalize_components),
             has_efficiency=bool(has_efficiency),
+        )
+
+    @staticmethod
+    def build_compact_data_kernel(
+        components: Sequence[AmplitudeComponent],
+        *,
+        normalize_components: bool,
+    ):
+        return _compact_data_kernel(
+            tuple(components),
+            normalize_components=bool(normalize_components),
+        )
+
+    @classmethod
+    def prepare_from_fixed_normalization(
+        cls,
+        components: Sequence[AmplitudeComponent],
+        *,
+        data: Mapping[str, Array],
+        normalization_weights: Array,
+        parameters: Sequence[Parameter],
+        normalization_matrix_fixed: Array,
+        component_scales: Array,
+        normalize_components: bool,
+        compact_data_kernel=None,
+    ) -> "PreparedAmplitudeCache":
+        """Prepare only dataset amplitudes using an existing model normalization."""
+
+        components = tuple(components)
+        parameters = tuple(parameters)
+        if any(
+            parameter.kind is ParameterKind.DYNAMICS and not parameter.fixed
+            for parameter in parameters
+        ):
+            raise ValueError("fixed-normalization reuse requires coefficient-only dynamics")
+        scales = jnp.asarray(component_scales)
+        kernel = compact_data_kernel
+        if kernel is None:
+            kernel = cls.build_compact_data_kernel(
+                components,
+                normalize_components=normalize_components,
+            )
+        data_components = kernel(data, scales)
+        return cls(
+            components=components,
+            data=None,
+            normalization_data=None,
+            normalization_weights=jnp.asarray(normalization_weights),
+            parameters=parameters,
+            data_components=data_components,
+            normalization_components=None,
+            normalization_matrix_fixed=jnp.asarray(normalization_matrix_fixed),
+            efficiency_normalization=None,
+            normalize_components=normalize_components,
+            component_scales=scales,
         )
 
     @classmethod
@@ -170,10 +228,6 @@ class PreparedAmplitudeCache:
         )
 
         if not has_floating_dynamics:
-            # Coefficient-only fits are the common high-throughput path. Keep all
-            # expensive preparation inside one compiled graph so GPU execution
-            # does not devolve into hundreds of eager kernel launches. Callers
-            # such as DecayModel may keep the JIT wrapper alive across sessions.
             efficiency = (
                 jnp.asarray(efficiency_normalization)
                 if efficiency_normalization is not None
@@ -186,13 +240,12 @@ class PreparedAmplitudeCache:
                     normalize_components=normalize_components,
                     has_efficiency=efficiency_normalization is not None,
                 )
-            data_components, fixed_matrix, diagonal = kernel(
+            data_components, fixed_matrix, diagonal, scales = kernel(
                 data,
                 normalization_data,
                 weights,
                 efficiency,
             )
-            # Preserve the original explicit validation outside the JIT trace.
             if bool(jnp.any(diagonal <= 0.0)):
                 raise ValueError(
                     "Component normalization requires positive diagonal integrals"
@@ -208,10 +261,9 @@ class PreparedAmplitudeCache:
                 normalization_matrix_fixed=fixed_matrix,
                 efficiency_normalization=efficiency_normalization,
                 normalize_components=normalize_components,
+                component_scales=scales,
             )
 
-        # Dynamic fits retain the prepared coordinates and normalization
-        # components because selected component dynamics must be reevaluated.
         prepared_data = _prepare_component_data(components, data)
         prepared_norm = _prepare_component_data(components, normalization_data)
         raw_data = jnp.stack(
@@ -227,7 +279,7 @@ class PreparedAmplitudeCache:
             data_components = raw_data * scales
             norm_components = raw_norm * scales
         else:
-            scales = None
+            scales = jnp.ones((raw_norm.shape[1],), dtype=jnp.real(raw_component_matrix).dtype)
             data_components = raw_data
             norm_components = raw_norm
 
@@ -253,6 +305,7 @@ class PreparedAmplitudeCache:
             normalization_matrix_fixed=fixed_matrix,
             efficiency_normalization=efficiency_normalization,
             normalize_components=normalize_components,
+            component_scales=scales,
         )
 
     @property
@@ -271,8 +324,6 @@ class PreparedAmplitudeCache:
 
     @property
     def is_compact(self) -> bool:
-        """Whether large normalization-evaluation arrays were released."""
-
         return not self.floating_dynamic_owners
 
     def coefficient_vector(self, fit_values: Mapping[str, object]) -> Array:
@@ -387,22 +438,16 @@ class PreparedAmplitudeCache:
         )
 
     def normalization_matrix(self, fit_values: Mapping[str, object]) -> Array:
-        """Return the normalization matrix at the supplied parameter point."""
-
         _, norm_components = self._evaluate_components(fit_values)
         return self._matrix_with_dynamic_blocks(norm_components)
 
     def fit_fractions(self, fit_values: Mapping[str, object]) -> Array:
-        """Return diagonal fit fractions in component order."""
-
         return matrix_fit_fractions(
             self.coefficient_vector(fit_values),
             self.normalization_matrix(fit_values),
         )
 
     def interference_fractions(self, fit_values: Mapping[str, object]) -> Array:
-        """Return the symmetric matrix of pairwise interference fractions."""
-
         return matrix_interference_fractions(
             self.coefficient_vector(fit_values),
             self.normalization_matrix(fit_values),
