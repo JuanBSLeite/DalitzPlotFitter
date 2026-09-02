@@ -2,9 +2,15 @@ name: toy generation benchmark
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/inverse-toy-sampling
+    paths:
+      - .github/workflows/toy-benchmark.yml
 
 jobs:
   benchmark:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'Run inverse toy benchmark')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
