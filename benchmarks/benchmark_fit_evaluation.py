@@ -144,20 +144,30 @@ def main() -> None:
     )
     session = FitSession(model, data)
 
-    # First session: includes first XLA compilation plus execution of the fused
-    # coefficient-only cache preparation program.
+    # First session: model normalization plus first XLA compilation and data-side
+    # evaluation.
     cache, cache_seconds = _seconds(lambda: session.signal_cache)
     _, cache_reuse_seconds = _seconds(lambda: session.signal_cache)
 
-    # Second independent dataset with identical shapes and the same DecayModel.
-    # This probes executable reuse across sessions rather than the cached_property
-    # lookup inside one FitSession.
+    # Second dataset: normalization is already cached on the DecayModel. The
+    # first data-only preparation may still include compilation of that smaller
+    # executable.
     second_data, second_data_seconds = _seconds(
         lambda: model.generate_phase_space(args.events, seed=args.seed + 1)
     )
     second_session = FitSession(model, second_data)
     second_cache, second_session_cache_seconds = _seconds(
         lambda: second_session.signal_cache
+    )
+
+    # Third dataset: both model normalization and the data-only executable are
+    # warm. This is representative of long toy/bootstrapping campaigns.
+    third_data, third_data_seconds = _seconds(
+        lambda: model.generate_phase_space(args.events, seed=args.seed + 2)
+    )
+    third_session = FitSession(model, third_data)
+    third_cache, third_session_cache_seconds = _seconds(
+        lambda: third_session.signal_cache
     )
 
     minimizer = session.minimizer()
@@ -183,6 +193,7 @@ def main() -> None:
 
     diagonal = jnp.real(jnp.diag(cache.normalization_matrix_fixed))
     second_diagonal = jnp.real(jnp.diag(second_cache.normalization_matrix_fixed))
+    third_diagonal = jnp.real(jnp.diag(third_cache.normalization_matrix_fixed))
     payload = {
         "device": str(jax.devices()[0]),
         "platform": jax.default_backend(),
@@ -198,9 +209,16 @@ def main() -> None:
         "prepared_cache_reuse_seconds": cache_reuse_seconds,
         "second_data_generation_seconds": second_data_seconds,
         "second_session_prepared_cache_seconds": second_session_cache_seconds,
+        "third_data_generation_seconds": third_data_seconds,
+        "third_session_prepared_cache_seconds": third_session_cache_seconds,
         "second_session_cache_speedup": (
             cache_seconds / second_session_cache_seconds
             if second_session_cache_seconds > 0.0
+            else float("inf")
+        ),
+        "third_session_cache_speedup": (
+            cache_seconds / third_session_cache_seconds
+            if third_session_cache_seconds > 0.0
             else float("inf")
         ),
         "cache_is_compact": bool(cache.is_compact),
@@ -208,6 +226,8 @@ def main() -> None:
         "normalization_matrix_diagonal_max": float(jnp.max(diagonal)),
         "second_normalization_matrix_diagonal_min": float(jnp.min(second_diagonal)),
         "second_normalization_matrix_diagonal_max": float(jnp.max(second_diagonal)),
+        "third_normalization_matrix_diagonal_min": float(jnp.min(third_diagonal)),
+        "third_normalization_matrix_diagonal_max": float(jnp.max(third_diagonal)),
         "first_value_and_gradient_seconds": first_seconds,
         "steady_value_and_gradient_seconds_mean": float(jnp.mean(jnp.asarray(times))),
         "steady_value_and_gradient_seconds_min": float(jnp.min(jnp.asarray(times))),
