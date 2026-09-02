@@ -11,7 +11,7 @@ import numpy as np
 
 from dalitzplotfitter.inverse_transform import DalitzInverseTransformSampler
 from dalitzplotfitter.kinematics import PhaseSpaceSample
-from dalitzplotfitter.toy import (
+from dalitzplotfitter.toy_accept import (
     CPToyBackground,
     ToyBackground,
     _acceptance,
