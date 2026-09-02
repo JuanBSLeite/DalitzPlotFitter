@@ -131,6 +131,43 @@ def test_compact_efficiency_weighted_matrix_matches_direct_recomputation():
     )
 
 
+def test_chunked_compact_normalization_matches_direct_partial_tail():
+    f1 = CountingAmplitude([1.0 + 0.0j, 2.0 - 0.2j, 0.3 + 0.4j])
+    f2 = CountingAmplitude([0.2 + 0.1j, 0.4 - 0.2j, -0.7 + 0.3j])
+    c1 = _coefficient("a", 1.0, 0.0, fixed=True)
+    c2 = _coefficient("b", 0.5, 0.3)
+    weights = jnp.linspace(0.5, 1.5, 23)
+    efficiency = jnp.linspace(0.65, 1.0, 23)
+    components = (
+        AmplitudeComponent("a", f1, c1),
+        AmplitudeComponent("b", f2, c2),
+    )
+    norm_data = {"x": jnp.arange(23.0)}
+    cache = PreparedAmplitudeCache.prepare(
+        components,
+        data={"x": jnp.arange(9.0)},
+        normalization_data=norm_data,
+        normalization_weights=weights,
+        efficiency_normalization=efficiency,
+        parameters=(*c1.parameters, *c2.parameters),
+        normalization_chunk_size=7,
+    )
+
+    raw_norm = jnp.stack(
+        [component.function(norm_data, None) for component in components], axis=1
+    )
+    bare = normalization_matrix(raw_norm, weights)
+    scales = 1.0 / jnp.sqrt(jnp.real(jnp.diag(bare)))
+    expected = normalization_matrix(raw_norm * scales, weights, efficiency)
+    assert jnp.allclose(cache.component_scales, scales, rtol=1e-12, atol=1e-12)
+    assert jnp.allclose(
+        cache.normalization_matrix_fixed,
+        expected,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
 def test_compact_unscaled_matrix_matches_direct_recomputation():
     f1 = CountingAmplitude([1.0 + 0.0j, 2.0 - 0.2j])
     f2 = CountingAmplitude([0.2 + 0.1j, 0.4 - 0.2j])
