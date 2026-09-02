@@ -53,32 +53,37 @@ Background shapes can be supplied through `BackgroundSpec`; their deterministic 
 There are two public unweighted toy-generation methods:
 
 ```text
-accept-reject
 inverse-transform
+accept-reject
 ```
 
-Accept-reject remains the default:
+Inverse transform is the default because it is substantially faster for realistic amplitude models:
 
 ```python
 from dalitzplotfitter import generate_toy
 
-toy = generate_toy(model, 50_000, seed=1, method="accept-reject")
-```
-
-For large samples or repeated pseudoexperiments at fixed truth parameters, the numerical inverse-transform path avoids event rejection:
-
-```python
 toy = generate_toy(
     model,
     1_000_000,
     parameters=fit_values,
-    method="inverse-transform",
     inverse_resolution=1024,
     seed=2,
 )
 ```
 
 The inverse method uses a numerical Rosenblatt transform on the physical conventional Dalitz plane. It first samples the marginal distribution and then the conditional distribution, including the exact coordinate Jacobian of the physical Dalitz boundary.
+
+`accept-reject` remains available explicitly as an independent reference and validation sampler:
+
+```python
+toy_reference = generate_toy(
+    model,
+    50_000,
+    parameters=fit_values,
+    method="accept-reject",
+    seed=1,
+)
+```
 
 For repeated toys, prepare the inverse CDFs once:
 
@@ -105,7 +110,6 @@ toy = generate_toy(
     model,
     100_000,
     parameters=fit_values,
-    method="inverse-transform",
     seed=3,
     output_root="toy.root",
 )
@@ -119,7 +123,6 @@ plus_toy, minus_toy = generate_cp_toy(
     minus_model,
     50_000,
     parameters=fit_values,
-    method="inverse-transform",
     seed=4,
     output_root="cp_toy.root",
 )
@@ -296,7 +299,7 @@ Gaussian external measurements can be added with `GaussianConstraint` and `Const
 
 ## Phase-space Monte Carlo
 
-`PhaseSpaceMC` is used for accept-reject proposal/event generation and for weighted rendering samples used by smooth fitted projections. It is **not** used for amplitude/PDF normalization or fit fractions, which remain deterministic. The inverse-transform toy path instead samples the physical Dalitz plane from prepared inverse CDFs.
+`PhaseSpaceMC` is used for accept-reject proposal/event generation and for weighted rendering samples used by smooth fitted projections. It is **not** used for amplitude/PDF normalization or fit fractions, which remain deterministic. The default inverse-transform toy path instead samples the physical Dalitz plane from prepared inverse CDFs.
 
 ## Tutorial notebooks
 
