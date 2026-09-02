@@ -15,6 +15,41 @@ session.plot_projection(result, "s13")
 
 The fit parameters are collected automatically from the amplitude model.
 
+## Toy generation
+
+High-level toy generation uses **accept-reject by default**, following the Laura++ generation strategy:
+
+```python
+from dalitzplotfitter import generate_toy
+
+toy = generate_toy(model, 100_000, parameters=truth, seed=1)
+```
+
+A pilot phase-space sample is used to estimate an envelope. Candidate events are then generated in vectorized batches and accepted with probability proportional to their exact proposal-corrected weight,
+
+```text
+PhaseSpaceMC weight * efficiency * veto * |A|^2
+```
+
+for signal, with the analogous expression for backgrounds. If a later candidate exceeds the current envelope, previously accepted events for that component are discarded, the envelope is enlarged, and generation restarts. The acceptance probability is never clipped, avoiding the bias that clipping would introduce.
+
+The old fixed-pool weighted-resampling generator remains available for validation and comparisons:
+
+```python
+toy = generate_toy(
+    model,
+    100_000,
+    parameters=truth,
+    method="resample",
+    pool_size=1_000_000,
+    seed=1,
+)
+```
+
+For `method="accept-reject"`, `pool_size` controls the pilot sample used to estimate the envelope. Optional tuning parameters are `batch_size`, `envelope_safety` (default 1.20), and `max_restarts`. These normally do not need to be changed.
+
+The same default applies to `generate_signal_toy` and `generate_cp_toy`. CP charge yields are still determined from the deterministic accepted integrals before events are generated, preserving the joint normalization convention used by `CPJointNLL`.
+
 ## ROOT file to fit
 
 ```python
