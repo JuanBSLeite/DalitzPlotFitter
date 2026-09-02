@@ -62,7 +62,7 @@ def write_cp_phase_space_sample(
     path = Path(file_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with uproot.recreate(path) as root_file:
-        root_file[tree] = arrays
+        root_file.mktree(tree, arrays)
     return path
 
 
