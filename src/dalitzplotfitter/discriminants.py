@@ -113,9 +113,14 @@ class LineshapeIntensity1D:
 
     ``|lineshape(m)|^2 / integral(|lineshape(m)|^2 dm)``
 
-    over ``[low, high]``. This allows the same relativistic Breit-Wigner,
-    Flatte, or another compatible one-dimensional complex lineshape used by
-    the amplitude model to be reused in detector-resolution convolutions.
+    over ``[low, high]``. ``from_context`` can infer the full physical mass
+    range of the resonance pair from ``ResonanceContext``:
+
+    ``m_min = m1 + m2`` and ``m_max = M_parent - m_bachelor``.
+
+    This allows the same relativistic Breit-Wigner, Flatte, or another
+    compatible one-dimensional complex lineshape used by the amplitude model
+    to be reused in detector-resolution convolutions.
 
     This class represents an isolated lineshape intensity. For a coherent
     physics model with interfering amplitudes, detector resolution must act on
@@ -133,6 +138,43 @@ class LineshapeIntensity1D:
         nodes, weights = _gauss_legendre_nodes(self.low, self.high, self.order)
         object.__setattr__(self, "_nodes", nodes)
         object.__setattr__(self, "_weights", weights)
+
+    @classmethod
+    def from_context(
+        cls,
+        lineshape: object,
+        context: object,
+        *,
+        order: int = 256,
+        floor: float = 1e-300,
+        parameters: Parameters | None = None,
+    ) -> "LineshapeIntensity1D":
+        """Use the full kinematic mass interval encoded by ``ResonanceContext``.
+
+        The boundaries are fixed when the PDF object is constructed. This is
+        appropriate for the usual case in which parent and daughter masses are
+        fixed constants while resonance pole parameters may float in the fit.
+        ``parameters`` is provided for contexts whose kinematic masses use the
+        same resolvable parameter interface.
+        """
+
+        resolved = context.resolve(parameters)
+        daughter1, daughter2 = resolved.daughter_masses
+        low = float(daughter1 + daughter2)
+        high = float(resolved.parent_mass - resolved.bachelor_mass)
+        if high <= low:
+            raise ValueError(
+                "ResonanceContext has no physical two-body mass interval: "
+                "parent_mass - bachelor_mass must exceed daughter mass sum"
+            )
+        return cls(
+            lineshape=lineshape,
+            context=context,
+            low=low,
+            high=high,
+            order=order,
+            floor=floor,
+        )
 
     def _intensity(self, x: Array, parameters: Parameters | None = None) -> Array:
         context = self.context.resolve(parameters)
