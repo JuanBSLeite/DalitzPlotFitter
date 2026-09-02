@@ -62,6 +62,10 @@ class Minimizer:
     cache, so when Minuit asks for both at identical parameters the expensive
     device evaluation and device-to-host synchronization occur only once.
 
+    A refined fit normally performs one MIGRAD followed by HESSE. A second
+    MIGRAD is used only if the first attempt is not valid, preserving the older
+    robust fallback without paying for it on already-converged fits.
+
     Verbosity levels are:
 
     - ``verbose=0``: silent;
@@ -200,12 +204,7 @@ class Minimizer:
         relative_floor: float = 1e-12,
         print_table: bool = True,
     ) -> GradientCheckResult:
-        """Compare JAX gradients with central finite differences.
-
-        ``values`` supplies the point to test. Missing free parameters use their
-        configured default values. The finite-difference step for parameter ``i``
-        is ``step_scale * max(abs(x_i), 1)``.
-        """
+        """Compare JAX gradients with central finite differences."""
 
         if step_scale <= 0:
             raise ValueError("step_scale must be positive")
@@ -301,6 +300,9 @@ class Minimizer:
             minuit.simplex()
         minuit.migrad(ncall=ncall)
         if run_hesse:
+            if not bool(minuit.valid):
+                self._log("first MIGRAD was not valid; retrying before HESSE")
+                minuit.migrad(ncall=ncall)
             minuit.hesse()
         return minuit
 
@@ -311,7 +313,7 @@ class Minimizer:
         simplex: bool = False,
         ncall: int | None = None,
     ):
-        """Run one MIGRAD minimization followed by HESSE."""
+        """Run MIGRAD with a conditional retry, then HESSE."""
 
         ncall = self._validate_ncall(ncall)
         free, names, fcn, grad = self._backend()
@@ -356,11 +358,7 @@ class Minimizer:
                 value = min(value, float(high))
         return value
 
-    def random_start(
-        self,
-        *,
-        seed: int | None = None,
-    ) -> dict[str, float]:
+    def random_start(self, *, seed: int | None = None) -> dict[str, float]:
         """Draw one reproducible start for all free parameters."""
 
         rng = np.random.default_rng(seed)
