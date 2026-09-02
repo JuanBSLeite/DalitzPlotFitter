@@ -144,10 +144,21 @@ def main() -> None:
     )
     session = FitSession(model, data)
 
-    # This is the main cold-start metric. In coefficient-only fits it includes
-    # XLA compilation plus execution of the fused cache-preparation program.
+    # First session: includes first XLA compilation plus execution of the fused
+    # coefficient-only cache preparation program.
     cache, cache_seconds = _seconds(lambda: session.signal_cache)
     _, cache_reuse_seconds = _seconds(lambda: session.signal_cache)
+
+    # Second independent dataset with identical shapes and the same DecayModel.
+    # This probes executable reuse across sessions rather than the cached_property
+    # lookup inside one FitSession.
+    second_data, second_data_seconds = _seconds(
+        lambda: model.generate_phase_space(args.events, seed=args.seed + 1)
+    )
+    second_session = FitSession(model, second_data)
+    second_cache, second_session_cache_seconds = _seconds(
+        lambda: second_session.signal_cache
+    )
 
     minimizer = session.minimizer()
     free, names, fcn, grad = minimizer._backend()
@@ -171,6 +182,7 @@ def main() -> None:
         times.append(time.perf_counter() - start)
 
     diagonal = jnp.real(jnp.diag(cache.normalization_matrix_fixed))
+    second_diagonal = jnp.real(jnp.diag(second_cache.normalization_matrix_fixed))
     payload = {
         "device": str(jax.devices()[0]),
         "platform": jax.default_backend(),
@@ -184,9 +196,18 @@ def main() -> None:
         "data_generation_seconds": data_seconds,
         "prepared_cache_seconds": cache_seconds,
         "prepared_cache_reuse_seconds": cache_reuse_seconds,
+        "second_data_generation_seconds": second_data_seconds,
+        "second_session_prepared_cache_seconds": second_session_cache_seconds,
+        "second_session_cache_speedup": (
+            cache_seconds / second_session_cache_seconds
+            if second_session_cache_seconds > 0.0
+            else float("inf")
+        ),
         "cache_is_compact": bool(cache.is_compact),
         "normalization_matrix_diagonal_min": float(jnp.min(diagonal)),
         "normalization_matrix_diagonal_max": float(jnp.max(diagonal)),
+        "second_normalization_matrix_diagonal_min": float(jnp.min(second_diagonal)),
+        "second_normalization_matrix_diagonal_max": float(jnp.max(second_diagonal)),
         "first_value_and_gradient_seconds": first_seconds,
         "steady_value_and_gradient_seconds_mean": float(jnp.mean(jnp.asarray(times))),
         "steady_value_and_gradient_seconds_min": float(jnp.min(jnp.asarray(times))),
