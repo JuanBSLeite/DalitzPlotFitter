@@ -40,7 +40,7 @@ def test_relativistic_lineshape_intensity_uses_context_mass_range_and_is_normali
         parent_radius=4.0,
     )
     pdf = LineshapeIntensity1D.from_context(
-        RelativisticBreitWigner(), context, order=512
+        RelativisticBreitWigner(), context, quadrature_order=512
     )
     expected_low = 0.493677 + 0.13957039
     expected_high = 5.27934 - 0.13957039
