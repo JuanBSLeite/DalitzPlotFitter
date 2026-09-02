@@ -50,44 +50,14 @@ def _blatt_polynomial(z, angular_momentum: int):
     raise NotImplementedError("barrier factors currently support L=0..4")
 
 
-def blatt_weisskopf_denominator(momentum, angular_momentum: int, radius):
-    """Return the event-side Blatt-Weisskopf polynomial ``P_L(qR)``.
-
-    For a fixed radius this quantity depends only on event kinematics and can be
-    cached when a resonance pole mass floats.  The pole-side polynomial remains
-    dynamic because the pole momentum changes with the fitted mass.
-    """
-
-    momentum = jnp.asarray(momentum)
-    return _blatt_polynomial(momentum * radius, int(angular_momentum))
-
-
-def blatt_weisskopf_from_denominator(
-    pole_momentum,
-    denominator,
-    angular_momentum: int,
-    radius,
-):
-    """Evaluate a Blatt-Weisskopf factor from a prepared event denominator."""
-
-    l = int(angular_momentum)
-    denominator = jnp.asarray(denominator)
-    if l == 0:
-        return jnp.ones_like(denominator)
-    numerator = _blatt_polynomial(jnp.asarray(pole_momentum) * radius, l)
-    return jnp.sqrt(numerator / denominator)
-
-
 def blatt_weisskopf_from_momenta(momentum, pole_momentum, angular_momentum: int, radius):
     l = int(angular_momentum)
     momentum = jnp.asarray(momentum)
-    denominator = blatt_weisskopf_denominator(momentum, l, radius)
-    return blatt_weisskopf_from_denominator(
-        pole_momentum,
-        denominator,
-        l,
-        radius,
-    )
+    if l == 0:
+        return jnp.ones_like(momentum)
+    z = momentum * radius
+    z0 = pole_momentum * radius
+    return jnp.sqrt(_blatt_polynomial(z0, l) / _blatt_polynomial(z, l))
 
 
 def energy_dependent_width(mass, context: ResonanceContext):
@@ -103,8 +73,6 @@ def energy_dependent_width(mass, context: ResonanceContext):
 
 __all__ = [
     "bachelor_momentum_resonance_frame",
-    "blatt_weisskopf_denominator",
-    "blatt_weisskopf_from_denominator",
     "blatt_weisskopf_from_momenta",
     "breakup_momentum",
     "effective_pole_mass",
