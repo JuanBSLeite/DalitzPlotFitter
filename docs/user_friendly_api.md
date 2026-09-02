@@ -103,7 +103,18 @@ session.plot_projection(result, "s13", log_scale=True)
 
 Data are shown as black circular points with statistical error bars, while the fitted signal/background components and total fit are drawn as lines. For `s12`, `s13`, and `s23`, the vertical-axis label is generated automatically from the actual uniform bin width, for example `Candidates / 0.25 GeV^2`. `log_scale=True` changes the projection y axis to logarithmic scale.
 
-The projection is shown in event units and can include signal plus each background category. The deterministic normalization sample is used to evaluate the fitted model rather than generating a new toy sample.
+Fit and PDF normalization always remain deterministic and use the configured Gauss--Legendre or Square-Dalitz quadrature. The quadrature nodes are **not** histogrammed directly for display, because a deterministic integration grid can alias strongly when projected onto arbitrary one-dimensional histogram bins. Instead, `plot_projection()` generates a weighted phase-space Monte Carlo sample only for rendering the fitted curves. This does not modify the NLL, fitted parameters, normalization integrals, or fit fractions.
+
+The default rendering sample contains 250000 phase-space points and is deterministic for a fixed seed. It can be adjusted if needed:
+
+```python
+session.plot_projection(
+    result,
+    "s13",
+    projection_size=500_000,
+    projection_seed=123,
+)
+```
 
 ## Simultaneous direct-CP fits
 
@@ -172,7 +183,7 @@ session.plot_projection(result, "s13")
 session.plot_projection(result, "s23", log_scale=True)
 ```
 
-The CP projections use the same black-point/error-bar convention and automatic candidates-per-bin-width y label. They deliberately use one common total-event normalization. B+ and B- are therefore **not normalized independently**, so an integrated charge asymmetry remains visible.
+The CP projections use two weighted phase-space MC rendering samples, but their signal and background weights are normalized **jointly across B+ and B-**. The plots therefore retain the same common global normalization as `CPJointNLL`; B+ and B- are not normalized independently and an integrated charge asymmetry remains visible.
 
 ## Plot helpers
 
