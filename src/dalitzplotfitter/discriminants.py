@@ -6,7 +6,10 @@ from dataclasses import dataclass
 from typing import Mapping
 
 import jax.numpy as jnp
+import numpy as np
 from jax import Array
+
+from dalitzplotfitter.dynamics.context import resolve_value
 
 Parameters = Mapping[str, object]
 
@@ -19,6 +22,17 @@ def _resolve(value: object, parameters: Parameters | None):
 def jax_erf(x: Array) -> Array:
     from jax.scipy.special import erf as _erf
     return _erf(x)
+
+
+def _gauss_legendre_nodes(low: float, high: float, order: int) -> tuple[Array, Array]:
+    if high <= low:
+        raise ValueError("integration interval requires low < high")
+    if order < 2:
+        raise ValueError("Gauss-Legendre order must be at least two")
+    nodes, weights = np.polynomial.legendre.leggauss(order)
+    scale = 0.5 * (high - low)
+    shift = 0.5 * (high + low)
+    return jnp.asarray(scale * nodes + shift), jnp.asarray(scale * weights)
 
 
 @dataclass(frozen=True)
@@ -88,6 +102,58 @@ class BreitWigner1D:
             & (norm > 0.0)
         )
         return jnp.where(inside, jnp.clip(raw / norm, min=self.floor), 0.0)
+
+
+@dataclass(frozen=True)
+class LineshapeIntensity1D:
+    """Normalize the intensity of an existing complex resonance lineshape.
+
+    The wrapped lineshape follows the dynamics-plugin interface
+    ``lineshape(mass, ResonanceContext)``. The returned PDF is
+
+    ``|lineshape(m)|^2 / integral(|lineshape(m)|^2 dm)``
+
+    over ``[low, high]``. This allows the same relativistic Breit-Wigner,
+    Flatte, or another compatible one-dimensional complex lineshape used by
+    the amplitude model to be reused in detector-resolution convolutions.
+
+    This class represents an isolated lineshape intensity. For a coherent
+    physics model with interfering amplitudes, detector resolution must act on
+    the full coherent intensity rather than on each component independently.
+    """
+
+    lineshape: object
+    context: object
+    low: float
+    high: float
+    order: int = 256
+    floor: float = 1e-300
+
+    def __post_init__(self) -> None:
+        nodes, weights = _gauss_legendre_nodes(self.low, self.high, self.order)
+        object.__setattr__(self, "_nodes", nodes)
+        object.__setattr__(self, "_weights", weights)
+
+    def _intensity(self, x: Array, parameters: Parameters | None = None) -> Array:
+        context = self.context.resolve(parameters)
+        lineshape = resolve_value(self.lineshape, parameters)
+        amplitude = jnp.asarray(lineshape(jnp.asarray(x), context))
+        return jnp.real(amplitude * jnp.conj(amplitude))
+
+    def normalization(self, parameters: Parameters | None = None) -> Array:
+        values = self._intensity(self._nodes, parameters)
+        return jnp.sum(self._weights * values)
+
+    def __call__(self, x: Array, parameters: Parameters | None = None) -> Array:
+        x = jnp.asarray(x)
+        norm = self.normalization(parameters)
+        intensity = self._intensity(x, parameters)
+        inside = (x >= self.low) & (x <= self.high) & (norm > 0.0)
+        return jnp.where(
+            inside,
+            jnp.clip(intensity / norm, min=self.floor),
+            0.0,
+        )
 
 
 @dataclass(frozen=True)
@@ -181,4 +247,5 @@ __all__ = [
     "FactorizedDensity",
     "Gaussian1D",
     "Histogram1D",
+    "LineshapeIntensity1D",
 ]
