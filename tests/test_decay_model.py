@@ -366,3 +366,55 @@ def test_decay_model_builds_normalized_pdf_with_internal_grid():
     assert values.shape == (norm.size,)
     assert bool(jnp.all(jnp.isfinite(values)))
     assert bool(jnp.all(values > 0.0))
+
+
+def test_amplitude_model_is_built_once_and_reused():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    model = _model(
+        channel,
+        [
+            Resonance(
+                "rho_test",
+                pair=(0, 1),
+                coefficient=RealImag(1.0, 0.0),
+                mass=0.775,
+                width=0.149,
+                spin=1,
+            ),
+            NonResonant(RealImag(0.2, -0.1)),
+        ],
+    )
+    first = model.amplitude_model
+    second = model.amplitude_model
+    assert first is second
+    assert first.components[0] is second.components[0]
+
+
+def test_compact_prepare_kernel_is_reused_by_model():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    model = _model(
+        channel,
+        [NonResonant(RealImag(1.0, 0.0), name="NR")],
+    )
+    first = model._compact_prepare_kernel(
+        normalize_components=True,
+        has_efficiency=False,
+    )
+    second = model._compact_prepare_kernel(
+        normalize_components=True,
+        has_efficiency=False,
+    )
+    efficient = model._compact_prepare_kernel(
+        normalize_components=True,
+        has_efficiency=True,
+    )
+    assert first is second
+    assert efficient is not first
+
+    first_data = model.generate_phase_space(32, seed=101)
+    second_data = model.generate_phase_space(32, seed=102)
+    first_cache = model.prepare_cache(first_data)
+    second_cache = model.prepare_cache(second_data)
+    assert first_cache.is_compact
+    assert second_cache.is_compact
+    assert len(model._compact_prepare_kernels) == 2
