@@ -6,6 +6,9 @@ from dalitzplotfitter import (
     FactorizedDensity,
     Gaussian1D,
     Histogram1D,
+    LineshapeIntensity1D,
+    RelativisticBreitWigner,
+    ResonanceContext,
 )
 
 
@@ -23,6 +26,25 @@ def test_breit_wigner_is_normalized_on_finite_interval():
     pdf = BreitWigner1D(mean=5.279, width=0.030, low=5.15, high=5.40)
     x = jnp.linspace(5.15, 5.40, 40001)
     assert jnp.isclose(_trapz(pdf(x), x), 1.0, rtol=2e-4, atol=2e-4)
+
+
+def test_relativistic_lineshape_intensity_is_normalized():
+    context = ResonanceContext(
+        parent_mass=5.27934,
+        daughter_masses=(0.493677, 0.13957039),
+        bachelor_mass=0.13957039,
+        spin=1,
+        pole_mass=0.8958,
+        pole_width=0.0474,
+        resonance_radius=4.0,
+        parent_radius=4.0,
+    )
+    pdf = LineshapeIntensity1D(
+        RelativisticBreitWigner(), context, low=0.64, high=1.20, order=512
+    )
+    x = jnp.linspace(0.64, 1.20, 40001)
+    assert jnp.isclose(_trapz(pdf(x), x), 1.0, rtol=5e-4, atol=5e-4)
+    assert jnp.all(pdf(x) >= 0.0)
 
 
 def test_exponential_is_normalized_on_finite_interval():
