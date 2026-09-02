@@ -1,6 +1,6 @@
 # DalitzPlotFitter
 
-DalitzPlotFitter is a Python package under development for unbinned amplitude fits of three-body decays. The numerical pipeline is JAX end to end: phase-space generation, kinematics, amplitudes, normalization, likelihoods and gradients all run on the active JAX device. `iminuit` performs minimization and `particle` supplies standard particle properties.
+DalitzPlotFitter is a Python package under development for unbinned amplitude fits of three-body decays. The numerical pipeline is JAX end to end: phase-space generation, kinematics, amplitudes, normalization, likelihoods and gradients all run on the active JAX device. `iminuit` performs minimization, `particle` supplies standard particle properties, and `uproot` provides ROOT-file input/output without requiring PyROOT.
 
 There is no TensorFlow dependency or mixed TensorFlow/JAX numerical path.
 
@@ -9,16 +9,9 @@ Laura++ is one of the main physics references used to define and validate resona
 ## High-level API
 
 ```python
-from dalitzplotfitter import (
-    DecayChannel,
-    DecayModel,
-    NonResonant,
-    RealImag,
-    Resonance,
-)
+from dalitzplotfitter import DecayChannel, DecayModel, NonResonant, RealImag, Resonance
 
 channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
-
 model = DecayModel(
     channel,
     [
@@ -26,54 +19,186 @@ model = DecayModel(
         NonResonant(RealImag(0.2, -0.1)),
     ],
 )
-
-pdf = model.pdf()
 ```
 
-`DecayChannel` resolves the parent and daughter masses from `particle`. `Resonance` resolves resonance mass, width and spin from `particle` unless an analysis-specific override is supplied.
-
-Historical or analysis-specific values can be supplied explicitly:
+For common fits, `FitSession` composes the PDF, likelihood, backgrounds, constraints and minimizer automatically:
 
 ```python
-Resonance(
-    "sigma",
-    pair=(0, 1),
-    coefficient=RealImag(x, y),
-    mass=0.478,
-    width=0.324,
-    spin=0,
+from dalitzplotfitter import FitSession
+
+session = FitSession(model, data)
+result = session.fit(simplex=True)
+session.report(result)
+session.plot_projection(result, "s13")
+```
+
+A ROOT-file workflow can be reduced to:
+
+```python
+session = FitSession.from_root(
+    model,
+    "data.root",
+    "DecayTree",
+    s12="S12",
+    s13="S13",
+    s23="S23",
+)
+result = session.fit()
+```
+
+Background shapes can be supplied through `BackgroundSpec`; their deterministic Dalitz normalization is computed automatically.
+
+## User-friendly toy generation
+
+Once a model exists, pseudo-data no longer requires manually creating a phase-space pool and calling `weighted_resample`:
+
+```python
+from dalitzplotfitter import generate_toy
+
+toy = generate_toy(model, 50_000, seed=1)
+```
+
+Efficiency, vetoes and backgrounds can be included directly:
+
+```python
+from dalitzplotfitter import ToyBackground
+
+toy = generate_toy(
+    model,
+    50_000,
+    parameters=fit_values,
+    efficiency=efficiency,
+    veto=veto,
+    signal_fraction=0.82,
+    backgrounds=(ToyBackground("comb", background_shape),),
+    seed=2,
 )
 ```
 
-## Normalization
-
-Amplitude and PDF normalization use **only deterministic equal-area `DalitzGrid` quadrature**.
+Toy samples can be written directly to ROOT:
 
 ```python
-from dalitzplotfitter import DalitzGrid
-
-norm = DalitzGrid(
-    channel.parent_mass,
-    channel.daughter_masses,
-    resolution=1000,
-).sample()
-cache = model.prepare_cache(data, norm)
+toy = generate_toy(
+    model,
+    100_000,
+    parameters=fit_values,
+    seed=3,
+    output_root="toy.root",
+)
 ```
 
-A resolution `N` gives exactly `N**2` physical integration points. The default `DecayModel` normalization uses
+For simultaneous direct-CP pseudoexperiments, `generate_cp_toy` computes the accepted B+/B- charge split from the model integrals automatically. When ROOT output is requested, both charges are written to one TTree with `charge=+1` for B+ and `charge=-1` for B-:
+
+```python
+plus_toy, minus_toy = generate_cp_toy(
+    plus_model,
+    minus_model,
+    50_000,
+    parameters=fit_values,
+    seed=4,
+    output_root="cp_toy.root",
+)
+```
+
+See `docs/toy_generation.md` and `notebooks/19_toy_root_output.ipynb`.
+
+## Simultaneous CP fits
+
+`CPFitSession` removes the manual construction of the two prepared caches, joint CP likelihood and minimizer:
+
+```python
+from dalitzplotfitter import CPFitSession
+
+session = CPFitSession(
+    plus_model,
+    minus_model,
+    plus_data,
+    minus_data,
+)
+result = session.fit()
+session.report(result)
+session.plot_projection(result, "s13")
+```
+
+Shared parameters are collected only once. Efficiency, vetoes and `CPBackgroundSpec` categories are folded into the same joint charge-Dalitz normalization convention used by `CPJointNLL`.
+
+Charge-separated projection plots use one common global normalization, so the B+ and B- projections do not hide an integrated charge asymmetry through independent rescaling.
+
+See `docs/user_friendly_api.md`.
+
+## Plot helpers
+
+```python
+from dalitzplotfitter import plot_dalitz, plot_square_dalitz
+
+plot_dalitz(data, x="s13", y="s23")
+plot_square_dalitz(
+    data,
+    mother_mass=channel.parent_mass,
+    masses=channel.daughter_masses,
+    pair=(0, 2),
+)
+```
+
+One-dimensional fitted projections use a separate weighted phase-space rendering sample so arbitrary histogram bins remain smooth. This rendering sample does not replace the deterministic quadrature used for likelihood normalization or fit fractions.
+
+## ROOT input/output with uproot
+
+ROOT files are supported directly through `uproot`, with no PyROOT dependency.
+
+```python
+from dalitzplotfitter import read_phase_space_sample
+
+data = read_phase_space_sample(
+    "data.root", "DecayTree",
+    s12="S12", s13="S13", s23="S23",
+    weight="eventWeight",
+)
+```
+
+ROOT TH2 maps in ordinary Dalitz variables can be loaded with `histogram_efficiency_from_root` and `histogram_background_from_root`.
+
+For B-decay analyses, ROOT TH2 maps defined directly in Square-Dalitz coordinates are also supported:
+
+```python
+from dalitzplotfitter import (
+    square_dalitz_background_from_root,
+    square_dalitz_efficiency_from_root,
+)
+
+kwargs = dict(
+    mother_mass=channel.parent_mass,
+    masses=channel.daughter_masses,
+    pair=(0, 2),
+)
+
+efficiency = square_dalitz_efficiency_from_root(
+    "maps.root", "efficiency_sdp", **kwargs
+)
+background = square_dalitz_background_from_root(
+    "maps.root", "background_sdp", **kwargs
+)
+```
+
+The TH2 axes are interpreted as `(m', theta')`. During PDF evaluation the fitter converts `(s12,s13,s23)` internally to Square-Dalitz coordinates before the bin lookup. The ordered `pair` must match the convention used to build the external maps.
+
+See `docs/root_io.md` for details.
+
+## Normalization
+
+Amplitude and PDF normalization use deterministic quadrature. The supported methods are `gauss-legendre` and `square-dalitz`.
 
 ```python
 model = DecayModel(
     channel,
     components,
-    normalize_components=True,
+    normalization_method="square-dalitz",
     normalization_resolution=1000,
+    normalization_pair=(0, 1),
 )
 ```
 
-so the default normalization support contains exactly one million deterministic grid points. It is created lazily and reused for the lifetime of the model.
-
-There is no Monte Carlo normalization path in the supported API.
+Square-Dalitz histogram values are scalar efficiency/background values; they do not receive an extra Jacobian. The coordinate-transformation Jacobian belongs to the integration measure and is already carried by `SquareDalitzGrid` normalization weights.
 
 ## Component normalization convention
 
@@ -83,62 +208,104 @@ Every dynamical component is normalized before applying its complex coefficient:
 integral dPhi |F_j|^2 = 1
 ```
 
-This keeps coefficient scales stable when dynamical parameters such as resonance masses or widths float. Detector efficiency is excluded from the individual component normalization and enters only the total PDF normalization.
+Detector efficiency is excluded from individual component normalization and enters only total PDF normalization.
+
+## Detector-resolution convolution
+
+A generic one-dimensional convolution layer is available for continuously smeared observables. The same relativistic resonance lineshape used by the amplitude model can be converted into an isolated normalized intensity and convolved with a Gaussian detector response:
+
+```python
+from dalitzplotfitter import (
+    ConvolvedPDF1D,
+    GaussianResolution1D,
+    LineshapeIntensity1D,
+    RelativisticBreitWigner,
+)
+
+true_mass = LineshapeIntensity1D.from_context(
+    RelativisticBreitWigner(),
+    context,
+    quadrature_order=512,
+)
+
+reco_mass = ConvolvedPDF1D(
+    true_mass,
+    GaussianResolution1D(sigma=0.008),
+    true_low=true_mass.low,
+    true_high=true_mass.high,
+    observed_low=true_mass.low,
+    observed_high=true_mass.high,
+    quadrature_order=192,
+)
+```
+
+For interfering amplitudes, detector resolution must act on the full coherent intensity rather than on each component intensity independently. See `docs/convolution_resolution.md` and `notebooks/20_pdf_convolution_resolution.ipynb`.
 
 ## Architecture
 
 ```text
-DecayChannel + amplitude-component declarations
-        -> particle masses / widths / spins
-        -> pure-JAX kinematics
-        -> resonance lineshape
-        -> Blatt-Weisskopf factors
-        -> angular factor
-        -> automatic identical-particle symmetrization
-        -> deterministic DalitzGrid component normalization
-        -> RealImag coefficient
+ROOT TTree / arrays / generated sample
+        -> PhaseSpaceSample
+        -> DecayChannel + amplitude components
+        -> pure-JAX kinematics and dynamics
+        -> deterministic Dalitz / Square-Dalitz normalization
         -> coherent amplitude
-        -> deterministic DalitzGrid PDF normalization
+        -> optional ordinary-Dalitz or Square-Dalitz efficiency/background maps
+        -> optional veto / SCF / multiple backgrounds
+        -> optional discriminating-variable PDFs / 1D resolution convolution
+        -> optional Gaussian constraints
+        -> FitSession / CPFitSession convenience layer (optional)
         -> JAX NLL + automatic gradients
         -> iminuit
 ```
 
-## Phase-space Monte Carlo is for toys only
+The low-level `SignalPDF`, `PreparedAmplitudeCache`, likelihood and `Minimizer` classes remain public for advanced analyses and numerical validation.
 
-`PhaseSpaceMC` remains available for event/proposal generation. It implements three-body Lorentz-invariant phase space directly in JAX and returns the corresponding phase-space importance weight.
+## Additional discriminating variables
 
-Toy generation can use a weighted pool:
+Basic observables beyond the Dalitz plot can be added with factorized PDFs using `FactorizedDensity`, `Gaussian1D`, `Exponential1D` and `Histogram1D`.
+
+## External constraints
+
+Gaussian external measurements can be added with `GaussianConstraint` and `ConstrainedNLL`, or attached directly to a fit session.
+
+## Phase-space Monte Carlo
+
+`PhaseSpaceMC` is used for proposal/event generation and for weighted rendering samples used by smooth fitted projections. It is **not** used for amplitude/PDF normalization or fit fractions, which remain deterministic.
+
+## Tutorial notebooks
+
+The repository contains a progressive set of examples:
+
+- `notebooks/01_e791_toy_fit.ipynb`: E791 signal toy generation and fit;
+- `notebooks/02_e791_efficiency_background_fit.ipynb`: E791 efficiency/background fit;
+- `notebooks/03_b2kpipi_toy_fit.ipynb`: non-CP `B+ -> K+ pi+ pi-` toy fit;
+- `notebooks/04_b2kpipi_efficiency_background_fit.ipynb`: B efficiency/background fit;
+- `notebooks/05_b2kpipi_cp_toy_fit.ipynb`: simultaneous direct-CP signal fit;
+- `notebooks/06_b2kpipi_cp_efficiency_background_fit.ipynb`: CP fit with efficiency/background;
+- `notebooks/07_b2kpipi_scf_migration.ipynb`: SCF migration;
+- `notebooks/08_b2kpipi_multiple_backgrounds.ipynb`: arbitrary multiple backgrounds;
+- `notebooks/09_b2kpipi_veto_maps.ipynb`: veto maps;
+- `notebooks/10_b2kpipi_discriminating_variables.ipynb`: Dalitz + mass + BDT;
+- `notebooks/11_b2kpipi_gaussian_constraints.ipynb`: Gaussian constraints;
+- `notebooks/12_b2kpipi_scf_with_veto.ipynb`: SCF + reconstructed-space veto;
+- `notebooks/13_b2kpipi_root_tree_input.ipynb`: ROOT TTree input;
+- `notebooks/14_b2kpipi_root_hist_eff_background.ipynb`: ROOT TH2 maps in ordinary Dalitz coordinates;
+- `notebooks/15_b2kpipi_square_dalitz_eff_background.ipynb`: ROOT TH2 efficiency/background maps in `(m', theta')`;
+- `notebooks/16_user_friendly_quickstart.ipynb`: concise non-CP `FitSession` workflow;
+- `notebooks/17_b2kpipi_cp_user_friendly.ipynb`: concise `CPFitSession` workflow and charge-separated fitted projections;
+- `notebooks/18_user_friendly_toy_generation.ipynb`: signal/background and CP pseudo-data generation;
+- `notebooks/19_toy_root_output.ipynb`: non-CP and CP toy generation with ROOT TTree output;
+- `notebooks/20_pdf_convolution_resolution.ipynb`: relativistic Breit-Wigner intensity convolved with Gaussian detector resolution.
+
+The B-to-Kpipi examples consistently use
 
 ```text
-w_target(k) = w_PS(k) |A(x_k; theta_gen)|^2
+s13 = m^2(K+ pi-)
+s23 = m^2(pi+ pi-)
 ```
 
-followed by `weighted_resample()`.
-
-`PhaseSpaceMC` is **not** used for amplitude or PDF normalization.
-
-## Deterministic Dalitz grid
-
-`DalitzGrid` constructs an equal-area grid in transformed Dalitz coordinates. A resolution `N` gives exactly `N**2` physical integration points with constant quadrature weights. Details are in `docs/dalitz_grid_integration.md`.
-
-## E791 examples
-
-Current validation examples use deterministic grid normalization:
-
-- `notebooks/02_fit_dynamic_parameters.ipynb`: E791 coefficient closure;
-- `notebooks/03_lineshape_parameter_diagnostics.ipynb`: lineshape diagnostics;
-- `notebooks/04_normalization_grid_diagnostics.ipynb`: grid-convergence and normalization diagnostics;
-- `notebooks/07_e791_rho1450_mass_width_closure.ipynb`: coefficients plus `rho(1450)` mass and width.
-
-## Coefficients
-
-The supported complex coefficient parameterization is
-
-```text
-c = x + i y
-```
-
-through `RealImag`. `x` and `y` may be constants or fit `Parameter` objects.
+for particle ordering `(K+, pi+, pi-)`.
 
 ## Installation
 

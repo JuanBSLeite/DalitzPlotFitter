@@ -65,45 +65,128 @@ When only coefficient parameters float, the dynamical basis and normalization ma
 
 At least one complex-amplitude convention must be fixed, as in an ordinary amplitude fit, to remove the overall scale/phase degeneracy.
 
-## Complete BaBar B± -> K± pi∓ pi± benchmark
+## Efficiency and background mixtures
 
-`notebooks/12_cp_coefficients_closure.ipynb` implements the complete nominal signal isobar model of BaBar, Phys. Rev. D 78, 012004 (2008), arXiv:0803.4451.
+`CPJointNLL` also supports efficiency-weighted signal and background while preserving the same joint charge normalization.
 
-The nominal model contains a constant phase-space nonresonant term and nine intermediate states:
+With charge-dependent efficiencies `epsilon_q(phi)` define
 
-- `K*(892)0 pi`;
-- the LASS `(K pi)_0*0 pi` S-wave;
-- `K2*(1430)0 pi`;
-- `rho(770)0 K`;
-- `omega(782) K`;
-- `f0(980) K`;
-- `f2(1270) K`;
-- the scalar `fX(1300) K` term used by BaBar;
-- `chi_c0 K`.
+```text
+I_plus^eps  = integral epsilon_plus(phi)  |A_plus(phi)|^2  dPhi
+I_minus^eps = integral epsilon_minus(phi) |A_minus(phi)|^2 dPhi.
+```
 
-The central `x`, `y`, `dx`, and `dy` values are taken directly from Table I of the paper. `K*(892)0` fixes the CP-even reference to `x=1`, `y=0`; its CP-odd shifts remain floating. BaBar fixes `dx=dy=0` for the `omega(782) K` and phase-space nonresonant terms, and the benchmark preserves that choice.
+The `PreparedAmplitudeCache` objects passed to `CPJointNLL` must therefore be prepared with the corresponding efficiency values on their normalization samples. Event-by-event efficiency arrays are passed separately to `CPJointNLL`.
 
-The dynamical conventions reproduced in the fitter are:
+For background functions `B_plus(phi)` and `B_minus(phi)`, define
 
-- per-component unit Dalitz normalization;
-- Blatt-Weisskopf radius `4 GeV^-1`;
-- relativistic Breit-Wigner for ordinary resonances;
-- LASS with `a=2.07 GeV^-1`, `r=3.32 GeV^-1`, and a `1.8 GeV` effective-range cutoff;
-- `BaBarFlatte` for `f0(980)` with the charged/neutral isospin weights used by BaBar;
-- a constant complex amplitude for the separate phase-space nonresonant component;
-- the fitted scalar `fX` mass and width, `1.479 GeV` and `0.080 GeV`.
+```text
+J_plus  = integral B_plus(phi)  dPhi
+J_minus = integral B_minus(phi) dPhi.
+```
 
-For the particle ordering
+### Non-extended convention
+
+The reference mixture parameter is the **signal fraction**, `f_sig`,
+
+```text
+p(phi,+) = f_sig epsilon_plus(phi)|A_plus(phi)|^2
+                     / (I_plus^eps + I_minus^eps)
+           + (1-f_sig) B_plus(phi)/(J_plus + J_minus)
+
+p(phi,-) = f_sig epsilon_minus(phi)|A_minus(phi)|^2
+                     / (I_plus^eps + I_minus^eps)
+           + (1-f_sig) B_minus(phi)/(J_plus + J_minus).
+```
+
+The total charge probabilities are
+
+```text
+P(+) = f_sig I_plus^eps/(I_plus^eps + I_minus^eps)
+       + (1-f_sig) J_plus/(J_plus + J_minus)
+
+P(-) = f_sig I_minus^eps/(I_plus^eps + I_minus^eps)
+       + (1-f_sig) J_minus/(J_plus + J_minus).
+```
+
+Example:
+
+```python
+nll = CPJointNLL(
+    plus_cache,
+    minus_cache,
+    plus_efficiency=eff_plus_data,
+    minus_efficiency=eff_minus_data,
+    plus_background=bkg_plus_data,
+    minus_background=bkg_minus_data,
+    plus_background_normalization=bkg_plus_norm,
+    minus_background_normalization=bkg_minus_norm,
+    signal_fraction=signal_fraction,
+)
+```
+
+`signal_fraction` may be either a number or a fit `Parameter`.
+
+### Extended convention
+
+For an extended likelihood, the mixture is parameterized by component yields rather than fractions:
+
+```text
+lambda(phi,+) = N_sig S_plus(phi) + N_bkg B_plus(phi)
+lambda(phi,-) = N_sig S_minus(phi) + N_bkg B_minus(phi),
+```
+
+where `S_plus + S_minus` and `B_plus + B_minus` each integrate to one over the combined charge-Dalitz sample space. The extended NLL is
+
+```text
+NLL_ext = N_sig + N_bkg
+          - sum_plus  log lambda(phi,+)
+          - sum_minus log lambda(phi,-),
+```
+
+up to the parameter-independent factorial constant.
+
+Use
+
+```python
+nll = CPJointNLL(
+    plus_cache,
+    minus_cache,
+    plus_efficiency=eff_plus_data,
+    minus_efficiency=eff_minus_data,
+    plus_background=bkg_plus_data,
+    minus_background=bkg_minus_data,
+    plus_background_normalization=bkg_plus_norm,
+    minus_background_normalization=bkg_minus_norm,
+    extended=True,
+    signal_yield=signal_yield,
+    background_yield=background_yield,
+)
+```
+
+The total expected number of events is available through
+
+```python
+nll.expected_events(values)
+```
+
+Signal-only extended fits are also supported by setting `extended=True` and supplying only `signal_yield`.
+
+The non-extended and extended parameterizations are deliberately mutually exclusive: a fit must use either `signal_fraction` or explicit yields, never both.
+
+## B± -> K± pi+ pi- tutorial convention
+
+The CP tutorial notebooks use the particle ordering
 
 ```text
 (1, 2, 3) = (K±, pi±, pi∓)
 ```
 
-the notebook consistently plots
+and consistently display
 
 ```text
 s13 = m^2(K± pi∓)
 s23 = m^2(pi+ pi-).
 ```
 
-Toy generation follows the same joint PDF as the fit: first the charge is drawn from `I_plus/(I_plus + I_minus)`, then the Dalitz point is generated from the corresponding charge amplitude. The notebook includes charge-separated Dalitz plots, a local 2D CP-asymmetry map, `s13`/`s23` projections, parameter pulls, Argand comparisons, component `A_CP`, and the truth/fit global charge fractions.
+The signal-only tutorial uses `CPJointNLL` directly. The efficiency/background tutorial uses `signal_fraction` by default and also shows how to instantiate the extended likelihood with `signal_yield` and `background_yield`. Both tutorials start the minimization from deliberately displaced values and report generated, start and fitted coefficients together with charge-separated fit fractions.

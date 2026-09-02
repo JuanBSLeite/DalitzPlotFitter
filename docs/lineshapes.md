@@ -117,7 +117,8 @@ qmi = QMI(
 )
 ```
 
-`notebooks/10_qmi_validation.ipynb` contains all 50 central values from Table 9 of the published LHCb `D_s+ -> pi- pi+ pi+` analysis.
+Published QMI values should be validated in analysis-specific studies before
+being used in a production model.
 
 ## QMI2D Dalitz amplitude
 
@@ -152,7 +153,9 @@ s12_min = (m1 + m2)^2
 s12_max = (M - m3)^2
 ```
 
-rather than from the minimum/maximum of midpoint integration samples. This is important at the endpoint: `DalitzGrid` uses midpoint quadrature, so its largest sampled `s12` lies below the true `s12_max`, even though a physical boundary bin must still extend all the way to `s12_max`.
+rather than from the minimum/maximum of numerical integration samples. This is
+important because quadrature nodes do not lie exactly on the kinematic
+endpoints, while a physical boundary bin must extend all the way to `s12_max`.
 
 Example:
 
@@ -205,14 +208,9 @@ The global complex normalization/phase ambiguity remains present, just as for a 
 
 `ResonanceAmplitude` multiplies one-dimensional isobar lineshapes by their barrier and angular terms. `DalitzAmplitude` bypasses the isobar construction and evaluates a full Dalitz-dependent complex function directly.
 
-All amplitude-component and coherent-PDF normalization uses deterministic `DalitzGrid`; `PhaseSpaceMC` is retained only for toy/proposal generation.
-
-## Validation notebooks
-
-- `notebooks/08_lineshape_validation_gs_flatte.ipynb`: Flatte, Gounaris-Sakurai, Pole and LASS.
-- `notebooks/09_kmatrix_validation.ipynb`: K-matrix, coupled-channel unitarity, Dalitz density and toy MC.
-- `notebooks/10_qmi_validation.ipynb`: published 50-point `D_s+ -> pi- pi+ pi+` QMI S-wave.
-- `notebooks/11_qmi2d_validation.ipynb`: exact kinematic endpoints, physical/folded active-bin map, and 2D complex field with no, linear and cubic interpolation.
+All amplitude-component and coherent-PDF normalization uses deterministic
+mass-plane Gauss--Legendre or Square-Dalitz quadrature; `PhaseSpaceMC` is
+retained only for toy/proposal generation.
 
 ## References
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, fields, is_dataclass
-from typing import Iterable
+from typing import Literal
 
 import jax.numpy as jnp
 from particle import Particle
@@ -22,8 +23,8 @@ from dalitzplotfitter.dynamics import (
 )
 from dalitzplotfitter.dynamics.context import resolve_value
 from dalitzplotfitter.fit import Parameter, ParameterKind
-from dalitzplotfitter.integration import GridIntegrator
-from dalitzplotfitter.kinematics import DalitzGrid, PhaseSpaceMC, PhaseSpaceSample
+from dalitzplotfitter.integration import DalitzGaussLegendreGrid, GridIntegrator
+from dalitzplotfitter.kinematics import PhaseSpaceMC, PhaseSpaceSample, SquareDalitzGrid
 from dalitzplotfitter.pdf import SignalPDF
 
 
@@ -208,13 +209,17 @@ class _ResolvedDirectDynamics:
 
 @dataclass(frozen=True, init=False)
 class DecayModel:
-    """Build a coherent three-body amplitude with deterministic grid normalization."""
+    """Build a coherent model with deterministic quadrature normalization."""
 
     channel: DecayChannel
     components: tuple[Resonance | NonResonant | DalitzAmplitude, ...]
     normalize_components: bool
     normalization_resolution: int
-    normalization_boundary_resolution: int | None
+    normalization_method: Literal["gauss-legendre", "square-dalitz"]
+    normalization_pair: tuple[int, int]
+    normalization_bin_width: float
+    normalization_order_m13: int | None
+    normalization_order_m23: int | None
     _normalization_sample: PhaseSpaceSample | None
 
     def __init__(
@@ -224,17 +229,39 @@ class DecayModel:
         *,
         normalize_components: bool = True,
         normalization_resolution: int = 1000,
-        normalization_boundary_resolution: int | None = None,
+        normalization_method: Literal["gauss-legendre", "square-dalitz"] = "gauss-legendre",
+        normalization_pair: tuple[int, int] = (0, 1),
+        normalization_bin_width: float = 0.005,
+        normalization_order_m13: int | None = None,
+        normalization_order_m23: int | None = None,
     ) -> None:
         if normalization_resolution < 2:
             raise ValueError("normalization_resolution must be at least 2")
-        if normalization_boundary_resolution is not None and normalization_boundary_resolution < 4:
-            raise ValueError("normalization_boundary_resolution must be at least 4")
+        if normalization_method not in ("gauss-legendre", "square-dalitz"):
+            raise ValueError(
+                "normalization_method must be either 'gauss-legendre' or 'square-dalitz'"
+            )
+        if len(set(normalization_pair)) != 2 or any(
+            index not in (0, 1, 2) for index in normalization_pair
+        ):
+            raise ValueError(
+                "normalization_pair must contain two distinct indices from 0, 1, 2"
+            )
+        if normalization_bin_width <= 0.0:
+            raise ValueError("normalization_bin_width must be positive")
+        if normalization_order_m13 is not None and normalization_order_m13 < 2:
+            raise ValueError("normalization_order_m13 must be at least 2")
+        if normalization_order_m23 is not None and normalization_order_m23 < 2:
+            raise ValueError("normalization_order_m23 must be at least 2")
         object.__setattr__(self, "channel", channel)
         object.__setattr__(self, "components", tuple(components))
         object.__setattr__(self, "normalize_components", bool(normalize_components))
         object.__setattr__(self, "normalization_resolution", int(normalization_resolution))
-        object.__setattr__(self, "normalization_boundary_resolution", normalization_boundary_resolution)
+        object.__setattr__(self, "normalization_method", normalization_method)
+        object.__setattr__(self, "normalization_pair", tuple(normalization_pair))
+        object.__setattr__(self, "normalization_bin_width", float(normalization_bin_width))
+        object.__setattr__(self, "normalization_order_m13", normalization_order_m13)
+        object.__setattr__(self, "normalization_order_m23", normalization_order_m23)
         object.__setattr__(self, "_normalization_sample", None)
         if not self.components:
             raise ValueError("DecayModel requires at least one amplitude component")
@@ -283,12 +310,22 @@ class DecayModel:
     def normalization_sample(self) -> PhaseSpaceSample:
         sample = self._normalization_sample
         if sample is None:
-            sample = DalitzGrid(
-                self.channel.parent_mass,
-                self.channel.daughter_masses,
-                resolution=self.normalization_resolution,
-                boundary_resolution=self.normalization_boundary_resolution,
-            ).sample()
+            if self.normalization_method == "gauss-legendre":
+                sample = DalitzGaussLegendreGrid(
+                    self.channel.parent_mass,
+                    self.channel.daughter_masses,
+                    bin_width=self.normalization_bin_width,
+                    order_m13=self.normalization_order_m13,
+                    order_m23=self.normalization_order_m23,
+                ).sample()
+            else:
+                sample = SquareDalitzGrid(
+                    self.channel.parent_mass,
+                    self.channel.daughter_masses,
+                    resolution=self.normalization_resolution,
+                    pair=self.normalization_pair,
+                    quadrature="gauss-legendre",
+                ).sample()
             object.__setattr__(self, "_normalization_sample", sample)
         return sample
 
@@ -392,3 +429,102 @@ class DecayModel:
             efficiency_normalization=efficiency_normalization,
             normalize_components=normalize,
         )
+
+    def _fraction_cache(
+        self,
+        normalization_sample: PhaseSpaceSample | None,
+        efficiency,
+    ) -> PreparedAmplitudeCache:
+        sample = (
+            self.normalization_sample
+            if normalization_sample is None
+            else normalization_sample
+        )
+        efficiency_values = None
+        if efficiency is not None:
+            efficiency_values = (
+                efficiency(sample.as_dict()) if callable(efficiency) else efficiency
+            )
+            efficiency_values = jnp.asarray(efficiency_values)
+            if efficiency_values.shape != (sample.size,):
+                raise ValueError(
+                    "efficiency must return one value per normalization point"
+                )
+        return self.prepare_cache(
+            sample,
+            normalization_sample=sample,
+            efficiency_normalization=efficiency_values,
+        )
+
+    def fit_fractions(
+        self,
+        fit_values=None,
+        *,
+        normalization_sample: PhaseSpaceSample | None = None,
+        efficiency=None,
+    ):
+        """Return component fit fractions at a parameter point.
+
+        Fractions are physical (efficiency excluded) by default. Supplying an
+        efficiency returns acceptance-weighted fractions instead.
+        """
+
+        values = {} if fit_values is None else fit_values
+        return self._fraction_cache(
+            normalization_sample, efficiency
+        ).fit_fractions(values)
+
+    def interference_fractions(
+        self,
+        fit_values=None,
+        *,
+        normalization_sample: PhaseSpaceSample | None = None,
+        efficiency=None,
+    ):
+        """Return pairwise interference fractions at a parameter point."""
+
+        values = {} if fit_values is None else fit_values
+        return self._fraction_cache(
+            normalization_sample, efficiency
+        ).interference_fractions(values)
+
+    def print_fit_fractions(
+        self,
+        fit_values=None,
+        *,
+        normalization_sample: PhaseSpaceSample | None = None,
+        efficiency=None,
+        include_interference: bool = False,
+        precision: int = 3,
+    ) -> dict[str, float]:
+        """Print fit fractions as percentages and return them by component name."""
+
+        if precision < 0:
+            raise ValueError("precision must be non-negative")
+        values = {} if fit_values is None else fit_values
+        cache = self._fraction_cache(normalization_sample, efficiency)
+        fractions = cache.fit_fractions(values)
+        result = {
+            component.name: float(fractions[index])
+            for index, component in enumerate(cache.components)
+        }
+        convention = "acceptance-weighted" if efficiency is not None else "physical"
+        print(f"Fit fractions ({convention})")
+        print(f"{'component':24s} {'fraction [%]':>16s}")
+        for name, fraction in result.items():
+            print(f"{name:24s} {100.0 * fraction:16.{precision}f}")
+        print(f"{'sum':24s} {100.0 * sum(result.values()):16.{precision}f}")
+
+        if include_interference:
+            interference = cache.interference_fractions(values)
+            print("\nInterference fractions")
+            print(f"{'pair':49s} {'fraction [%]':>16s}")
+            for i, first in enumerate(cache.components):
+                for j in range(i + 1, len(cache.components)):
+                    second = cache.components[j]
+                    fraction = float(interference[i, j])
+                    print(
+                        f"{first.name + ' x ' + second.name:49s} "
+                        f"{100.0 * fraction:16.{precision}f}"
+                    )
+        return result

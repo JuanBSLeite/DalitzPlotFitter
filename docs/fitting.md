@@ -16,7 +16,9 @@ so HESSE one-parameter uncertainties correspond to `Delta NLL = 0.5`.
 
 ## Deterministic normalization only
 
-All amplitude-component and PDF normalization integrals use `DalitzGrid`. There is no Monte Carlo normalization path in the supported API.
+All amplitude-component and PDF normalization integrals use either mass-plane
+Gauss--Legendre quadrature or Square-Dalitz quadrature. There is no Monte Carlo,
+equal-area, or adaptive normalization path in the supported API.
 
 The default model configuration is
 
@@ -25,11 +27,14 @@ model = DecayModel(
     channel,
     components,
     normalize_components=True,
-    normalization_resolution=1000,
+    normalization_method="gauss-legendre",
+    normalization_bin_width=0.005,
 )
 ```
 
-A resolution of 1000 gives exactly one million deterministic equal-area Dalitz points. The grid is constructed lazily and reused for the lifetime of the model.
+The quadrature is constructed lazily and reused for the lifetime of the model.
+This mass-plane method is the same base Gauss--Legendre prescription used by
+Laura++.
 
 The normal fit workflow is simply
 
@@ -40,7 +45,9 @@ cache = model.prepare_cache(data)
 
 where `generate_phase_space()` is used only to generate event/proposal samples. `prepare_cache()` uses the deterministic model-owned grid unless an explicit grid sample is supplied.
 
-Grid convergence should be checked by changing `normalization_resolution`, for example
+For the default method, convergence should be checked by changing
+`normalization_order_m13` and `normalization_order_m23`. For
+`normalization_method="square-dalitz"`, change `normalization_resolution`.
 
 ```text
 400 -> 600 -> 800 -> 1000 -> 1200.
@@ -232,9 +239,20 @@ The project RBW convention is
 
 With `rho(770)=1+0i` retained as the reference coefficient, the E791 examples account for the propagator-sign convention by shifting the constant non-resonant phase by 180 degrees.
 
-Current validation notebooks are:
+The canonical E791 workflows are
+`notebooks/01_e791_toy_fit.ipynb` and
+`notebooks/02_e791_efficiency_background_fit.ipynb`.
 
-- `notebooks/02_fit_dynamic_parameters.ipynb`: coefficient-only closure;
-- `notebooks/03_lineshape_parameter_diagnostics.ipynb`: dominant/weak resonance shape diagnostics;
-- `notebooks/04_normalization_grid_diagnostics.ipynb`: deterministic grid convergence;
-- `notebooks/07_e791_rho1450_mass_width_closure.ipynb`: coefficients plus `rho(1450)` mass/width closure.
+## Fit fractions
+
+After a fit, convert the Minuit values to a mapping and print the fractions:
+
+```python
+fit_values = {name: float(result.values[name]) for name in result.parameters}
+model.print_fit_fractions(fit_values, include_interference=True)
+```
+
+By default this reports physical fractions. Pass the same efficiency callable
+used in the likelihood through `efficiency=...` to report acceptance-weighted
+fractions. The returned dictionary stores fractions as numbers rather than
+percentages; the printed table uses percentages.

@@ -33,7 +33,13 @@ def square_dalitz_to_invariants(
     masses: tuple[float, float, float],
     pair: tuple[int, int] = (0, 1),
 ):
-    """Map square-Dalitz coordinates to ``s12``, ``s13`` and ``s23``."""
+    """Map square-Dalitz coordinates to ``s12``, ``s13`` and ``s23``.
+
+    ``pair`` is ordered: for Laura++'s literal ``(d1, d2, d3)`` convention,
+    use ``pair=(0, 1)`` so that the helicity angle is between ``d1`` and the
+    bachelor ``d3`` in the ``d1 d2`` rest frame. Reversing the pair preserves
+    ``mprime`` and maps ``thetaprime`` to ``1 - thetaprime``.
+    """
     i, j = pair
     if i == j or i not in (0, 1, 2) or j not in (0, 1, 2):
         raise ValueError("pair must contain two distinct indices from 0, 1, 2")
@@ -114,7 +120,11 @@ def invariants_to_square_dalitz(
         raise ValueError("pair must contain two distinct indices from 0, 1, 2")
     k = next(index for index in range(3) if index not in pair)
 
-    invariant = {"s12": jnp.asarray(s12), "s13": jnp.asarray(s13), "s23": jnp.asarray(s23)}
+    invariant = {
+        "s12": jnp.asarray(s12),
+        "s13": jnp.asarray(s13),
+        "s23": jnp.asarray(s23),
+    }
     s_ij = invariant[_pair_key(i, j)]
     s_ik = invariant[_pair_key(i, k)]
 
@@ -155,19 +165,18 @@ def _quadrature_axis(n: int, quadrature: str) -> tuple[jnp.ndarray, jnp.ndarray]
 
 @dataclass(frozen=True)
 class SquareDalitzGrid:
-    """Deterministic Square-Dalitz grid with Jacobian weights.
+    """Laura++-convention Square-Dalitz grid with Jacobian weights.
 
-    The default is a uniform midpoint grid in both transformed variables over
-    [0,1] x [0,1]. Midpoints avoid evaluating exactly on the physical boundary,
-    where the Jacobian vanishes. Gauss-Legendre remains available explicitly
-    for convergence studies.
+    The default uses the Laura++ ordered pair ``(d1, d2)`` and 1000-point
+    Gauss-Legendre quadrature along each transformed axis. A midpoint grid is
+    retained as an explicit alternative for convergence and mesh studies.
     """
 
     mother_mass: float
     masses: tuple[float, float, float]
-    resolution: int = 800
+    resolution: int = 1000
     pair: tuple[int, int] = (0, 1)
-    quadrature: str = "midpoint"
+    quadrature: str = "gauss-legendre"
 
     def __post_init__(self) -> None:
         if self.resolution < 2:
