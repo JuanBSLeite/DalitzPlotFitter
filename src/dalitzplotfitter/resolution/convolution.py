@@ -108,11 +108,7 @@ class GaussianResolution1D:
         observed = jnp.asarray(observed)
         sigma = jnp.asarray(_resolve(self.sigma, parameters))
         bias = jnp.asarray(_resolve(self.bias, parameters))
-        true = (
-            observed[:, None]
-            - bias
-            + jnp.sqrt(2.0) * sigma * nodes[None, :]
-        )
+        true = observed[:, None] - bias + jnp.sqrt(2.0) * sigma * nodes[None, :]
         density = jnp.asarray(pdf(true, parameters))
         inside = (true >= true_low) & (true <= true_high)
         numerator = jnp.sum(
@@ -137,6 +133,10 @@ class ConvolvedPDF1D:
     value, which remains accurate for resolutions much narrower than the full
     true-variable interval.
 
+    ``quadrature_order`` is purely numerical: it sets the number of nodes used
+    by both the Gauss--Legendre normalization grid and the specialized
+    Gauss--Hermite Gaussian-convolution grid.
+
     The result is normalized on the finite observed fit range. This
     normalization is parameter dependent whenever probability migrates across
     the observed boundaries.
@@ -148,7 +148,7 @@ class ConvolvedPDF1D:
     true_high: float
     observed_low: float
     observed_high: float
-    order: int = 96
+    quadrature_order: int = 96
     floor: float = 1e-300
 
     def __post_init__(self) -> None:
@@ -156,8 +156,10 @@ class ConvolvedPDF1D:
             raise ValueError("ConvolvedPDF1D requires true_low < true_high")
         if self.observed_high <= self.observed_low:
             raise ValueError("ConvolvedPDF1D requires observed_low < observed_high")
-        nodes, weights = _gauss_legendre_nodes(self.true_low, self.true_high, self.order)
-        hermite_nodes, hermite_weights = _gauss_hermite_nodes(self.order)
+        nodes, weights = _gauss_legendre_nodes(
+            self.true_low, self.true_high, self.quadrature_order
+        )
+        hermite_nodes, hermite_weights = _gauss_hermite_nodes(self.quadrature_order)
         object.__setattr__(self, "_true_nodes", nodes)
         object.__setattr__(self, "_true_weights", weights)
         object.__setattr__(self, "_hermite_nodes", hermite_nodes)
