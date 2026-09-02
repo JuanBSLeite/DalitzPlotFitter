@@ -69,8 +69,6 @@ def _joint_scaled_weights(plus_sample, plus_density, minus_sample, minus_density
 
 @dataclass(frozen=True)
 class CPBackgroundSpec:
-    """One CP background shape, normalized automatically over both charges."""
-
     name: str
     plus_shape: object
     minus_shape: object | None = None
@@ -168,7 +166,8 @@ class CPFitSession:
             return background
         plus_norm = self.plus_model.normalization_sample if background.plus_normalization_sample is None else background.plus_normalization_sample
         minus_norm = self.minus_model.normalization_sample if background.minus_normalization_sample is None else background.minus_normalization_sample
-        plus_shape = background.plus_shape; minus_shape = background.resolved_minus_shape
+        plus_shape = background.plus_shape
+        minus_shape = background.resolved_minus_shape
         pd, md, pn, mn = self.plus_data.as_dict(), self.minus_data.as_dict(), plus_norm.as_dict(), minus_norm.as_dict()
         pv, mv = self._evaluate_shape(plus_shape, pd), self._evaluate_shape(minus_shape, md)
         pnv, mnv = self._evaluate_shape(plus_shape, pn), self._evaluate_shape(minus_shape, mn)
@@ -247,14 +246,16 @@ class CPFitSession:
     def _projection_components_pair(self, values, plus_sample, minus_sample):
         plus_acc = _acceptance(self.plus_efficiency, self.plus_veto, plus_sample.as_dict())
         minus_acc = _acceptance(self.minus_efficiency, self.minus_veto, minus_sample.as_dict())
-        _, integral_plus = self.plus_cache.evaluate(values); _, integral_minus = self.minus_cache.evaluate(values)
+        _, integral_plus = self.plus_cache.evaluate(values)
+        _, integral_minus = self.minus_cache.evaluate(values)
         joint_signal_norm = integral_plus + integral_minus
         plus_density = plus_acc * self.plus_model.intensity(plus_sample.as_dict(), values) / joint_signal_norm
         minus_density = minus_acc * self.minus_model.intensity(minus_sample.as_dict(), values) / joint_signal_norm
         total_events = self.plus_data.size + self.minus_data.size
         signal_scale = float(_resolve(self.signal_yield, values)) if self.extended else (total_events * float(_resolve(self.signal_fraction, values)) if self.background_categories else float(total_events))
         plus_w, minus_w = _joint_scaled_weights(plus_sample, plus_density, minus_sample, minus_density, signal_scale)
-        plus_components = [("signal", plus_sample, plus_w)]; minus_components = [("signal", minus_sample, minus_w)]
+        plus_components = [("signal", plus_sample, plus_w)]
+        minus_components = [("signal", minus_sample, minus_w)]
         if not self.background_categories:
             return plus_components, minus_components
         if self.extended:
@@ -266,13 +267,28 @@ class CPFitSession:
         for source, category, scale in zip(self.backgrounds, self.background_categories, bg_scales):
             if not isinstance(source, CPBackgroundSpec):
                 continue
-            pr = jnp.asarray(source.plus_shape(plus_sample.as_dict())); mr = jnp.asarray(source.resolved_minus_shape(minus_sample.as_dict()))
+            pr = jnp.asarray(source.plus_shape(plus_sample.as_dict()))
+            mr = jnp.asarray(source.resolved_minus_shape(minus_sample.as_dict()))
             if source.apply_veto:
-                if self.plus_veto is not None: pr *= jnp.asarray(self.plus_veto(plus_sample.as_dict()))
-                if self.minus_veto is not None: mr *= jnp.asarray(self.minus_veto(minus_sample.as_dict()))
+                if self.plus_veto is not None:
+                    pr *= jnp.asarray(self.plus_veto(plus_sample.as_dict()))
+                if self.minus_veto is not None:
+                    mr *= jnp.asarray(self.minus_veto(minus_sample.as_dict()))
             pw, mw = _joint_scaled_weights(plus_sample, pr / category.normalization, minus_sample, mr / category.normalization, scale)
-            plus_components.append((category.name, plus_sample, pw)); minus_components.append((category.name, minus_sample, mw))
+            plus_components.append((category.name, plus_sample, pw))
+            minus_components.append((category.name, minus_sample, mw))
         return plus_components, minus_components
+
+    def _projection_components(self, values, charge: str):
+        """Compatibility wrapper using deterministic normalization samples."""
+        if charge not in ("plus", "minus"):
+            raise ValueError("charge must be 'plus' or 'minus'")
+        plus, minus = self._projection_components_pair(
+            values,
+            self.plus_model.normalization_sample,
+            self.minus_model.normalization_sample,
+        )
+        return plus if charge == "plus" else minus
 
     def plot_projection(self, result, variable="s13", *, bins=60, range=None, show_components=True, log_scale=False, projection_size=250_000, projection_seed=20260901, axes=None):
         """Plot smooth B+/B- projections without histogramming quadrature nodes.
@@ -289,14 +305,20 @@ class CPFitSession:
         minus_sample = self.minus_model.generate_phase_space(projection_size, seed=projection_seed + 1)
         plus_components, minus_components = self._projection_components_pair(values, plus_sample, minus_sample)
         for ax, charge, data, components in zip(axes, ("plus","minus"), (self.plus_data,self.minus_data), (plus_components,minus_components)):
-            dv = np.asarray(getattr(data, variable)); hist_range = range or (float(np.min(dv)), float(np.max(dv))); edges = np.linspace(hist_range[0], hist_range[1], bins+1)
+            dv = np.asarray(getattr(data, variable))
+            hist_range = range or (float(np.min(dv)), float(np.max(dv)))
+            edges = np.linspace(hist_range[0], hist_range[1], bins+1)
             unit = r"GeV$^2$" if variable in ("s12","s13","s23") else ""
             plot_binned_data(dv, bins=edges, ax=ax, label=f"B{'+' if charge=='plus' else '-'} data", unit=unit, log_scale=log_scale)
             total = np.zeros(bins)
             for name, sample, weights in components:
-                counts, _ = np.histogram(np.asarray(getattr(sample, variable)), bins=edges, weights=weights); total += counts
-                if show_components: ax.stairs(counts, edges, label=name)
-            ax.stairs(total, edges, label="total fit", linewidth=2.0); ax.set_xlabel(rf"${variable}$ [GeV$^2$]"); ax.legend()
+                counts, _ = np.histogram(np.asarray(getattr(sample, variable)), bins=edges, weights=weights)
+                total += counts
+                if show_components:
+                    ax.stairs(counts, edges, label=name)
+            ax.stairs(total, edges, label="total fit", linewidth=2.0)
+            ax.set_xlabel(rf"${variable}$ [GeV$^2$]")
+            ax.legend()
         return axes
 
 
