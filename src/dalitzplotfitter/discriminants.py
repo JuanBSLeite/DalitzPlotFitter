@@ -49,6 +49,48 @@ class Gaussian1D:
 
 
 @dataclass(frozen=True)
+class BreitWigner1D:
+    """Constant-width Breit-Wigner PDF normalized on a finite mass interval.
+
+    This is the Lorentz/Cauchy form in the observable itself,
+
+    ``(Gamma/2) / ((x - mean)^2 + (Gamma/2)^2)``,
+
+    with ``width=Gamma`` the full width. It is useful for reconstructed-mass
+    examples and, when convolved with a Gaussian detector response, produces
+    the standard Voigt-profile problem. It is distinct from the relativistic
+    complex amplitude lineshape used inside a Dalitz amplitude model.
+    """
+
+    mean: object
+    width: object
+    low: float
+    high: float
+    floor: float = 1e-300
+
+    def __post_init__(self) -> None:
+        if self.high <= self.low:
+            raise ValueError("BreitWigner1D requires low < high")
+
+    def __call__(self, x: Array, parameters: Parameters | None = None) -> Array:
+        x = jnp.asarray(x)
+        mean = jnp.asarray(_resolve(self.mean, parameters))
+        width = jnp.asarray(_resolve(self.width, parameters))
+        gamma = 0.5 * width
+        raw = gamma / ((x - mean) ** 2 + gamma**2)
+        norm = jnp.arctan((self.high - mean) / gamma) - jnp.arctan(
+            (self.low - mean) / gamma
+        )
+        inside = (
+            (x >= self.low)
+            & (x <= self.high)
+            & (width > 0.0)
+            & (norm > 0.0)
+        )
+        return jnp.where(inside, jnp.clip(raw / norm, min=self.floor), 0.0)
+
+
+@dataclass(frozen=True)
 class Exponential1D:
     """Exponential PDF ``exp(slope*x)`` normalized on a finite interval."""
 
@@ -133,4 +175,10 @@ class FactorizedDensity:
         return result
 
 
-__all__ = ["Exponential1D", "FactorizedDensity", "Gaussian1D", "Histogram1D"]
+__all__ = [
+    "BreitWigner1D",
+    "Exponential1D",
+    "FactorizedDensity",
+    "Gaussian1D",
+    "Histogram1D",
+]
