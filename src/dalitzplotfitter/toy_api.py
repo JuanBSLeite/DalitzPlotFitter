@@ -47,7 +47,7 @@ def generate_signal_toy(
     veto=None,
     seed: int | None = None,
     pool_size: int | None = None,
-    method: str = "accept-reject",
+    method: str = "inverse-transform",
     batch_size: int | None = None,
     envelope_safety: float = 1.20,
     max_restarts: int = 10,
@@ -58,7 +58,11 @@ def generate_signal_toy(
     root_include_weights: bool = True,
     root_include_momenta: bool = True,
 ) -> PhaseSpaceSample:
-    """Generate an unweighted signal toy with accept-reject or inverse transform."""
+    """Generate an unweighted signal toy.
+
+    ``inverse-transform`` is the default sampler. ``accept-reject`` remains
+    available explicitly as a reference and validation method.
+    """
 
     _validate_method(method)
     _validate_inverse_options(method, pool_size, batch_size)
@@ -109,7 +113,7 @@ def generate_toy(
     seed: int | None = None,
     pool_size: int | None = None,
     shuffle: bool = True,
-    method: str = "accept-reject",
+    method: str = "inverse-transform",
     batch_size: int | None = None,
     envelope_safety: float = 1.20,
     max_restarts: int = 10,
@@ -120,7 +124,12 @@ def generate_toy(
     root_include_weights: bool = True,
     root_include_momenta: bool = True,
 ) -> PhaseSpaceSample:
-    """Generate signal/background pseudo-data with one of two sampling methods."""
+    """Generate signal/background pseudo-data.
+
+    The default is ``method='inverse-transform'``. Use
+    ``method='accept-reject'`` when an independent rejection-based reference
+    sample is desired.
+    """
 
     _validate_method(method)
     _validate_inverse_options(method, pool_size, batch_size)
@@ -180,7 +189,7 @@ def generate_cp_toy(
     seed: int | None = None,
     pool_size: int | None = None,
     shuffle: bool = True,
-    method: str = "accept-reject",
+    method: str = "inverse-transform",
     batch_size: int | None = None,
     envelope_safety: float = 1.20,
     max_restarts: int = 10,
@@ -192,7 +201,11 @@ def generate_cp_toy(
     root_include_weights: bool = True,
     root_include_momenta: bool = True,
 ) -> tuple[PhaseSpaceSample, PhaseSpaceSample]:
-    """Generate a CP toy and optionally save both charges in one ROOT TTree."""
+    """Generate a CP toy and optionally save both charges in one ROOT TTree.
+
+    ``inverse-transform`` is the default for both charge samples;
+    ``accept-reject`` remains available explicitly.
+    """
 
     _validate_method(method)
     _validate_inverse_options(method, pool_size, batch_size)
