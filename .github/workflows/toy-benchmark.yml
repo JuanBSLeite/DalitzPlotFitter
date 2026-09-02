@@ -1,10 +1,6 @@
 name: toy generation benchmark
 
 on:
-  push:
-    paths:
-      - "benchmarks/benchmark_toy_generation.py"
-      - ".github/workflows/toy-benchmark.yml"
   workflow_dispatch:
 
 jobs:
