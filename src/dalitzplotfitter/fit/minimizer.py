@@ -13,10 +13,11 @@ import numpy as np
 from .parameters import Parameter
 
 
-# ``FitSession.fit()`` constructs a new Minimizer for each call.  The objective
+# ``FitSession.fit()`` constructs a new Minimizer for each call. The objective
 # object itself is cached by the session, so use its identity to retain the JAX
-# executable across those short-lived Minimizer instances.  Weak references
-# ensure a session/objective can still be garbage-collected normally.
+# executable across those short-lived Minimizer instances. The compiled closure
+# keeps only a weak reference to the objective, so this global lookup cannot keep
+# a finished fit session alive.
 _SHARED_BACKENDS: dict[tuple[int, tuple], tuple[weakref.ReferenceType, object]] = {}
 
 
@@ -65,10 +66,10 @@ class Minimizer:
     provides a stricter convergence target than iminuit's generic default while
     remaining numerically practical for the amplitude-fit likelihoods used here.
 
-    The JAX value-and-gradient program is compiled lazily.  It is cached both by
+    The JAX value-and-gradient program is compiled lazily. It is cached both by
     the ``Minimizer`` instance and, while the objective remains alive, across
     different Minimizer instances that wrap the same objective and parameter
-    layout.  This means repeated ``FitSession.fit()`` or ``CPFitSession.fit()``
+    layout. This means repeated ``FitSession.fit()`` or ``CPFitSession.fit()``
     calls reuse the already-compiled XLA executable instead of paying the JIT
     cost again.
 
@@ -79,12 +80,6 @@ class Minimizer:
     The established strategy-2 refinement remains unchanged: refined fits run
     two MIGRAD passes before HESSE. This deliberately preserves convergence and
     numerical precision while the accelerator-side evaluation path is optimized.
-
-    Verbosity levels are:
-
-    - ``verbose=0``: silent;
-    - ``verbose=1``: fitter-level progress and summaries;
-    - ``verbose>=2``: the same progress plus iminuit's internal print output.
     """
 
     def __init__(
@@ -123,8 +118,6 @@ class Minimizer:
         )
 
     def _backend_signature(self) -> tuple:
-        """Return the parameter information that changes the JAX objective graph."""
-
         return tuple(
             (
                 parameter.name,
@@ -144,20 +137,6 @@ class Minimizer:
             return key, backend
         _SHARED_BACKENDS.pop(key, None)
         return key, None
-
-    def _store_shared_backend(self, key, backend) -> None:
-        try:
-            objective_ref = weakref.ref(
-                self.objective,
-                lambda _reference, cache_key=key: _SHARED_BACKENDS.pop(
-                    cache_key, None
-                ),
-            )
-        except TypeError:
-            # A few exotic callables cannot be weak-referenced. They still get
-            # the normal per-Minimizer cache without introducing a memory leak.
-            return
-        _SHARED_BACKENDS[key] = (objective_ref, backend)
 
     def _backend(self):
         """Return persistent compiled JAX and Minuit callbacks."""
@@ -180,10 +159,30 @@ class Minimizer:
         if not free:
             raise ValueError("At least one free parameter is required")
 
-        def vector_objective(vector):
-            mapping = dict(fixed)
-            mapping.update({name: vector[i] for i, name in enumerate(names)})
-            return self.objective(mapping)
+        try:
+            objective_ref = weakref.ref(
+                self.objective,
+                lambda _reference, cache_key=shared_key: _SHARED_BACKENDS.pop(
+                    cache_key, None
+                ),
+            )
+        except TypeError:
+            objective_ref = None
+            objective = self.objective
+
+        if objective_ref is not None:
+            def vector_objective(vector):
+                objective = objective_ref()
+                if objective is None:
+                    raise RuntimeError("fit objective was released before JAX evaluation")
+                mapping = dict(fixed)
+                mapping.update({name: vector[i] for i, name in enumerate(names)})
+                return objective(mapping)
+        else:
+            def vector_objective(vector):
+                mapping = dict(fixed)
+                mapping.update({name: vector[i] for i, name in enumerate(names)})
+                return objective(mapping)
 
         value_and_grad = jax.jit(jax.value_and_grad(vector_objective))
 
@@ -198,9 +197,7 @@ class Minimizer:
                 return last_value, last_gradient
 
             value_device, gradient_device = value_and_grad(jnp.asarray(point))
-            value_host, gradient_host = jax.device_get(
-                (value_device, gradient_device)
-            )
+            value_host, gradient_host = jax.device_get((value_device, gradient_device))
             last_point = point.copy()
             last_value = float(value_host)
             last_gradient = np.asarray(gradient_host, dtype=float)
@@ -216,7 +213,8 @@ class Minimizer:
 
         backend = (free, names, fcn, grad)
         self._backend_cache = backend
-        self._store_shared_backend(shared_key, backend)
+        if objective_ref is not None:
+            _SHARED_BACKENDS[shared_key] = (objective_ref, backend)
         return backend
 
     def _validate_start_values(
@@ -262,8 +260,6 @@ class Minimizer:
         relative_floor: float = 1e-12,
         print_table: bool = True,
     ) -> GradientCheckResult:
-        """Compare JAX gradients with central finite differences."""
-
         if step_scale <= 0:
             raise ValueError("step_scale must be positive")
         if relative_floor <= 0:
@@ -272,10 +268,7 @@ class Minimizer:
         free, names, fcn, grad = self._backend()
         supplied = self._validate_start_values(values)
         point = np.asarray(
-            [
-                float(supplied.get(parameter.name, parameter.value))
-                for parameter in free
-            ],
+            [float(supplied.get(parameter.name, parameter.value)) for parameter in free],
             dtype=float,
         )
 
@@ -341,8 +334,7 @@ class Minimizer:
         ncall = self._validate_ncall(ncall)
         supplied = self._validate_start_values(start_values)
         start = tuple(
-            float(supplied.get(parameter.name, parameter.value))
-            for parameter in free
+            float(supplied.get(parameter.name, parameter.value)) for parameter in free
         )
         minuit = Minuit(fcn, *start, name=names, grad=grad)
         minuit.errordef = self.errordef
@@ -369,8 +361,6 @@ class Minimizer:
         simplex: bool = False,
         ncall: int | None = None,
     ):
-        """Run the established strategy-2 MIGRAD refinement followed by HESSE."""
-
         ncall = self._validate_ncall(ncall)
         free, names, fcn, grad = self._backend()
         self._log(
@@ -391,10 +381,7 @@ class Minimizer:
         return result
 
     @staticmethod
-    def _draw_parameter(
-        parameter: Parameter,
-        rng: np.random.Generator,
-    ) -> float:
+    def _draw_parameter(parameter: Parameter, rng: np.random.Generator) -> float:
         if parameter.bounds is not None:
             low, high = parameter.bounds
             if low is not None and high is not None:
@@ -415,8 +402,6 @@ class Minimizer:
         return value
 
     def random_start(self, *, seed: int | None = None) -> dict[str, float]:
-        """Draw one reproducible start for all free parameters."""
-
         rng = np.random.default_rng(seed)
         return {
             parameter.name: self._draw_parameter(parameter, rng)
@@ -432,8 +417,6 @@ class Minimizer:
         include_default: bool = False,
         simplex: bool = False,
     ) -> MultiStartResult:
-        """Run independent starts and select the valid solution with lowest NLL."""
-
         if n_starts < 1:
             raise ValueError("n_starts must be at least 1")
 
@@ -441,9 +424,7 @@ class Minimizer:
         rng = np.random.default_rng(seed)
         starts: list[dict[str, float]] = []
         if include_default:
-            starts.append(
-                {parameter.name: float(parameter.value) for parameter in free}
-            )
+            starts.append({parameter.name: float(parameter.value) for parameter in free})
         while len(starts) < n_starts:
             starts.append(
                 {
@@ -469,9 +450,7 @@ class Minimizer:
                 simplex=simplex,
             )
             results.append(result)
-            self._log(
-                f"start {index}/{len(starts)} finished: {self._summary(result)}"
-            )
+            self._log(f"start {index}/{len(starts)} finished: {self._summary(result)}")
         results = tuple(results)
 
         valid_indices = tuple(
@@ -480,14 +459,9 @@ class Minimizer:
             if bool(result.valid) and np.isfinite(float(result.fval))
         )
         if not valid_indices:
-            raise RuntimeError(
-                "No valid finite minimum was found across the multistart scan"
-            )
+            raise RuntimeError("No valid finite minimum was found across the multistart scan")
 
-        best_index = min(
-            valid_indices,
-            key=lambda index: float(results[index].fval),
-        )
+        best_index = min(valid_indices, key=lambda index: float(results[index].fval))
         preliminary = results[best_index]
         self._log(
             f"selected start {best_index + 1}/{len(starts)} for strategy-2/HESSE "
@@ -507,8 +481,4 @@ class Minimizer:
             raise RuntimeError("Best multistart solution is invalid after HESSE")
         self._log(f"final refined minimum: {self._summary(best)}")
 
-        return MultiStartResult(
-            best=best,
-            results=results,
-            starts=tuple(starts),
-        )
+        return MultiStartResult(best=best, results=results, starts=tuple(starts))
