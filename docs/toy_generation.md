@@ -2,6 +2,28 @@
 
 `generate_signal_toy`, `generate_toy` and `generate_cp_toy` generate unweighted pseudo-data. The default sampling method is vectorized accept-reject, with the previous fixed-pool resampling implementation available through `method="resample"`.
 
+## Current accept-reject benchmark
+
+The accept-reject implementation follows the Laura++ safety principle: if a proposal exceeds the current envelope, already accepted events from that component are discarded and generation restarts with a larger envelope. Probabilities are never clipped.
+
+A CPU benchmark on GitHub Actions using the full paper-inspired `B+ -> K+ pi+ pi-` model showed that the **current proposal distribution is not yet efficient for accept-reject**. The proposal is `PhaseSpaceMC`, so the rejection score contains both the phase-space proposal weight and the dynamical density. With one global envelope this gives a very low acceptance rate.
+
+| output events | accept-reject | resample | accept-reject proposals | resample pool |
+| ---: | ---: | ---: | ---: | ---: |
+| 10,000 | 4.06 s | 3.04 s | 2.02 M | 0.10 M |
+| 100,000 | 16.80 s | 3.13 s | 12.1 M | 1.0 M |
+| 1,000,000 | 96.28 s | 8.88 s | 116.1 M | 10.0 M |
+
+The accept-reject output is fully unweighted and had no duplicated phase-space points in this benchmark. The finite-pool resampler naturally contains duplicates; its unique-`s12` fraction was about 0.80. One- and two-dimensional closure between the two methods improved with sample size and was statistically consistent.
+
+Therefore the current performance limitation is the **proposal/envelope**, not the accept-reject principle itself. Future optimization should replace the current weighted phase-space proposal with a flatter Dalitz-space proposal or a locally/adaptively bounded proposal before changing the statistical algorithm.
+
+The benchmark is reproducible with:
+
+```bash
+python benchmarks/benchmark_toy_generation.py --size 100000
+```
+
 ## Save a non-CP toy to ROOT
 
 ```python
