@@ -23,7 +23,23 @@ Efficiency and veto values on the data and normalization sample are also evaluat
 
 ## Compact coefficient-only cache
 
-If no dynamical parameter is floating, `PreparedAmplitudeCache` releases the large prepared normalization-event mapping and the per-point normalization component array after constructing the fixed normalization matrix. This can save substantial accelerator memory for high-resolution Square-Dalitz grids.
+If no dynamical parameter is floating, `PreparedAmplitudeCache` uses a dedicated compact preparation path. Kinematic preparation, all fixed component evaluations, component normalization and construction of the final normalization matrix are traced as one JAX program and executed through a single `jax.jit` boundary. This avoids a long sequence of eager GPU kernel launches during cold start.
+
+When no efficiency map is present, the bare component matrix is needed to normalize individual components. After obtaining scales
+
+\[
+s_i = 1/\sqrt{M_{ii}},
+\]
+
+the normalized matrix is obtained algebraically as
+
+\[
+M'_{ij}=s_i M_{ij}s_j.
+\]
+
+The code therefore no longer performs a second full normalization-grid reduction after scaling. With an efficiency map, the efficiency-weighted matrix is still integrated explicitly because in general it cannot be derived from the bare matrix by per-component scaling alone.
+
+After preparation, the compact cache releases the large prepared normalization-event mapping and the per-point normalization component array. Only the data component matrix and the small fixed normalization matrix remain resident for coefficient-only minimization.
 
 If a mass, width, radius, lineshape parameter, or other `ParameterKind.DYNAMICS` quantity floats, the relevant prepared data are retained. Only components owned by floating dynamical parameters are reevaluated.
 
@@ -65,7 +81,7 @@ Only five complex values per point are retained, rather than the full 5x5 invers
 
 ## Sparse SCF migration
 
-`SquareDalitzSCFMap` caches its fixed Square-Dalitz bin centres, invariant coordinates and phase-space areas. It now also supports sparse migration storage.
+`SquareDalitzSCFMap` caches its fixed Square-Dalitz bin centres, invariant coordinates and phase-space areas. It also supports sparse migration storage.
 
 A dense migration matrix has memory complexity
 
@@ -117,10 +133,12 @@ The JSON output reports:
 - number of data and normalization points;
 - normalization-grid construction time;
 - phase-space data generation time;
-- prepared-cache construction time;
-- first value+gradient time, which includes JIT compilation;
+- `prepared_cache_seconds`, including first compact-cache compilation and execution;
+- `prepared_cache_reuse_seconds`, the cost of accessing the already prepared session cache;
+- first value+gradient time, which includes likelihood JIT compilation;
 - steady-state value+gradient timing after compilation;
-- whether the amplitude cache is compact.
+- whether the amplitude cache is compact;
+- minimum and maximum normalization-matrix diagonal values as a quick component-normalization sanity check.
 
 The first compiled call should not be confused with steady-state fit throughput. GPU/XLA compilation can be significant, while subsequent iterations are much faster.
 
