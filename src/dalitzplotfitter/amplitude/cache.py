@@ -47,22 +47,16 @@ def _scaled_matrix_from_raw(raw_matrix: Array, scales: Array) -> Array:
     return scales[:, None] * raw_matrix * scales[None, :]
 
 
-def _compact_prepare_kernel(
+def _compact_normalization_kernel(
     components: tuple[AmplitudeComponent, ...],
     *,
     normalize_components: bool,
     has_efficiency: bool,
 ):
-    """Build one fused XLA program for first coefficient-only preparation."""
+    """Build the normalization-only XLA program for coefficient-only fits."""
 
-    def kernel(data, normalization_data, weights, efficiency):
-        prepared_data = _prepare_component_data(components, data)
+    def kernel(normalization_data, weights, efficiency):
         prepared_norm = _prepare_component_data(components, normalization_data)
-
-        raw_data = jnp.stack(
-            [jnp.asarray(c.function(prepared_data, None)) for c in components],
-            axis=1,
-        )
         raw_norm = jnp.stack(
             [jnp.asarray(c.function(prepared_norm, None)) for c in components],
             axis=1,
@@ -71,12 +65,12 @@ def _compact_prepare_kernel(
 
         if normalize_components:
             scales, diagonal = _component_scales_unchecked(raw_matrix)
-            data_components = raw_data * scales
             norm_components = raw_norm * scales
         else:
-            scales = jnp.ones((raw_norm.shape[1],), dtype=jnp.real(raw_matrix).dtype)
+            scales = jnp.ones(
+                (raw_norm.shape[1],), dtype=jnp.real(raw_matrix).dtype
+            )
             diagonal = jnp.real(jnp.diag(raw_matrix))
-            data_components = raw_data
             norm_components = raw_norm
 
         if has_efficiency:
@@ -90,7 +84,7 @@ def _compact_prepare_kernel(
         else:
             fixed_matrix = raw_matrix
 
-        return data_components, fixed_matrix, diagonal, scales
+        return fixed_matrix, diagonal, scales
 
     return jax.jit(kernel)
 
@@ -100,7 +94,7 @@ def _compact_data_kernel(
     *,
     normalize_components: bool,
 ):
-    """Build a data-only kernel for later datasets with fixed normalization."""
+    """Build a data-only kernel for datasets with fixed normalization."""
 
     def kernel(data, scales):
         prepared_data = _prepare_component_data(components, data)
@@ -113,14 +107,52 @@ def _compact_data_kernel(
     return jax.jit(kernel)
 
 
+def _compact_prepare_kernel(
+    components: tuple[AmplitudeComponent, ...],
+    *,
+    normalize_components: bool,
+    has_efficiency: bool,
+):
+    """Compose smaller normalization- and data-side XLA programs.
+
+    Earlier versions placed both the data and normalization evaluation in one
+    JIT graph. That duplicated the complete resonance-dynamics graph inside XLA
+    and increased first-session compilation time. The split keeps the same
+    numerical operations but lets the compiler optimize two substantially
+    smaller programs.
+    """
+
+    normalization_kernel = _compact_normalization_kernel(
+        components,
+        normalize_components=normalize_components,
+        has_efficiency=has_efficiency,
+    )
+    data_kernel = _compact_data_kernel(
+        components,
+        normalize_components=normalize_components,
+    )
+
+    def kernel(data, normalization_data, weights, efficiency):
+        fixed_matrix, diagonal, scales = normalization_kernel(
+            normalization_data,
+            weights,
+            efficiency,
+        )
+        data_components = data_kernel(data, scales)
+        return data_components, fixed_matrix, diagonal, scales
+
+    return kernel
+
+
 @dataclass(frozen=True)
 class PreparedAmplitudeCache:
     """Pre-evaluated amplitude components and normalization matrix.
 
-    The first coefficient-only cache can prepare data and normalization in one
-    fused XLA graph. Its tiny per-component scales and fixed normalization matrix
-    can then be reused by the parent ``DecayModel`` so later datasets only need
-    the data-side amplitude evaluation.
+    The first coefficient-only cache prepares the model normalization and the
+    dataset amplitudes in separate XLA programs. Its tiny per-component scales
+    and fixed normalization matrix can then be reused by the parent
+    ``DecayModel`` so later datasets only need the data-side amplitude
+    evaluation.
     """
 
     components: tuple[AmplitudeComponent, ...]
@@ -279,7 +311,9 @@ class PreparedAmplitudeCache:
             data_components = raw_data * scales
             norm_components = raw_norm * scales
         else:
-            scales = jnp.ones((raw_norm.shape[1],), dtype=jnp.real(raw_component_matrix).dtype)
+            scales = jnp.ones(
+                (raw_norm.shape[1],), dtype=jnp.real(raw_component_matrix).dtype
+            )
             data_components = raw_data
             norm_components = raw_norm
 
