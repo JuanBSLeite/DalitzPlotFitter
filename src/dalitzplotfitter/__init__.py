@@ -65,7 +65,12 @@ from .kinematics import (
 from .likelihood import MultiBackgroundNLL
 from .pdf import SCFSignalPDF, SignalPDF
 from .plotting import binned_data, plot_binned_data, plot_dalitz, plot_square_dalitz
-from .resolution import ConvolvedPDF1D, GaussianResolution1D, SquareDalitzSCFMap
+from .resolution import (
+    ConvolvedPDF1D,
+    GaussianResolution1D,
+    SparseMigration,
+    SquareDalitzSCFMap,
+)
 from .sampling import weighted_resample
 from .square_histograms import (
     SquareDalitzHistogramBackground,
@@ -102,7 +107,7 @@ __all__ = [
     "Parameter", "ParameterKind", "PhaseSpaceMC", "PhaseSpaceSample", "Pole",
     "PreparedAmplitudeCache", "PreparedInverseToyGenerator", "QMI", "QMI2D", "RealImag", "RelativisticBreitWigner",
     "Resonance", "ResonanceAmplitude", "ResonanceContext", "SCFSignalPDF", "SignalPDF",
-    "SquareDalitzGrid", "SquareDalitzHistogramBackground", "SquareDalitzHistogramEfficiency",
+    "SparseMigration", "SquareDalitzGrid", "SquareDalitzHistogramBackground", "SquareDalitzHistogramEfficiency",
     "SquareDalitzSCFMap", "ToyBackground", "VetoMap", "VetoedDensity",
     "boost_to_rest_frame", "binned_data", "covariant_kinematics",
     "covariant_kinematics_from_invariants", "dalitz_s13_limits", "enable_x64",
