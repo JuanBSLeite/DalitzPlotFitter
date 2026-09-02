@@ -31,13 +31,39 @@ For multiple floating dynamical components, all affected normalization-matrix ro
 
 ## JAX and iminuit
 
-`Minimizer` compiles its `jax.value_and_grad` evaluator lazily and reuses that compiled backend for the lifetime of the `Minimizer` object. The Minuit value and gradient callbacks share the last evaluated parameter point, so requesting the value and gradient at the same point causes only one JAX device evaluation and one device-to-host transfer.
+`Minimizer` compiles its `jax.value_and_grad` evaluator lazily. The compiled backend is reused both inside one `Minimizer` and across short-lived `Minimizer` instances that wrap the same live objective and parameter layout. This is the common pattern produced by repeated `FitSession.fit()` or `CPFitSession.fit()` calls, so a second fit of the same session does not pay the same XLA compilation cost again.
+
+The shared lookup stores only a weak reference to the objective. A completed fit session can therefore be garbage-collected normally instead of being retained by the compilation cache.
+
+The Minuit value and gradient callbacks also share the last evaluated parameter point, so requesting the value and gradient at the same point causes only one JAX device evaluation and one device-to-host transfer.
 
 The established strategy-2 refinement is intentionally retained: refined fits still run the existing two MIGRAD passes followed by HESSE. Removing the second pass changed convergence/precision in the regression suite. It should therefore only be reconsidered as an explicit fast-fit mode after dedicated closure studies.
 
-## QMI and SCF preparation
+## QMI preparation
 
-For cubic one-dimensional QMI amplitudes, the natural-spline linear system depends only on the fixed knot coordinates. Its inverse is now cached and reused; changing magnitudes or phases no longer solves the same system from scratch.
+For cubic one-dimensional QMI amplitudes, the natural-spline linear system depends only on the fixed knot coordinates. Its inverse is cached and reused; changing magnitudes or phases no longer solves the same system from scratch.
+
+For `QMI2D`, fixed interpolation geometry is also cached: bin edges, bin centres, active masks and the nearest-active gather map used to fill ghost cells. Floating magnitudes/phases therefore update only the value field and interpolation algebra, not the geometry construction.
+
+## K-matrix preparation
+
+The five-channel K-matrix has a particularly expensive fixed operation,
+
+\[
+D(s)=\left[I-iK(s)\rho(s)\right]^{-1}.
+\]
+
+For the pi-pi production amplitude only the first row of `D(s)` is needed. During prepared resonance evaluation, DalitzPlotFitter now stores that row once for each event/normalization point. A later change of production coefficients therefore evaluates
+
+\[
+F_{\pi\pi}(s)=D_{0j}(s)P_j(s)
+\]
+
+as a five-term complex contraction rather than repeating a 5x5 linear solve for every point at every likelihood evaluation.
+
+Only five complex values per point are retained, rather than the full 5x5 inverse matrix. This keeps the GPU memory cost substantially lower while removing the dominant repeated K-matrix linear algebra. The ordinary standalone `KMatrix.amplitude_vector()` API still performs the full solve because it returns all five output channels.
+
+## SCF preparation
 
 `SquareDalitzSCFMap` caches its fixed Square-Dalitz bin centres, corresponding invariant coordinates, and phase-space areas. The dense migration matrix is still supported as before. Very fine SCF maps can remain memory intensive; a sparse migration representation is a separate future optimization because it changes storage and execution semantics.
 
