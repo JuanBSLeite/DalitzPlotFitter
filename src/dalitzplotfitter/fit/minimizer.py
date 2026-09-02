@@ -4,12 +4,20 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+import weakref
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
 from .parameters import Parameter
+
+
+# ``FitSession.fit()`` constructs a new Minimizer for each call.  The objective
+# object itself is cached by the session, so use its identity to retain the JAX
+# executable across those short-lived Minimizer instances.  Weak references
+# ensure a session/objective can still be garbage-collected normally.
+_SHARED_BACKENDS: dict[tuple[int, tuple], tuple[weakref.ReferenceType, object]] = {}
 
 
 @dataclass(frozen=True)
@@ -57,10 +65,16 @@ class Minimizer:
     provides a stricter convergence target than iminuit's generic default while
     remaining numerically practical for the amplitude-fit likelihoods used here.
 
-    The JAX value-and-gradient program is compiled lazily and retained by the
-    ``Minimizer`` instance. Value and gradient callbacks share a one-point host
-    cache, so when Minuit asks for both at identical parameters the expensive
-    device evaluation and device-to-host synchronization occur only once.
+    The JAX value-and-gradient program is compiled lazily.  It is cached both by
+    the ``Minimizer`` instance and, while the objective remains alive, across
+    different Minimizer instances that wrap the same objective and parameter
+    layout.  This means repeated ``FitSession.fit()`` or ``CPFitSession.fit()``
+    calls reuse the already-compiled XLA executable instead of paying the JIT
+    cost again.
+
+    Value and gradient callbacks share a one-point host cache, so when Minuit
+    asks for both at identical parameters the expensive device evaluation and
+    device-to-host synchronization occur only once.
 
     The established strategy-2 refinement remains unchanged: refined fits run
     two MIGRAD passes before HESSE. This deliberately preserves convergence and
@@ -108,11 +122,53 @@ class Minimizer:
             f"nfcn={int(result.nfcn)}"
         )
 
+    def _backend_signature(self) -> tuple:
+        """Return the parameter information that changes the JAX objective graph."""
+
+        return tuple(
+            (
+                parameter.name,
+                bool(parameter.fixed),
+                float(parameter.value) if parameter.fixed else None,
+            )
+            for parameter in self.parameters
+        )
+
+    def _shared_backend(self):
+        key = (id(self.objective), self._backend_signature())
+        cached = _SHARED_BACKENDS.get(key)
+        if cached is None:
+            return key, None
+        objective_ref, backend = cached
+        if objective_ref() is self.objective:
+            return key, backend
+        _SHARED_BACKENDS.pop(key, None)
+        return key, None
+
+    def _store_shared_backend(self, key, backend) -> None:
+        try:
+            objective_ref = weakref.ref(
+                self.objective,
+                lambda _reference, cache_key=key: _SHARED_BACKENDS.pop(
+                    cache_key, None
+                ),
+            )
+        except TypeError:
+            # A few exotic callables cannot be weak-referenced. They still get
+            # the normal per-Minimizer cache without introducing a memory leak.
+            return
+        _SHARED_BACKENDS[key] = (objective_ref, backend)
+
     def _backend(self):
-        """Return the persistent compiled JAX backend and Minuit callbacks."""
+        """Return persistent compiled JAX and Minuit callbacks."""
 
         if self._backend_cache is not None:
             return self._backend_cache
+
+        shared_key, shared = self._shared_backend()
+        if shared is not None:
+            self._backend_cache = shared
+            return shared
 
         free = tuple(parameter for parameter in self.parameters if not parameter.fixed)
         fixed = {
@@ -158,8 +214,10 @@ class Minimizer:
             _, gradient = evaluate(values)
             return gradient
 
-        self._backend_cache = (free, names, fcn, grad)
-        return self._backend_cache
+        backend = (free, names, fcn, grad)
+        self._backend_cache = backend
+        self._store_shared_backend(shared_key, backend)
+        return backend
 
     def _validate_start_values(
         self,
