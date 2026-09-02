@@ -221,6 +221,8 @@ class DecayModel:
     normalization_order_m13: int | None
     normalization_order_m23: int | None
     _normalization_sample: PhaseSpaceSample | None
+    _amplitude_model: CoherentAmplitudeModel | None
+    _compact_prepare_kernels: dict[tuple[bool, bool], object]
 
     def __init__(
         self,
@@ -263,6 +265,8 @@ class DecayModel:
         object.__setattr__(self, "normalization_order_m13", normalization_order_m13)
         object.__setattr__(self, "normalization_order_m23", normalization_order_m23)
         object.__setattr__(self, "_normalization_sample", None)
+        object.__setattr__(self, "_amplitude_model", None)
+        object.__setattr__(self, "_compact_prepare_kernels", {})
         if not self.components:
             raise ValueError("DecayModel requires at least one amplitude component")
         names = [component.name for component in self.components]
@@ -359,6 +363,9 @@ class DecayModel:
 
     @property
     def amplitude_model(self) -> CoherentAmplitudeModel:
+        model = self._amplitude_model
+        if model is not None:
+            return model
         built = []
         for component in self.components:
             if isinstance(component, Resonance):
@@ -375,7 +382,21 @@ class DecayModel:
                 )
             else:
                 raise TypeError(f"Unsupported amplitude component: {type(component)!r}")
-        return CoherentAmplitudeModel(tuple(built))
+        model = CoherentAmplitudeModel(tuple(built))
+        object.__setattr__(self, "_amplitude_model", model)
+        return model
+
+    def _compact_prepare_kernel(self, *, normalize_components: bool, has_efficiency: bool):
+        key = (bool(normalize_components), bool(has_efficiency))
+        kernel = self._compact_prepare_kernels.get(key)
+        if kernel is None:
+            kernel = PreparedAmplitudeCache.build_compact_prepare_kernel(
+                self.amplitude_model.components,
+                normalize_components=normalize_components,
+                has_efficiency=has_efficiency,
+            )
+            self._compact_prepare_kernels[key] = kernel
+        return kernel
 
     def generate_phase_space(self, size: int, *, seed: int | None = None) -> PhaseSpaceSample:
         return PhaseSpaceMC(self.channel.parent_mass, self.channel.daughter_masses).generate(size, seed=seed)
@@ -420,6 +441,16 @@ class DecayModel:
     ) -> PreparedAmplitudeCache:
         sample = self.normalization_sample if normalization_sample is None else normalization_sample
         normalize = self.normalize_components if normalize_components is None else bool(normalize_components)
+        has_floating_dynamics = any(
+            parameter.kind is ParameterKind.DYNAMICS and not parameter.fixed
+            for parameter in self.parameters
+        )
+        compact_kernel = None
+        if not has_floating_dynamics:
+            compact_kernel = self._compact_prepare_kernel(
+                normalize_components=normalize,
+                has_efficiency=efficiency_normalization is not None,
+            )
         return PreparedAmplitudeCache.prepare(
             self.amplitude_model.components,
             data=data_sample.as_dict(),
@@ -428,6 +459,7 @@ class DecayModel:
             parameters=self.parameters,
             efficiency_normalization=efficiency_normalization,
             normalize_components=normalize,
+            compact_prepare_kernel=compact_kernel,
         )
 
     def _fraction_cache(
