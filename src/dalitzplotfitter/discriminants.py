@@ -64,17 +64,7 @@ class Gaussian1D:
 
 @dataclass(frozen=True)
 class BreitWigner1D:
-    """Constant-width Breit-Wigner PDF normalized on a finite mass interval.
-
-    This is the Lorentz/Cauchy form in the observable itself,
-
-    ``(Gamma/2) / ((x - mean)^2 + (Gamma/2)^2)``,
-
-    with ``width=Gamma`` the full width. It is useful for reconstructed-mass
-    examples and, when convolved with a Gaussian detector response, produces
-    the standard Voigt-profile problem. It is distinct from the relativistic
-    complex amplitude lineshape used inside a Dalitz amplitude model.
-    """
+    """Constant-width Breit-Wigner PDF normalized on a finite mass interval."""
 
     mean: object
     width: object
@@ -108,34 +98,28 @@ class BreitWigner1D:
 class LineshapeIntensity1D:
     """Normalize the intensity of an existing complex resonance lineshape.
 
-    The wrapped lineshape follows the dynamics-plugin interface
-    ``lineshape(mass, ResonanceContext)``. The returned PDF is
+    The wrapped lineshape follows ``lineshape(mass, ResonanceContext)`` and the
+    returned PDF is ``|lineshape(m)|^2`` normalized on ``[low, high]``.
+    ``from_context`` infers the full physical pair-mass interval,
+    ``m1 + m2 <= m <= M_parent - m_bachelor``.
 
-    ``|lineshape(m)|^2 / integral(|lineshape(m)|^2 dm)``
-
-    over ``[low, high]``. ``from_context`` can infer the full physical mass
-    range of the resonance pair from ``ResonanceContext``:
-
-    ``m_min = m1 + m2`` and ``m_max = M_parent - m_bachelor``.
-
-    This allows the same relativistic Breit-Wigner, Flatte, or another
-    compatible one-dimensional complex lineshape used by the amplitude model
-    to be reused in detector-resolution convolutions.
-
-    This class represents an isolated lineshape intensity. For a coherent
-    physics model with interfering amplitudes, detector resolution must act on
-    the full coherent intensity rather than on each component independently.
+    ``quadrature_order`` is purely numerical and controls the Gauss--Legendre
+    normalization grid. For a coherent model with interfering amplitudes,
+    detector resolution must act on the full coherent intensity rather than on
+    individual component intensities.
     """
 
     lineshape: object
     context: object
     low: float
     high: float
-    order: int = 256
+    quadrature_order: int = 256
     floor: float = 1e-300
 
     def __post_init__(self) -> None:
-        nodes, weights = _gauss_legendre_nodes(self.low, self.high, self.order)
+        nodes, weights = _gauss_legendre_nodes(
+            self.low, self.high, self.quadrature_order
+        )
         object.__setattr__(self, "_nodes", nodes)
         object.__setattr__(self, "_weights", weights)
 
@@ -145,18 +129,11 @@ class LineshapeIntensity1D:
         lineshape: object,
         context: object,
         *,
-        order: int = 256,
+        quadrature_order: int = 256,
         floor: float = 1e-300,
         parameters: Parameters | None = None,
     ) -> "LineshapeIntensity1D":
-        """Use the full kinematic mass interval encoded by ``ResonanceContext``.
-
-        The boundaries are fixed when the PDF object is constructed. This is
-        appropriate for the usual case in which parent and daughter masses are
-        fixed constants while resonance pole parameters may float in the fit.
-        ``parameters`` is provided for contexts whose kinematic masses use the
-        same resolvable parameter interface.
-        """
+        """Use the full kinematic mass interval encoded by ``ResonanceContext``."""
 
         resolved = context.resolve(parameters)
         daughter1, daughter2 = resolved.daughter_masses
@@ -172,7 +149,7 @@ class LineshapeIntensity1D:
             context=context,
             low=low,
             high=high,
-            order=order,
+            quadrature_order=quadrature_order,
             floor=floor,
         )
 
@@ -257,12 +234,7 @@ class Histogram1D:
 
 @dataclass(frozen=True)
 class FactorizedDensity:
-    """Multiply a base event density by independent discriminant PDFs.
-
-    ``base_density(parameters)`` returns the Dalitz density evaluated on the
-    fitted events. ``observables`` maps names to event arrays, and ``pdfs`` maps
-    the same names to normalized one-dimensional PDF objects.
-    """
+    """Multiply a base event density by independent discriminant PDFs."""
 
     base_density: object
     observables: Mapping[str, Array]
