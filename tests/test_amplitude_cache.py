@@ -21,6 +21,18 @@ class CountingAmplitude:
         return jnp.resize(self.base, n) * scale
 
 
+class EventAmplitude:
+    """Pointwise amplitude whose value is determined by event coordinates."""
+
+    def __init__(self, base):
+        self.base = jnp.asarray(base, dtype=jnp.complex128)
+
+    def __call__(self, data, parameters=None):
+        scale = 1.0 if parameters is None else parameters.get("scale", 1.0)
+        indices = jnp.asarray(data["x"], dtype=jnp.int32) % self.base.shape[0]
+        return self.base[indices] * scale
+
+
 def _coefficient(prefix, x, y, *, fixed=False):
     return RealImag(
         Parameter.coefficient(f"{prefix}.x", x, fixed=fixed, owner=prefix),
@@ -132,8 +144,10 @@ def test_compact_efficiency_weighted_matrix_matches_direct_recomputation():
 
 
 def test_chunked_compact_normalization_matches_direct_partial_tail():
-    f1 = CountingAmplitude([1.0 + 0.0j, 2.0 - 0.2j, 0.3 + 0.4j])
-    f2 = CountingAmplitude([0.2 + 0.1j, 0.4 - 0.2j, -0.7 + 0.3j])
+    # Use an event-local mock. Physics amplitudes are functions of event
+    # coordinates, so their values must not depend on how the batch is chunked.
+    f1 = EventAmplitude([1.0 + 0.0j, 2.0 - 0.2j, 0.3 + 0.4j])
+    f2 = EventAmplitude([0.2 + 0.1j, 0.4 - 0.2j, -0.7 + 0.3j])
     c1 = _coefficient("a", 1.0, 0.0, fixed=True)
     c2 = _coefficient("b", 0.5, 0.3)
     weights = jnp.linspace(0.5, 1.5, 23)
