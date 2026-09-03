@@ -77,9 +77,10 @@ class Minimizer:
     asks for both at identical parameters the expensive device evaluation and
     device-to-host synchronization occur only once.
 
-    The established strategy-2 refinement remains unchanged: refined fits run
-    two MIGRAD passes before HESSE. This deliberately preserves convergence and
-    numerical precision while the accelerator-side evaluation path is optimized.
+    ``fit`` exposes Minuit strategies 0, 1 and 2 directly. The historical
+    project default remains strategy 2 with HESSE enabled; that path keeps the
+    established two-MIGRAD refinement before HESSE. Strategies 0 and 1 use one
+    MIGRAD pass, which is useful for faster preliminary fits of large models.
     """
 
     def __init__(
@@ -252,6 +253,12 @@ class Minimizer:
             raise ValueError("ncall must be a positive integer or None")
         return ncall
 
+    @staticmethod
+    def _validate_strategy(strategy: int) -> int:
+        if isinstance(strategy, bool) or not isinstance(strategy, int) or strategy not in (0, 1, 2):
+            raise ValueError("strategy must be one of 0, 1 or 2")
+        return int(strategy)
+
     def check_gradient(
         self,
         values: Mapping[str, float] | None = None,
@@ -325,13 +332,15 @@ class Minimizer:
         grad,
         *,
         start_values: Mapping[str, float] | None,
-        run_hesse: bool,
+        strategy: int,
+        hesse: bool,
         simplex: bool,
         ncall: int | None = None,
     ):
         from iminuit import Minuit
 
         ncall = self._validate_ncall(ncall)
+        strategy = self._validate_strategy(strategy)
         supplied = self._validate_start_values(start_values)
         start = tuple(
             float(supplied.get(parameter.name, parameter.value)) for parameter in free
@@ -339,7 +348,7 @@ class Minimizer:
         minuit = Minuit(fcn, *start, name=names, grad=grad)
         minuit.errordef = self.errordef
         minuit.tol = self.tolerance
-        minuit.strategy = 2 if run_hesse else 1
+        minuit.strategy = strategy
         minuit.print_level = max(0, self.verbose - 1)
         for parameter in free:
             if parameter.bounds is not None:
@@ -349,8 +358,9 @@ class Minimizer:
         if simplex:
             minuit.simplex()
         minuit.migrad(ncall=ncall)
-        if run_hesse:
+        if strategy == 2:
             minuit.migrad(ncall=ncall)
+        if hesse:
             minuit.hesse()
         return minuit
 
@@ -360,12 +370,18 @@ class Minimizer:
         *,
         simplex: bool = False,
         ncall: int | None = None,
+        strategy: int = 2,
+        hesse: bool = True,
     ):
         ncall = self._validate_ncall(ncall)
+        strategy = self._validate_strategy(strategy)
+        if not isinstance(hesse, bool):
+            raise ValueError("hesse must be a boolean")
         free, names, fcn, grad = self._backend()
         self._log(
             f"single fit with {len(free)} free parameters "
-            f"(simplex={simplex}, ncall={ncall}, tolerance={self.tolerance})"
+            f"(simplex={simplex}, strategy={strategy}, hesse={hesse}, "
+            f"ncall={ncall}, tolerance={self.tolerance})"
         )
         result = self._run(
             free,
@@ -373,7 +389,8 @@ class Minimizer:
             fcn,
             grad,
             start_values=start_values,
-            run_hesse=True,
+            strategy=strategy,
+            hesse=hesse,
             simplex=simplex,
             ncall=ncall,
         )
@@ -416,9 +433,11 @@ class Minimizer:
         seed: int | None = None,
         include_default: bool = False,
         simplex: bool = False,
+        strategy: int = 1,
     ) -> MultiStartResult:
         if n_starts < 1:
             raise ValueError("n_starts must be at least 1")
+        strategy = self._validate_strategy(strategy)
 
         free, names, fcn, grad = self._backend()
         rng = np.random.default_rng(seed)
@@ -435,7 +454,7 @@ class Minimizer:
 
         self._log(
             f"multistart with {len(free)} free parameters, {len(starts)} starts "
-            f"(simplex={simplex}, seed={seed})"
+            f"(simplex={simplex}, strategy={strategy}, seed={seed})"
         )
         results = []
         for index, start in enumerate(starts, start=1):
@@ -446,7 +465,8 @@ class Minimizer:
                 fcn,
                 grad,
                 start_values=start,
-                run_hesse=False,
+                strategy=strategy,
+                hesse=False,
                 simplex=simplex,
             )
             results.append(result)
@@ -474,7 +494,8 @@ class Minimizer:
             fcn,
             grad,
             start_values=best_values,
-            run_hesse=True,
+            strategy=2,
+            hesse=True,
             simplex=False,
         )
         if not bool(best.valid) or not np.isfinite(float(best.fval)):
