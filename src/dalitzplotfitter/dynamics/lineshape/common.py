@@ -23,6 +23,13 @@ def bachelor_momentum_resonance_frame(parent_mass, resonance_mass, bachelor_mass
     return jnp.sqrt(radicand) / (2.0 * resonance_mass)
 
 
+def bachelor_momentum_parent_frame(parent_mass, resonance_mass, bachelor_mass):
+    """Bachelor momentum evaluated in the parent rest frame."""
+    resonance_mass = jnp.asarray(resonance_mass)
+    radicand = jnp.maximum(kallen(parent_mass**2, resonance_mass**2, bachelor_mass**2), 0.0)
+    return jnp.sqrt(radicand) / (2.0 * parent_mass)
+
+
 def effective_pole_mass(context: ResonanceContext):
     m0 = jnp.asarray(context.pole_mass)
     m1, m2 = context.daughter_masses
@@ -72,6 +79,7 @@ def energy_dependent_width(mass, context: ResonanceContext):
 
 
 __all__ = [
+    "bachelor_momentum_parent_frame",
     "bachelor_momentum_resonance_frame",
     "blatt_weisskopf_from_momenta",
     "breakup_momentum",
