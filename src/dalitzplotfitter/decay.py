@@ -161,6 +161,7 @@ class Resonance:
     spin: int | None = None
     resonance_radius: object = 1.5
     parent_radius: object = 5.0
+    bachelor_momentum_frame: Literal["resonance", "parent"] = "resonance"
 
     def __post_init__(self) -> None:
         if len(set(self.pair)) != 2 or any(
@@ -177,6 +178,10 @@ class Resonance:
         _validate_positive_quantity(self.parent_radius, f"{self.name}.parent_radius", allow_zero=True)
         if self.spin is not None and (self.spin < 0 or int(self.spin) != self.spin):
             raise ValueError("resonance spin must be a non-negative integer")
+        if self.bachelor_momentum_frame not in {"resonance", "parent"}:
+            raise ValueError(
+                "bachelor_momentum_frame must be either 'resonance' or 'parent'"
+            )
 
 
 @dataclass(frozen=True)
@@ -362,6 +367,7 @@ class DecayModel:
             final_state=self.channel.final_state_ids,
             lineshape=component.lineshape,
             angular=component.angular,
+            bachelor_momentum_frame=component.bachelor_momentum_frame,
         )
         return AmplitudeComponent(component.name, dynamics, component.coefficient)
 
