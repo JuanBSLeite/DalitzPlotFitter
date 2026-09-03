@@ -1,4 +1,4 @@
-"""Gounaris-Sakurai lineshape."""
+"""Gounaris-Sakurai lineshapes."""
 
 from __future__ import annotations
 
@@ -10,6 +10,45 @@ from ..context import ResonanceContext
 from .common import breakup_momentum, energy_dependent_width
 
 
+def _gs_terms(mass, context: ResonanceContext, *, legacy_goofit: bool):
+    m = jnp.asarray(mass)
+    m0 = jnp.asarray(context.pole_mass)
+    gamma0 = jnp.asarray(context.pole_width)
+    mpi = 0.5 * (context.daughter_masses[0] + context.daughter_masses[1])
+    q = breakup_momentum(m, mpi, mpi)
+    q0 = breakup_momentum(m0, mpi, mpi)
+
+    def h(x, qx):
+        safe_q = jnp.where(qx > 0.0, qx, jnp.finfo(jnp.asarray(x).dtype).tiny)
+        return (2.0 / jnp.pi) * (safe_q / x) * jnp.log((x + 2.0 * safe_q) / (2.0 * mpi))
+
+    h_m = h(m, q)
+    h_0 = h(m0, q0)
+    if legacy_goofit:
+        # Literal convention from DsPPP_ANA_Branch: the last term is inside
+        # the multiplication by h(m0).
+        dh_dm2_0 = h_0 * (
+            1.0 / (8.0 * q0**2)
+            - 1.0 / (2.0 * m0**2)
+            + 1.0 / (2.0 * jnp.pi * m0**2)
+        )
+    else:
+        dh_dm2_0 = h_0 * (
+            1.0 / (8.0 * q0**2) - 1.0 / (2.0 * m0**2)
+        ) + 1.0 / (2.0 * jnp.pi * m0**2)
+    f_m = gamma0 * m0**2 / q0**3 * (
+        q**2 * (h_m - h_0) + (m0**2 - m**2) * q0**2 * dh_dm2_0
+    )
+    d = (
+        (3.0 / jnp.pi) * (mpi**2 / q0**2) * jnp.log((m0 + 2.0 * q0) / (2.0 * mpi))
+        + m0 / (2.0 * jnp.pi * q0)
+        - mpi**2 * m0 / (jnp.pi * q0**3)
+    )
+    width = energy_dependent_width(m, context)
+    numerator = 1.0 + d * gamma0 / m0
+    return numerator / (m0**2 - m**2 + f_m - 1j * m0 * width)
+
+
 @dataclass(frozen=True)
 class GounarisSakurai:
     """Laura++ Gounaris-Sakurai lineshape for rho -> pi pi."""
@@ -17,32 +56,19 @@ class GounarisSakurai:
     def __call__(self, mass, context: ResonanceContext):
         if int(context.spin) != 1:
             raise ValueError("GounarisSakurai is defined for spin-1 rho-like states")
-
-        m = jnp.asarray(mass)
-        m0 = jnp.asarray(context.pole_mass)
-        gamma0 = jnp.asarray(context.pole_width)
-        mpi = 0.5 * (context.daughter_masses[0] + context.daughter_masses[1])
-        q = breakup_momentum(m, mpi, mpi)
-        q0 = breakup_momentum(m0, mpi, mpi)
-
-        def h(x, qx):
-            safe_q = jnp.where(qx > 0.0, qx, jnp.finfo(jnp.asarray(x).dtype).tiny)
-            return (2.0 / jnp.pi) * (safe_q / x) * jnp.log((x + 2.0 * safe_q) / (2.0 * mpi))
-
-        h_m = h(m, q)
-        h_0 = h(m0, q0)
-        dh_dm2_0 = h_0 * (1.0 / (8.0 * q0**2) - 1.0 / (2.0 * m0**2)) + 1.0 / (2.0 * jnp.pi * m0**2)
-        f_m = gamma0 * m0**2 / q0**3 * (
-            q**2 * (h_m - h_0) + (m0**2 - m**2) * q0**2 * dh_dm2_0
-        )
-        d = (
-            (3.0 / jnp.pi) * (mpi**2 / q0**2) * jnp.log((m0 + 2.0 * q0) / (2.0 * mpi))
-            + m0 / (2.0 * jnp.pi * q0)
-            - mpi**2 * m0 / (jnp.pi * q0**3)
-        )
-        width = energy_dependent_width(m, context)
-        numerator = 1.0 + d * gamma0 / m0
-        return numerator / (m0**2 - m**2 + f_m - 1j * m0 * width)
+        return _gs_terms(mass, context, legacy_goofit=False)
 
 
-__all__ = ["GounarisSakurai"]
+@dataclass(frozen=True)
+class GooFitLegacyGounarisSakurai:
+    """Literal GS convention used in the legacy DsPPP GooFit branch."""
+
+    def __call__(self, mass, context: ResonanceContext):
+        if int(context.spin) != 1:
+            raise ValueError(
+                "GooFitLegacyGounarisSakurai is defined for spin-1 rho-like states"
+            )
+        return _gs_terms(mass, context, legacy_goofit=True)
+
+
+__all__ = ["GooFitLegacyGounarisSakurai", "GounarisSakurai"]
