@@ -40,6 +40,10 @@ from .dynamics import (
     RelativisticBreitWigner,
     ResonanceAmplitude,
     ResonanceContext,
+    ZemachP,
+    ZemachPstar,
+    Zemach_P,
+    Zemach_Pstar,
     physical_bin_mask,
 )
 from .fit import Minimizer, MultiStartResult, Parameter, ParameterKind
@@ -115,7 +119,8 @@ __all__ = [
     "PreparedAmplitudeCache", "PreparedInverseToyGenerator", "QMI", "QMI2D", "RealImag", "RelativisticBreitWigner",
     "Resonance", "ResonanceAmplitude", "ResonanceContext", "SCFSignalPDF", "SignalPDF",
     "SparseMigration", "SquareDalitzGrid", "SquareDalitzHistogramBackground", "SquareDalitzHistogramEfficiency",
-    "SquareDalitzSCFMap", "ToyBackground", "VetoMap", "VetoedDensity",
+    "SquareDalitzSCFMap", "ToyBackground", "VetoMap", "VetoedDensity", "ZemachP", "ZemachPstar",
+    "Zemach_P", "Zemach_Pstar",
     "boost_to_rest_frame", "binned_data", "covariant_kinematics",
     "covariant_kinematics_from_invariants", "dalitz_s13_limits", "enable_x64",
     "generate_cp_toy", "generate_signal_toy", "generate_toy", "histogram_background_from_root",
