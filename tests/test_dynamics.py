@@ -3,6 +3,7 @@ import math
 import jax.numpy as jnp
 
 from dalitzplotfitter.dynamics import (
+    GooFitLegacyAngular,
     RelativisticBreitWigner,
     ResonanceContext,
     ZemachP,
@@ -15,6 +16,7 @@ from dalitzplotfitter.dynamics import (
     covariant_spin_factor,
     effective_pole_mass,
     energy_dependent_width,
+    goofit_legacy_spin_factor,
     zemach_spin_factor,
 )
 from dalitzplotfitter.kinematics import CovariantKinematics
@@ -117,6 +119,33 @@ def test_zemach_spin_factors_match_laura_reference_formulas():
             angular_momentum,
         )
         assert math.isclose(float(value), target, rel_tol=1e-6, abs_tol=1e-7)
+
+
+def test_goofit_legacy_spin_factors_match_historical_formulas():
+    p, q, c = 0.7, 0.3, 0.25
+    expected = {
+        0: 1.0,
+        1: 4.0 * p * q * c,
+        2: (16.0 / 3.0) * (p * q) ** 2 * (3.0 * c**2 - 1.0),
+    }
+    for angular_momentum, target in expected.items():
+        value = goofit_legacy_spin_factor(
+            jnp.asarray(p), jnp.asarray(q), jnp.asarray(c), angular_momentum
+        )
+        assert math.isclose(float(value), target, rel_tol=1e-6, abs_tol=1e-7)
+
+
+def test_goofit_legacy_angular_uses_resonance_frame_bachelor_momentum():
+    kin = CovariantKinematics(
+        resonance_mass=jnp.asarray(0.9),
+        p_star=jnp.asarray(0.4),
+        p=jnp.asarray(0.7),
+        q=jnp.asarray(0.3),
+        cos_theta=jnp.asarray(0.25),
+    )
+    value = GooFitLegacyAngular()(kin, _context(spin=1))
+    expected = 4.0 * 0.7 * 0.3 * 0.25
+    assert math.isclose(float(value), expected, rel_tol=1e-7, abs_tol=1e-7)
 
 
 def test_zemach_p_and_pstar_select_the_expected_bachelor_momentum():
