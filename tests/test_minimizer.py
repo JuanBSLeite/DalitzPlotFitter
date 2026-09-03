@@ -1,6 +1,7 @@
 import math
 
 import numpy as np
+import pytest
 
 from dalitzplotfitter import Minimizer, Parameter, enable_x64
 
@@ -23,6 +24,28 @@ def test_minimizer_recovers_quadratic_minimum_from_displaced_start():
     assert result.valid
     assert math.isclose(float(result.values["x"]), 1.25, abs_tol=1e-8)
     assert math.isclose(float(result.values["y"]), -0.75, abs_tol=1e-8)
+
+
+def test_minimizer_exposes_strategy_and_optional_hesse():
+    parameter = Parameter("x", -2.0, bounds=(-5.0, 5.0), step=0.1)
+
+    def objective(values):
+        return (values["x"] - 1.5) ** 2
+
+    result = Minimizer(objective, (parameter,)).fit(strategy=1, hesse=False)
+    assert result.strategy == 1
+    assert math.isclose(float(result.values["x"]), 1.5, abs_tol=1e-8)
+
+
+@pytest.mark.parametrize("strategy", [-1, 3, True, 1.5])
+def test_minimizer_rejects_invalid_strategy(strategy):
+    parameter = Parameter("x", 0.0)
+
+    def objective(values):
+        return values["x"] ** 2
+
+    with pytest.raises(ValueError, match="strategy"):
+        Minimizer(objective, (parameter,)).fit(strategy=strategy)
 
 
 def test_minimizer_reuses_compiled_backend_and_shared_value_gradient_point():
