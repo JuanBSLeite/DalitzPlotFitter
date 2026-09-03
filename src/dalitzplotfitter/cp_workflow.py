@@ -204,11 +204,23 @@ class CPFitSession:
     def minimizer(self, *, tolerance=1e-4, verbose=0):
         return Minimizer(self.objective, self.parameters, tolerance=tolerance, verbose=verbose)
 
-    def fit(self, start_values=None, *, simplex=False, ncall=None, tolerance=1e-4, verbose=0):
-        return self.minimizer(tolerance=tolerance, verbose=verbose).fit(start_values=start_values, simplex=simplex, ncall=ncall)
+    def fit(self, start_values=None, *, simplex=False, ncall=None, strategy=2, hesse=True, tolerance=1e-4, verbose=0):
+        return self.minimizer(tolerance=tolerance, verbose=verbose).fit(
+            start_values=start_values,
+            simplex=simplex,
+            ncall=ncall,
+            strategy=strategy,
+            hesse=hesse,
+        )
 
-    def fit_multistart(self, n_starts=20, *, seed=None, include_default=False, simplex=False, tolerance=1e-4, verbose=0):
-        return self.minimizer(tolerance=tolerance, verbose=verbose).fit_multistart(n_starts=n_starts, seed=seed, include_default=include_default, simplex=simplex)
+    def fit_multistart(self, n_starts=20, *, seed=None, include_default=False, simplex=False, strategy=1, tolerance=1e-4, verbose=0):
+        return self.minimizer(tolerance=tolerance, verbose=verbose).fit_multistart(
+            n_starts=n_starts,
+            seed=seed,
+            include_default=include_default,
+            simplex=simplex,
+            strategy=strategy,
+        )
 
     def result_values(self, result):
         return {p.name: (float(p.value) if p.fixed else float(result.values[p.name])) for p in self.parameters}

@@ -4,12 +4,21 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+import weakref
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
 from .parameters import Parameter
+
+
+# ``FitSession.fit()`` constructs a new Minimizer for each call. The objective
+# object itself is cached by the session, so use its identity to retain the JAX
+# executable across those short-lived Minimizer instances. The compiled closure
+# keeps only a weak reference to the objective, so this global lookup cannot keep
+# a finished fit session alive.
+_SHARED_BACKENDS: dict[tuple[int, tuple], tuple[weakref.ReferenceType, object]] = {}
 
 
 @dataclass(frozen=True)
@@ -57,11 +66,21 @@ class Minimizer:
     provides a stricter convergence target than iminuit's generic default while
     remaining numerically practical for the amplitude-fit likelihoods used here.
 
-    Verbosity levels are:
+    The JAX value-and-gradient program is compiled lazily. It is cached both by
+    the ``Minimizer`` instance and, while the objective remains alive, across
+    different Minimizer instances that wrap the same objective and parameter
+    layout. This means repeated ``FitSession.fit()`` or ``CPFitSession.fit()``
+    calls reuse the already-compiled XLA executable instead of paying the JIT
+    cost again.
 
-    - ``verbose=0``: silent;
-    - ``verbose=1``: fitter-level progress and summaries;
-    - ``verbose>=2``: the same progress plus iminuit's internal print output.
+    Value and gradient callbacks share a one-point host cache, so when Minuit
+    asks for both at identical parameters the expensive device evaluation and
+    device-to-host synchronization occur only once.
+
+    ``fit`` exposes Minuit strategies 0, 1 and 2 directly. The historical
+    project default remains strategy 2 with HESSE enabled; that path keeps the
+    established two-MIGRAD refinement before HESSE. Strategies 0 and 1 use one
+    MIGRAD pass, which is useful for faster preliminary fits of large models.
     """
 
     def __init__(
@@ -84,6 +103,7 @@ class Minimizer:
         self.errordef = float(errordef)
         self.tolerance = float(tolerance)
         self.verbose = int(verbose)
+        self._backend_cache = None
 
     def _log(self, message: str) -> None:
         if self.verbose >= 1:
@@ -98,7 +118,38 @@ class Minimizer:
             f"nfcn={int(result.nfcn)}"
         )
 
+    def _backend_signature(self) -> tuple:
+        return tuple(
+            (
+                parameter.name,
+                bool(parameter.fixed),
+                float(parameter.value) if parameter.fixed else None,
+            )
+            for parameter in self.parameters
+        )
+
+    def _shared_backend(self):
+        key = (id(self.objective), self._backend_signature())
+        cached = _SHARED_BACKENDS.get(key)
+        if cached is None:
+            return key, None
+        objective_ref, backend = cached
+        if objective_ref() is self.objective:
+            return key, backend
+        _SHARED_BACKENDS.pop(key, None)
+        return key, None
+
     def _backend(self):
+        """Return persistent compiled JAX and Minuit callbacks."""
+
+        if self._backend_cache is not None:
+            return self._backend_cache
+
+        shared_key, shared = self._shared_backend()
+        if shared is not None:
+            self._backend_cache = shared
+            return shared
+
         free = tuple(parameter for parameter in self.parameters if not parameter.fixed)
         fixed = {
             parameter.name: parameter.value
@@ -109,22 +160,63 @@ class Minimizer:
         if not free:
             raise ValueError("At least one free parameter is required")
 
-        def vector_objective(vector):
-            mapping = dict(fixed)
-            mapping.update({name: vector[i] for i, name in enumerate(names)})
-            return self.objective(mapping)
+        try:
+            objective_ref = weakref.ref(
+                self.objective,
+                lambda _reference, cache_key=shared_key: _SHARED_BACKENDS.pop(
+                    cache_key, None
+                ),
+            )
+        except TypeError:
+            objective_ref = None
+            objective = self.objective
+
+        if objective_ref is not None:
+            def vector_objective(vector):
+                objective = objective_ref()
+                if objective is None:
+                    raise RuntimeError("fit objective was released before JAX evaluation")
+                mapping = dict(fixed)
+                mapping.update({name: vector[i] for i, name in enumerate(names)})
+                return objective(mapping)
+        else:
+            def vector_objective(vector):
+                mapping = dict(fixed)
+                mapping.update({name: vector[i] for i, name in enumerate(names)})
+                return objective(mapping)
 
         value_and_grad = jax.jit(jax.value_and_grad(vector_objective))
 
+        last_point: np.ndarray | None = None
+        last_value: float | None = None
+        last_gradient: np.ndarray | None = None
+
+        def evaluate(values):
+            nonlocal last_point, last_value, last_gradient
+            point = np.asarray(values, dtype=float)
+            if last_point is not None and np.array_equal(point, last_point):
+                return last_value, last_gradient
+
+            value_device, gradient_device = value_and_grad(jnp.asarray(point))
+            value_host, gradient_host = jax.device_get((value_device, gradient_device))
+            last_point = point.copy()
+            last_value = float(value_host)
+            last_gradient = np.asarray(gradient_host, dtype=float)
+            return last_value, last_gradient
+
         def fcn(*values):
-            value, _ = value_and_grad(jnp.asarray(values))
-            return float(value)
+            value, _ = evaluate(values)
+            return value
 
         def grad(*values):
-            _, gradient = value_and_grad(jnp.asarray(values))
-            return np.asarray(gradient, dtype=float)
+            _, gradient = evaluate(values)
+            return gradient
 
-        return free, names, fcn, grad
+        backend = (free, names, fcn, grad)
+        self._backend_cache = backend
+        if objective_ref is not None:
+            _SHARED_BACKENDS[shared_key] = (objective_ref, backend)
+        return backend
 
     def _validate_start_values(
         self,
@@ -143,11 +235,13 @@ class Minimizer:
             low, high = parameter.bounds
             if low is not None and value < low:
                 raise ValueError(
-                    f"starting value {value} is below the lower bound {low} for {parameter.name!r}"
+                    f"starting value {value} is below the lower bound {low} for "
+                    f"{parameter.name!r}"
                 )
             if high is not None and value > high:
                 raise ValueError(
-                    f"starting value {value} is above the upper bound {high} for {parameter.name!r}"
+                    f"starting value {value} is above the upper bound {high} for "
+                    f"{parameter.name!r}"
                 )
         return values
 
@@ -159,6 +253,12 @@ class Minimizer:
             raise ValueError("ncall must be a positive integer or None")
         return ncall
 
+    @staticmethod
+    def _validate_strategy(strategy: int) -> int:
+        if isinstance(strategy, bool) or not isinstance(strategy, int) or strategy not in (0, 1, 2):
+            raise ValueError("strategy must be one of 0, 1 or 2")
+        return int(strategy)
+
     def check_gradient(
         self,
         values: Mapping[str, float] | None = None,
@@ -167,13 +267,6 @@ class Minimizer:
         relative_floor: float = 1e-12,
         print_table: bool = True,
     ) -> GradientCheckResult:
-        """Compare JAX gradients with central finite differences.
-
-        ``values`` supplies the point to test. Missing free parameters use their
-        configured default values. The finite-difference step for parameter ``i``
-        is ``step_scale * max(abs(x_i), 1)``.
-        """
-
         if step_scale <= 0:
             raise ValueError("step_scale must be positive")
         if relative_floor <= 0:
@@ -239,22 +332,23 @@ class Minimizer:
         grad,
         *,
         start_values: Mapping[str, float] | None,
-        run_hesse: bool,
+        strategy: int,
+        hesse: bool,
         simplex: bool,
         ncall: int | None = None,
     ):
         from iminuit import Minuit
 
         ncall = self._validate_ncall(ncall)
+        strategy = self._validate_strategy(strategy)
         supplied = self._validate_start_values(start_values)
         start = tuple(
-            float(supplied.get(parameter.name, parameter.value))
-            for parameter in free
+            float(supplied.get(parameter.name, parameter.value)) for parameter in free
         )
         minuit = Minuit(fcn, *start, name=names, grad=grad)
         minuit.errordef = self.errordef
         minuit.tol = self.tolerance
-        minuit.strategy = 2 if run_hesse else 1
+        minuit.strategy = strategy
         minuit.print_level = max(0, self.verbose - 1)
         for parameter in free:
             if parameter.bounds is not None:
@@ -264,8 +358,9 @@ class Minimizer:
         if simplex:
             minuit.simplex()
         minuit.migrad(ncall=ncall)
-        if run_hesse:
+        if strategy == 2:
             minuit.migrad(ncall=ncall)
+        if hesse:
             minuit.hesse()
         return minuit
 
@@ -275,14 +370,18 @@ class Minimizer:
         *,
         simplex: bool = False,
         ncall: int | None = None,
+        strategy: int = 2,
+        hesse: bool = True,
     ):
-        """Run one carefully refined MIGRAD/HESSE minimization."""
-
         ncall = self._validate_ncall(ncall)
+        strategy = self._validate_strategy(strategy)
+        if not isinstance(hesse, bool):
+            raise ValueError("hesse must be a boolean")
         free, names, fcn, grad = self._backend()
         self._log(
             f"single fit with {len(free)} free parameters "
-            f"(simplex={simplex}, ncall={ncall}, tolerance={self.tolerance})"
+            f"(simplex={simplex}, strategy={strategy}, hesse={hesse}, "
+            f"ncall={ncall}, tolerance={self.tolerance})"
         )
         result = self._run(
             free,
@@ -290,7 +389,8 @@ class Minimizer:
             fcn,
             grad,
             start_values=start_values,
-            run_hesse=True,
+            strategy=strategy,
+            hesse=hesse,
             simplex=simplex,
             ncall=ncall,
         )
@@ -298,10 +398,7 @@ class Minimizer:
         return result
 
     @staticmethod
-    def _draw_parameter(
-        parameter: Parameter,
-        rng: np.random.Generator,
-    ) -> float:
+    def _draw_parameter(parameter: Parameter, rng: np.random.Generator) -> float:
         if parameter.bounds is not None:
             low, high = parameter.bounds
             if low is not None and high is not None:
@@ -321,13 +418,7 @@ class Minimizer:
                 value = min(value, float(high))
         return value
 
-    def random_start(
-        self,
-        *,
-        seed: int | None = None,
-    ) -> dict[str, float]:
-        """Draw one reproducible start for all free parameters."""
-
+    def random_start(self, *, seed: int | None = None) -> dict[str, float]:
         rng = np.random.default_rng(seed)
         return {
             parameter.name: self._draw_parameter(parameter, rng)
@@ -342,11 +433,11 @@ class Minimizer:
         seed: int | None = None,
         include_default: bool = False,
         simplex: bool = False,
+        strategy: int = 1,
     ) -> MultiStartResult:
-        """Run independent starts and select the valid solution with lowest NLL."""
-
         if n_starts < 1:
             raise ValueError("n_starts must be at least 1")
+        strategy = self._validate_strategy(strategy)
 
         free, names, fcn, grad = self._backend()
         rng = np.random.default_rng(seed)
@@ -363,7 +454,7 @@ class Minimizer:
 
         self._log(
             f"multistart with {len(free)} free parameters, {len(starts)} starts "
-            f"(simplex={simplex}, seed={seed})"
+            f"(simplex={simplex}, strategy={strategy}, seed={seed})"
         )
         results = []
         for index, start in enumerate(starts, start=1):
@@ -374,13 +465,12 @@ class Minimizer:
                 fcn,
                 grad,
                 start_values=start,
-                run_hesse=False,
+                strategy=strategy,
+                hesse=False,
                 simplex=simplex,
             )
             results.append(result)
-            self._log(
-                f"start {index}/{len(starts)} finished: {self._summary(result)}"
-            )
+            self._log(f"start {index}/{len(starts)} finished: {self._summary(result)}")
         results = tuple(results)
 
         valid_indices = tuple(
@@ -389,9 +479,7 @@ class Minimizer:
             if bool(result.valid) and np.isfinite(float(result.fval))
         )
         if not valid_indices:
-            raise RuntimeError(
-                "No valid finite minimum was found across the multistart scan"
-            )
+            raise RuntimeError("No valid finite minimum was found across the multistart scan")
 
         best_index = min(valid_indices, key=lambda index: float(results[index].fval))
         preliminary = results[best_index]
@@ -406,15 +494,12 @@ class Minimizer:
             fcn,
             grad,
             start_values=best_values,
-            run_hesse=True,
+            strategy=2,
+            hesse=True,
             simplex=False,
         )
         if not bool(best.valid) or not np.isfinite(float(best.fval)):
             raise RuntimeError("Best multistart solution is invalid after HESSE")
         self._log(f"final refined minimum: {self._summary(best)}")
 
-        return MultiStartResult(
-            best=best,
-            results=results,
-            starts=tuple(starts),
-        )
+        return MultiStartResult(best=best, results=results, starts=tuple(starts))

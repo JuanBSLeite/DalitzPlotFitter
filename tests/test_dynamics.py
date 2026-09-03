@@ -5,13 +5,19 @@ import jax.numpy as jnp
 from dalitzplotfitter.dynamics import (
     RelativisticBreitWigner,
     ResonanceContext,
+    ZemachP,
+    ZemachPstar,
+    Zemach_P,
+    Zemach_Pstar,
     bachelor_momentum_resonance_frame,
     blatt_weisskopf_from_momenta,
     breakup_momentum,
     covariant_spin_factor,
     effective_pole_mass,
     energy_dependent_width,
+    zemach_spin_factor,
 )
+from dalitzplotfitter.kinematics import CovariantKinematics
 
 
 def _context(spin=1, *, pole_mass=0.775):
@@ -90,6 +96,56 @@ def test_covariant_spin_factors_match_reference_formulas():
             m_parent, angular_momentum,
         )
         assert math.isclose(float(value), target, rel_tol=1e-6, abs_tol=1e-7)
+
+
+def test_zemach_spin_factors_match_laura_reference_formulas():
+    momentum, q, c = 1.1, 0.3, 0.25
+    expected = {
+        0: 1.0,
+        1: -2.0 * momentum * q * c,
+        2: (4.0 / 3.0) * (momentum * q) ** 2 * (3.0 * c**2 - 1.0),
+        3: -(24.0 / 15.0) * (momentum * q) ** 3 * (5.0 * c**3 - 3.0 * c),
+        4: (16.0 / 35.0)
+        * (momentum * q) ** 4
+        * (35.0 * c**4 - 30.0 * c**2 + 3.0),
+    }
+    for angular_momentum, target in expected.items():
+        value = zemach_spin_factor(
+            jnp.asarray(momentum),
+            jnp.asarray(q),
+            jnp.asarray(c),
+            angular_momentum,
+        )
+        assert math.isclose(float(value), target, rel_tol=1e-6, abs_tol=1e-7)
+
+
+def test_zemach_p_and_pstar_select_the_expected_bachelor_momentum():
+    kin = CovariantKinematics(
+        resonance_mass=jnp.asarray(0.9),
+        p_star=jnp.asarray(0.7),
+        p=jnp.asarray(1.1),
+        q=jnp.asarray(0.3),
+        cos_theta=jnp.asarray(0.25),
+    )
+    context = _context(spin=2)
+
+    expected_p = zemach_spin_factor(kin.p, kin.q, kin.cos_theta, 2)
+    expected_pstar = zemach_spin_factor(kin.p_star, kin.q, kin.cos_theta, 2)
+
+    assert math.isclose(
+        float(ZemachP()(kin, context)),
+        float(expected_p),
+        rel_tol=1e-7,
+        abs_tol=1e-7,
+    )
+    assert math.isclose(
+        float(ZemachPstar()(kin, context)),
+        float(expected_pstar),
+        rel_tol=1e-7,
+        abs_tol=1e-7,
+    )
+    assert Zemach_P is ZemachP
+    assert Zemach_Pstar is ZemachPstar
 
 
 def test_blatt_weisskopf_is_one_at_pole():

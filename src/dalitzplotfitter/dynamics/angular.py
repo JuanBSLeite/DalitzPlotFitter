@@ -9,6 +9,35 @@ import jax.numpy as jnp
 from .context import ResonanceContext
 
 
+def _zemach_polynomial(cos_theta, angular_momentum: int):
+    """Laura++ phase-convention polynomial entering Zemach spin factors."""
+    l = int(angular_momentum)
+    c = cos_theta
+    if l == 0:
+        return jnp.ones_like(c)
+    if l == 1:
+        return -2.0 * c
+    if l == 2:
+        return (4.0 / 3.0) * (3.0 * c**2 - 1.0)
+    if l == 3:
+        return -(24.0 / 15.0) * (5.0 * c**3 - 3.0 * c)
+    if l == 4:
+        return (16.0 / 35.0) * (35.0 * c**4 - 30.0 * c**2 + 3.0)
+    raise NotImplementedError("Zemach angular factors support L=0..4")
+
+
+def zemach_spin_factor(momentum, q, cos_theta, angular_momentum: int):
+    """Return the Zemach spin factor using the selected bachelor momentum.
+
+    The Laura++ ``Zemach_P`` and ``Zemach_Pstar`` conventions share the same
+    polynomial and differ only in the bachelor momentum. ``Zemach_P`` uses
+    the bachelor momentum in the resonance rest frame, while
+    ``Zemach_Pstar`` uses it in the parent rest frame.
+    """
+    l = int(angular_momentum)
+    return (momentum * q) ** l * _zemach_polynomial(cos_theta, l)
+
+
 def covariant_spin_factor(p_star, p, q, cos_theta, parent_mass, angular_momentum: int):
     """Covariant angular factor following the conventions documented in Laura++."""
     l = int(angular_momentum)
@@ -40,6 +69,44 @@ def covariant_spin_factor(p_star, p, q, cos_theta, parent_mass, angular_momentum
 
 
 @dataclass(frozen=True)
+class ZemachP:
+    """Laura++ ``Zemach_P`` angular model.
+
+    The bachelor momentum ``p`` is evaluated in the resonance rest frame.
+    """
+
+    def __call__(self, kinematics, context: ResonanceContext):
+        return zemach_spin_factor(
+            kinematics.p,
+            kinematics.q,
+            kinematics.cos_theta,
+            context.spin,
+        )
+
+
+@dataclass(frozen=True)
+class ZemachPstar:
+    """Laura++ ``Zemach_Pstar`` angular model.
+
+    The bachelor momentum ``p*`` is evaluated in the parent rest frame.
+    """
+
+    def __call__(self, kinematics, context: ResonanceContext):
+        return zemach_spin_factor(
+            kinematics.p_star,
+            kinematics.q,
+            kinematics.cos_theta,
+            context.spin,
+        )
+
+
+# Laura++-style aliases are kept for users who want the formalism names exactly
+# as they appear in amplitude-analysis documentation.
+Zemach_P = ZemachP
+Zemach_Pstar = ZemachPstar
+
+
+@dataclass(frozen=True)
 class CovariantAngular:
     """Default covariant angular model."""
 
@@ -52,3 +119,14 @@ class CovariantAngular:
             context.parent_mass,
             context.spin,
         )
+
+
+__all__ = [
+    "CovariantAngular",
+    "ZemachP",
+    "ZemachPstar",
+    "Zemach_P",
+    "Zemach_Pstar",
+    "covariant_spin_factor",
+    "zemach_spin_factor",
+]

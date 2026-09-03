@@ -70,19 +70,45 @@ def _stable_inverse_denominators(s):
     denominators = _POLE_MASSES**2 - s[..., None]
     eps = jnp.finfo(s.dtype).eps
     scale = jnp.maximum(1.0, jnp.abs(_POLE_MASSES**2))
-    regularized = jnp.where(jnp.abs(denominators) <= eps * scale, jnp.where(denominators < 0.0, -eps * scale, eps * scale), denominators)
+    regularized = jnp.where(
+        jnp.abs(denominators) <= eps * scale,
+        jnp.where(denominators < 0.0, -eps * scale, eps * scale),
+        denominators,
+    )
     return 1.0 / regularized
+
+
+def _scattering_matrix_from_inverse(s, inverse_denominators):
+    pole_terms = jnp.einsum(
+        "...a,au,av->...uv",
+        inverse_denominators,
+        _POLE_COUPLINGS,
+        _POLE_COUPLINGS,
+    )
+    f_scatt = jnp.zeros((5, 5), dtype=s.dtype)
+    f_scatt = f_scatt.at[0, :].set(_F_SCATT_ROW)
+    f_scatt = f_scatt.at[:, 0].set(_F_SCATT_ROW)
+    smooth = f_scatt * _slowly_varying_factor(
+        s[..., None, None], _S0_SCATT
+    )
+    return (pole_terms + smooth) * _adler_factor(s)[..., None, None]
 
 
 def _scattering_matrix(s):
     s = jnp.asarray(s)
+    return _scattering_matrix_from_inverse(s, _stable_inverse_denominators(s))
+
+
+def _kernel(mass):
+    mass = jnp.asarray(mass)
+    s = mass**2
     inverse_denominators = _stable_inverse_denominators(s)
-    pole_terms = jnp.einsum("...a,au,av->...uv", inverse_denominators, _POLE_COUPLINGS, _POLE_COUPLINGS)
-    f_scatt = jnp.zeros((5, 5), dtype=s.dtype)
-    f_scatt = f_scatt.at[0, :].set(_F_SCATT_ROW)
-    f_scatt = f_scatt.at[:, 0].set(_F_SCATT_ROW)
-    smooth = f_scatt * _slowly_varying_factor(s[..., None, None], _S0_SCATT)
-    return (pole_terms + smooth) * _adler_factor(s)[..., None, None]
+    k_matrix = _scattering_matrix_from_inverse(
+        s, inverse_denominators
+    ).astype(jnp.complex128)
+    rho = _phase_space_vector(s)
+    kernel = jnp.eye(5, dtype=jnp.complex128) - 1j * k_matrix * rho[..., None, :]
+    return s, inverse_denominators, k_matrix, rho, kernel
 
 
 @dataclass(frozen=True)
@@ -104,10 +130,7 @@ class KMatrix:
         return _scattering_matrix(jnp.asarray(mass) ** 2)
 
     def scattering_amplitude(self, mass):
-        mass = jnp.asarray(mass)
-        k_matrix = self.scattering_matrix(mass).astype(jnp.complex128)
-        rho = self.phase_space(mass)
-        kernel = jnp.eye(5, dtype=jnp.complex128) - 1j * k_matrix * rho[..., None, :]
+        _, _, k_matrix, _, kernel = _kernel(mass)
         return jnp.linalg.solve(kernel, k_matrix)
 
     def s_matrix(self, mass):
@@ -118,28 +141,60 @@ class KMatrix:
         dressed = sqrt_rho[..., :, None] * t_matrix * sqrt_rho[..., None, :]
         return jnp.eye(5, dtype=jnp.complex128) + 2j * dressed
 
-    def production_vector(self, mass):
-        s = jnp.asarray(mass) ** 2
+    def _production_vector_from_inverse(self, s, inverse_denominators):
         beta = jnp.stack([_complex_value(value) for value in self.betas])
         f_prod = jnp.stack([_complex_value(value) for value in self.f_prod])
         s0_prod = jnp.asarray(self.s0_prod)
-        inverse_denominators = _stable_inverse_denominators(s)
-        pole = jnp.einsum("a,aj,...a->...j", beta, _POLE_COUPLINGS, inverse_denominators)
+        pole = jnp.einsum(
+            "a,aj,...a->...j",
+            beta,
+            _POLE_COUPLINGS,
+            inverse_denominators,
+        )
         smooth = f_prod * _slowly_varying_factor(s[..., None], s0_prod)
         return pole + smooth
 
+    def production_vector(self, mass):
+        s = jnp.asarray(mass) ** 2
+        inverse_denominators = _stable_inverse_denominators(s)
+        return self._production_vector_from_inverse(s, inverse_denominators)
+
+    def prepare_mass(self, mass, context=None):
+        """Prepare the fixed pi-pi response needed by the observed channel.
+
+        Only row zero of ``(I - i K rho)^-1`` is retained because ``__call__``
+        returns the pi-pi production channel. This replaces a 5x5 solve at every
+        likelihood evaluation with a five-term complex dot product, while using
+        one fifth of the memory of a full inverse response matrix.
+        """
+
+        del context
+        _, _, _, _, kernel = _kernel(mass)
+        rhs = jnp.zeros(kernel.shape[:-1] + (1,), dtype=jnp.complex128)
+        rhs = rhs.at[..., 0, 0].set(1.0 + 0.0j)
+        response_column = jnp.linalg.solve(
+            jnp.swapaxes(kernel, -1, -2), rhs
+        )[..., 0]
+        return response_column
+
+    def evaluate_prepared(self, mass, response_row, context=None):
+        """Evaluate the pi-pi production amplitude from a prepared response."""
+
+        del context
+        production = self.production_vector(mass)
+        return jnp.einsum("...j,...j->...", response_row, production)
+
     def amplitude_vector(self, mass):
         mass = jnp.asarray(mass)
-        k_matrix = self.scattering_matrix(mass).astype(jnp.complex128)
-        rho = self.phase_space(mass)
-        production = self.production_vector(mass)
-        kernel = jnp.eye(5, dtype=jnp.complex128) - 1j * k_matrix * rho[..., None, :]
+        s, inverse_denominators, _, _, kernel = _kernel(mass)
+        production = self._production_vector_from_inverse(s, inverse_denominators)
         return jnp.linalg.solve(kernel, production[..., :, None])[..., 0]
 
     def __call__(self, mass, context: ResonanceContext):
         if int(context.spin) != 0:
             raise ValueError("KMatrix is defined for the scalar pi-pi S-wave")
-        return self.amplitude_vector(mass)[..., 0]
+        response_row = self.prepare_mass(mass, context)
+        return self.evaluate_prepared(mass, response_row, context)
 
 
 __all__ = ["KMatrix"]

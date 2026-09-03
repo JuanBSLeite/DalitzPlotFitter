@@ -1,6 +1,14 @@
 """Numerical resonance dynamics."""
 
-from .angular import CovariantAngular, covariant_spin_factor
+from .angular import (
+    CovariantAngular,
+    ZemachP,
+    ZemachPstar,
+    Zemach_P,
+    Zemach_Pstar,
+    covariant_spin_factor,
+    zemach_spin_factor,
+)
 from .context import ResonanceContext
 from .lineshape import (
     BaBarFlatte,
@@ -34,6 +42,10 @@ __all__ = [
     "RelativisticBreitWigner",
     "ResonanceAmplitude",
     "ResonanceContext",
+    "ZemachP",
+    "ZemachPstar",
+    "Zemach_P",
+    "Zemach_Pstar",
     "bachelor_momentum_resonance_frame",
     "blatt_weisskopf_from_momenta",
     "breakup_momentum",
@@ -42,4 +54,5 @@ __all__ = [
     "energy_dependent_width",
     "kallen",
     "physical_bin_mask",
+    "zemach_spin_factor",
 ]

@@ -55,6 +55,10 @@ def _kinematics_prefix(
     return f"__kin_{daughter_key}_{partner_key}_{bachelor_key}"
 
 
+def _lineshape_prepared_key(prefix: str) -> str:
+    return f"{prefix}_lineshape_prepared"
+
+
 def _identical_permutations(
     final_state: tuple[str, str, str],
 ) -> tuple[tuple[int, int, int], ...]:
@@ -157,30 +161,44 @@ class ResonanceAmplitude:
         )
 
     def prepare_data(self, data: Mapping[str, Array]) -> dict[str, Array]:
-        """Attach parameter-independent kinematics for fast repeated evaluation."""
+        """Attach parameter-independent kinematics and lineshape response data."""
 
         prepared = dict(data)
         context = self.context.resolve(None)
+        prepare_lineshape = getattr(self.lineshape, "prepare_mass", None)
         for daughter_key, partner_key, bachelor_key in self._pairings():
             prefix = _kinematics_prefix(daughter_key, partner_key, bachelor_key)
             if f"{prefix}_mass" in prepared:
-                continue
-            kin = self._kinematics(
-                prepared,
-                daughter_key,
-                partner_key,
-                bachelor_key,
-                context,
-            )
-            prepared.update(
-                {
-                    f"{prefix}_mass": kin.resonance_mass,
-                    f"{prefix}_pstar": kin.p_star,
-                    f"{prefix}_p": kin.p,
-                    f"{prefix}_q": kin.q,
-                    f"{prefix}_costheta": kin.cos_theta,
-                }
-            )
+                kin = self._kinematics(
+                    prepared,
+                    daughter_key,
+                    partner_key,
+                    bachelor_key,
+                    context,
+                )
+            else:
+                kin = self._kinematics(
+                    prepared,
+                    daughter_key,
+                    partner_key,
+                    bachelor_key,
+                    context,
+                )
+                prepared.update(
+                    {
+                        f"{prefix}_mass": kin.resonance_mass,
+                        f"{prefix}_pstar": kin.p_star,
+                        f"{prefix}_p": kin.p,
+                        f"{prefix}_q": kin.q,
+                        f"{prefix}_costheta": kin.cos_theta,
+                    }
+                )
+            prepared_key = _lineshape_prepared_key(prefix)
+            if prepare_lineshape is not None and prepared_key not in prepared:
+                prepared[prepared_key] = prepare_lineshape(
+                    kin.resonance_mass,
+                    context,
+                )
         return prepared
 
     def _evaluate_pairing(
@@ -217,7 +235,19 @@ class ResonanceAmplitude:
         x_parent = blatt_weisskopf_from_momenta(
             kin.p, p0, l, context.parent_radius
         )
-        resonance = lineshape(kin.resonance_mass, context)
+
+        prefix = _kinematics_prefix(daughter_key, partner_key, bachelor_key)
+        prepared_key = _lineshape_prepared_key(prefix)
+        evaluate_prepared = getattr(lineshape, "evaluate_prepared", None)
+        if evaluate_prepared is not None and prepared_key in data:
+            resonance = evaluate_prepared(
+                kin.resonance_mass,
+                data[prepared_key],
+                context,
+            )
+        else:
+            resonance = lineshape(kin.resonance_mass, context)
+
         angular = angular_model(kin, context)
         return resonance * x_parent * x_res * angular
 

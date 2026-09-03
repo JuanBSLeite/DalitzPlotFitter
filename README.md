@@ -50,32 +50,60 @@ Background shapes can be supplied through `BackgroundSpec`; their deterministic 
 
 ## User-friendly toy generation
 
-Once a model exists, pseudo-data no longer requires manually creating a phase-space pool and calling `weighted_resample`:
+There are two public unweighted toy-generation methods:
+
+```text
+inverse-transform
+accept-reject
+```
+
+Inverse transform is the default because it is substantially faster for realistic amplitude models:
 
 ```python
 from dalitzplotfitter import generate_toy
 
-toy = generate_toy(model, 50_000, seed=1)
-```
-
-Efficiency, vetoes and backgrounds can be included directly:
-
-```python
-from dalitzplotfitter import ToyBackground
-
 toy = generate_toy(
     model,
-    50_000,
+    1_000_000,
     parameters=fit_values,
-    efficiency=efficiency,
-    veto=veto,
-    signal_fraction=0.82,
-    backgrounds=(ToyBackground("comb", background_shape),),
+    inverse_resolution=1024,
     seed=2,
 )
 ```
 
-Toy samples can be written directly to ROOT:
+The inverse method uses a numerical Rosenblatt transform on the physical conventional Dalitz plane. It first samples the marginal distribution and then the conditional distribution, including the exact coordinate Jacobian of the physical Dalitz boundary.
+
+`accept-reject` remains available explicitly as an independent reference and validation sampler:
+
+```python
+toy_reference = generate_toy(
+    model,
+    50_000,
+    parameters=fit_values,
+    method="accept-reject",
+    seed=1,
+)
+```
+
+For repeated toys, prepare the inverse CDFs once:
+
+```python
+from dalitzplotfitter import prepare_inverse_toy_generator
+
+prepared = prepare_inverse_toy_generator(
+    model,
+    parameters=fit_values,
+    efficiency=efficiency,
+    veto=veto,
+    resolution=1024,
+)
+
+toy1 = prepared.generate(100_000, seed=10)
+toy2 = prepared.generate(100_000, seed=11)
+toy3 = prepared.generate(1_000_000, seed=12)
+```
+
+Efficiency, vetoes and backgrounds can be included directly in either public method. Toy samples can also be written directly to ROOT:
 
 ```python
 toy = generate_toy(
@@ -271,7 +299,7 @@ Gaussian external measurements can be added with `GaussianConstraint` and `Const
 
 ## Phase-space Monte Carlo
 
-`PhaseSpaceMC` is used for proposal/event generation and for weighted rendering samples used by smooth fitted projections. It is **not** used for amplitude/PDF normalization or fit fractions, which remain deterministic.
+`PhaseSpaceMC` is used for accept-reject proposal/event generation and for weighted rendering samples used by smooth fitted projections. It is **not** used for amplitude/PDF normalization or fit fractions, which remain deterministic. The default inverse-transform toy path instead samples the physical Dalitz plane from prepared inverse CDFs.
 
 ## Tutorial notebooks
 

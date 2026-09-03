@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from math import sqrt
-from typing import Mapping
 
 import jax
 import jax.numpy as jnp
@@ -27,19 +27,13 @@ def _s13_limits_scalar(s12, mother_mass, masses):
 
 
 def physical_bin_mask(s12_edges, s13_edges, *, mother_mass, masses, folded=False, samples_per_bin=129):
-    """Return bins that intersect the exact physical Dalitz region.
-
-    The check samples the exact analytic s13 boundary densely inside each s12
-    interval, including both interval edges. Therefore the first/last bins are
-    retained whenever they contain any non-zero physical Dalitz area. With
-    ``folded=True`` only the half-plane s12 <= s13 is retained.
-    """
+    """Return bins that intersect the exact physical Dalitz region."""
     if samples_per_bin < 3:
         raise ValueError("samples_per_bin must be at least 3")
     xedges = tuple(float(v) for v in s12_edges)
     yedges = tuple(float(v) for v in s13_edges)
     rows = []
-    for i, (x0, x1) in enumerate(zip(xedges[:-1], xedges[1:])):
+    for x0, x1 in zip(xedges[:-1], xedges[1:]):
         row = []
         for y0, y1 in zip(yedges[:-1], yedges[1:]):
             active = False
@@ -89,24 +83,30 @@ def _bicubic_one(x, y, xc, yc, values):
     return _catmull_rom(along[0],along[1],along[2],along[3],ty)
 
 
-def _fill_inactive_from_nearest(values, mask):
-    """Use nearest active cell as a fixed ghost value for interpolation."""
+def _nearest_active_sources(mask):
+    """Return a fixed flat gather map used to fill inactive interpolation cells."""
     if mask is None:
-        return values
-    active = [(i,j) for i,row in enumerate(mask) for j,ok in enumerate(row) if ok]
+        return None
+    active = [(i, j) for i, row in enumerate(mask) for j, ok in enumerate(row) if ok]
     if not active:
         raise ValueError("QMI2D active_mask contains no physical bins")
-    rows = []
-    for i,row in enumerate(mask):
-        out = []
-        for j,ok in enumerate(row):
+    ny = len(mask[0])
+    sources = []
+    for i, row in enumerate(mask):
+        for j, ok in enumerate(row):
             if ok:
-                out.append(values[i,j])
+                ai, aj = i, j
             else:
-                ai,aj = min(active, key=lambda p:(p[0]-i)**2+(p[1]-j)**2)
-                out.append(values[ai,aj])
-        rows.append(jnp.stack(out))
-    return jnp.stack(rows)
+                ai, aj = min(active, key=lambda p: (p[0]-i)**2 + (p[1]-j)**2)
+            sources.append(ai * ny + aj)
+    return tuple(sources)
+
+
+def _fill_inactive_from_sources(values, sources):
+    if sources is None:
+        return values
+    flat = jnp.ravel(values)
+    return flat[jnp.asarray(sources, dtype=jnp.int32)].reshape(values.shape)
 
 
 @dataclass(frozen=True)
@@ -117,6 +117,10 @@ class QMI2D:
     mark only cells intersecting the physical Dalitz region. Inactive cells are
     never intended to carry fit parameters; for linear/cubic interpolation they
     act only as ghost cells filled from the nearest active value.
+
+    All geometry that depends only on the fixed binning/mask is cached once:
+    bin edges, centres and the nearest-active ghost-cell gather map. Floating
+    QMI magnitudes/phases therefore only rebuild the value field itself.
     """
     s12_edges: tuple[float,...]
     s13_edges: tuple[float,...]
@@ -136,11 +140,37 @@ class QMI2D:
         if self.active_mask is not None and (len(self.active_mask)!=nx or any(len(r)!=ny for r in self.active_mask)): raise ValueError("QMI2D active_mask shape must match the 2D binning")
         if self.interpolation not in {"none","linear","cubic"}: raise ValueError("QMI2D interpolation must be 'none', 'linear', or 'cubic'")
         if self.interpolation=="cubic" and (nx<2 or ny<2): raise ValueError("cubic QMI2D interpolation requires at least 2x2 bins")
+        if self.active_mask is not None and not any(any(row) for row in self.active_mask):
+            raise ValueError("QMI2D active_mask contains no physical bins")
 
     @property
     def shape(self): return (len(self.s12_edges)-1,len(self.s13_edges)-1)
     @property
     def n_active_bins(self): return self.shape[0]*self.shape[1] if self.active_mask is None else sum(sum(bool(v) for v in r) for r in self.active_mask)
+
+    @cached_property
+    def _x_edges_fixed(self):
+        return jnp.asarray(self.s12_edges)
+
+    @cached_property
+    def _y_edges_fixed(self):
+        return jnp.asarray(self.s13_edges)
+
+    @cached_property
+    def _x_centers_fixed(self):
+        return 0.5 * (self._x_edges_fixed[:-1] + self._x_edges_fixed[1:])
+
+    @cached_property
+    def _y_centers_fixed(self):
+        return 0.5 * (self._y_edges_fixed[:-1] + self._y_edges_fixed[1:])
+
+    @cached_property
+    def _active_mask_fixed(self):
+        return None if self.active_mask is None else jnp.asarray(self.active_mask, dtype=bool)
+
+    @cached_property
+    def _ghost_sources(self):
+        return _nearest_active_sources(self.active_mask)
 
     def _coordinates(self,data):
         s12,s13=jnp.asarray(data["s12"]),jnp.asarray(data["s13"])
@@ -148,16 +178,22 @@ class QMI2D:
 
     def interpolated_magnitude_phase(self,data):
         x,y=self._coordinates(data)
-        xe,ye=jnp.asarray(self.s12_edges,dtype=x.dtype),jnp.asarray(self.s13_edges,dtype=y.dtype)
-        xc,yc=0.5*(xe[:-1]+xe[1:]),0.5*(ye[:-1]+ye[1:])
-        mag=jnp.asarray(self.magnitudes,dtype=x.dtype); phase=jnp.asarray(self.phases,dtype=x.dtype)
-        mag=_fill_inactive_from_nearest(mag,self.active_mask); phase=_fill_inactive_from_nearest(phase,self.active_mask)
+        xe=self._x_edges_fixed.astype(x.dtype)
+        ye=self._y_edges_fixed.astype(y.dtype)
+        xc=self._x_centers_fixed.astype(x.dtype)
+        yc=self._y_centers_fixed.astype(y.dtype)
+        mag=jnp.asarray(self.magnitudes,dtype=x.dtype)
+        phase=jnp.asarray(self.phases,dtype=x.dtype)
+        mag=_fill_inactive_from_sources(mag,self._ghost_sources)
+        phase=_fill_inactive_from_sources(phase,self._ghost_sources)
         if self.interpolation=="none":
-            ix=jnp.clip(jnp.searchsorted(xe,x,side="right")-1,0,mag.shape[0]-1); iy=jnp.clip(jnp.searchsorted(ye,y,side="right")-1,0,mag.shape[1]-1)
+            ix=jnp.clip(jnp.searchsorted(xe,x,side="right")-1,0,mag.shape[0]-1)
+            iy=jnp.clip(jnp.searchsorted(ye,y,side="right")-1,0,mag.shape[1]-1)
             out_mag,out_phase=mag[ix,iy],phase[ix,iy]
-            if self.active_mask is not None:
-                mask=jnp.asarray(self.active_mask); active=mask[ix,iy]
-                out_mag=jnp.where(active,out_mag,0.0); out_phase=jnp.where(active,out_phase,0.0)
+            if self._active_mask_fixed is not None:
+                active=self._active_mask_fixed[ix,iy]
+                out_mag=jnp.where(active,out_mag,0.0)
+                out_phase=jnp.where(active,out_phase,0.0)
             return out_mag,out_phase
         xx,yy=jnp.clip(x,xc[0],xc[-1]),jnp.clip(y,yc[0],yc[-1])
         if self.interpolation=="linear": return _bilinear(xx,yy,xc,yc,mag),_bilinear(xx,yy,xc,yc,phase)
