@@ -68,6 +68,26 @@ def covariant_spin_factor(p_star, p, q, cos_theta, parent_mass, angular_momentum
     raise NotImplementedError("covariant angular factors support L=0..4")
 
 
+def goofit_legacy_spin_factor(p, q, cos_theta, angular_momentum: int):
+    """Return the legacy GooFit spin factor used by the Ds->pipipi analysis.
+
+    This reproduces the historical GooFit/Laura++ invariant convention after
+    reduction to resonance-rest-frame momenta.  It is intentionally kept as a
+    separate legacy option because its mass-dependent normalization is not the
+    same as the current covariant or Zemach conventions.
+    """
+    l = int(angular_momentum)
+    c = cos_theta
+    pq = p * q
+    if l == 0:
+        return jnp.ones_like(c)
+    if l == 1:
+        return 4.0 * pq * c
+    if l == 2:
+        return (16.0 / 3.0) * pq**2 * (3.0 * c**2 - 1.0)
+    raise NotImplementedError("GooFit legacy angular factors support L=0..2")
+
+
 @dataclass(frozen=True)
 class ZemachP:
     """Laura++ ``Zemach_P`` angular model.
@@ -121,12 +141,33 @@ class CovariantAngular:
         )
 
 
+@dataclass(frozen=True)
+class GooFitLegacyAngular:
+    """Legacy angular convention used by the historical GooFit Ds->pipipi fit.
+
+    The angular factor itself uses the bachelor momentum in the resonance rest
+    frame.  To reproduce the complete historical GooFit resonance convention,
+    construct ``ResonanceAmplitude`` with ``bachelor_momentum_frame="parent"``
+    so that the parent Blatt--Weisskopf factor also follows the legacy setup.
+    """
+
+    def __call__(self, kinematics, context: ResonanceContext):
+        return goofit_legacy_spin_factor(
+            kinematics.p,
+            kinematics.q,
+            kinematics.cos_theta,
+            context.spin,
+        )
+
+
 __all__ = [
     "CovariantAngular",
+    "GooFitLegacyAngular",
     "ZemachP",
     "ZemachPstar",
     "Zemach_P",
     "Zemach_Pstar",
     "covariant_spin_factor",
+    "goofit_legacy_spin_factor",
     "zemach_spin_factor",
 ]
