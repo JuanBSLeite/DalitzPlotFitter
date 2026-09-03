@@ -2,6 +2,7 @@
 
 from .babar_flatte import BaBarFlatte
 from .common import (
+    bachelor_momentum_parent_frame,
     bachelor_momentum_resonance_frame,
     blatt_weisskopf_from_momenta,
     breakup_momentum,
@@ -26,6 +27,7 @@ __all__ = [
     "Pole",
     "QMI",
     "RelativisticBreitWigner",
+    "bachelor_momentum_parent_frame",
     "bachelor_momentum_resonance_frame",
     "blatt_weisskopf_from_momenta",
     "breakup_momentum",
