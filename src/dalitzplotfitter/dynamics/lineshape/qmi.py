@@ -79,8 +79,10 @@ class QMI:
             raise ValueError("QMI knots must be strictly increasing")
         if knots[0] <= 0.0:
             raise ValueError("QMI knot masses must be positive")
-        if self.interpolation not in {"linear", "cubic"}:
-            raise ValueError("QMI interpolation must be 'linear' or 'cubic'")
+        if self.interpolation not in {"linear", "cubic", "linear-cartesian"}:
+            raise ValueError(
+                "QMI interpolation must be 'linear', 'cubic' or 'linear-cartesian'"
+            )
         if self.interpolation == "cubic" and len(self.knots) < 3:
             raise ValueError("cubic QMI interpolation requires at least three knots")
 
@@ -104,7 +106,7 @@ class QMI:
         return jnp.asarray(np.linalg.inv(matrix))
 
     def _interpolate(self, s, knot_s, values):
-        if self.interpolation == "linear":
+        if self.interpolation in {"linear", "linear-cartesian"}:
             return jnp.interp(s, knot_s, values)
         return _natural_cubic_spline(
             s,
@@ -127,8 +129,26 @@ class QMI:
     def __call__(self, mass, context: ResonanceContext):
         if int(context.spin) != 0:
             raise ValueError("QMI is defined for a scalar S-wave")
-        magnitude, phase = self.interpolated_magnitude_phase(mass)
-        return magnitude * jnp.exp(1j * phase)
+
+        mass = jnp.asarray(mass)
+        if self.interpolation != "linear-cartesian":
+            magnitude, phase = self.interpolated_magnitude_phase(mass)
+            return magnitude * jnp.exp(1j * phase)
+
+        # Legacy DsPPP GooFit SplinePolar convention: convert each knot from
+        # magnitude/phase to Cartesian coordinates, then interpolate Re and Im
+        # independently in s=m^2. The old implementation returned zero outside
+        # the knot range instead of extending the endpoint values.
+        knot_s = jnp.asarray(self.knots, dtype=mass.dtype) ** 2
+        s = mass**2
+        magnitudes = jnp.asarray(self.magnitudes, dtype=mass.dtype)
+        phases = jnp.asarray(self.phases, dtype=mass.dtype)
+        real_knots = magnitudes * jnp.cos(phases)
+        imag_knots = magnitudes * jnp.sin(phases)
+        real = jnp.interp(s, knot_s, real_knots)
+        imag = jnp.interp(s, knot_s, imag_knots)
+        inside = (s >= knot_s[0]) & (s < knot_s[-1])
+        return jnp.where(inside, real + 1j * imag, 0.0 + 0.0j)
 
 
 __all__ = ["QMI"]
