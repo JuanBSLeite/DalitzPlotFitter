@@ -19,6 +19,7 @@ from .angular import CovariantAngular
 from .context import ResonanceContext, resolve_value
 from .lineshape import (
     RelativisticBreitWigner,
+    bachelor_momentum_parent_frame,
     bachelor_momentum_resonance_frame,
     blatt_weisskopf_from_momenta,
     breakup_momentum,
@@ -109,6 +110,13 @@ class ResonanceAmplitude:
     final_state: tuple[str, str, str] | None = None
     lineshape: object = RelativisticBreitWigner()
     angular: object = CovariantAngular()
+    bachelor_momentum_frame: str = "resonance"
+
+    def __post_init__(self) -> None:
+        if self.bachelor_momentum_frame not in {"resonance", "parent"}:
+            raise ValueError(
+                "bachelor_momentum_frame must be either 'resonance' or 'parent'"
+            )
 
     def _pairings(self) -> tuple[tuple[str, str, str], ...]:
         base_keys = (self.daughter_key, self.partner_key, self.bachelor_key)
@@ -224,16 +232,25 @@ class ResonanceAmplitude:
 
         pole_mass_for_momenta = effective_pole_mass(context)
         q0 = breakup_momentum(pole_mass_for_momenta, m1, m2)
-        p0 = bachelor_momentum_resonance_frame(
-            context.parent_mass,
-            pole_mass_for_momenta,
-            context.bachelor_mass,
-        )
+        if self.bachelor_momentum_frame == "parent":
+            parent_momentum = kin.p_star
+            p0 = bachelor_momentum_parent_frame(
+                context.parent_mass,
+                pole_mass_for_momenta,
+                context.bachelor_mass,
+            )
+        else:
+            parent_momentum = kin.p
+            p0 = bachelor_momentum_resonance_frame(
+                context.parent_mass,
+                pole_mass_for_momenta,
+                context.bachelor_mass,
+            )
         x_res = blatt_weisskopf_from_momenta(
             kin.q, q0, l, context.resonance_radius
         )
         x_parent = blatt_weisskopf_from_momenta(
-            kin.p, p0, l, context.parent_radius
+            parent_momentum, p0, l, context.parent_radius
         )
 
         prefix = _kinematics_prefix(daughter_key, partner_key, bachelor_key)
