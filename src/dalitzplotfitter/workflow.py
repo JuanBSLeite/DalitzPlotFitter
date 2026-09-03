@@ -436,6 +436,8 @@ class FitSession:
         *,
         simplex: bool = False,
         ncall: int | None = None,
+        strategy: int = 2,
+        hesse: bool = True,
         tolerance: float = 1e-4,
         verbose: int = 0,
     ):
@@ -443,6 +445,8 @@ class FitSession:
             start_values=start_values,
             simplex=simplex,
             ncall=ncall,
+            strategy=strategy,
+            hesse=hesse,
         )
 
     def fit_multistart(
@@ -452,6 +456,7 @@ class FitSession:
         seed: int | None = None,
         include_default: bool = False,
         simplex: bool = False,
+        strategy: int = 1,
         tolerance: float = 1e-4,
         verbose: int = 0,
     ):
@@ -460,6 +465,7 @@ class FitSession:
             seed=seed,
             include_default=include_default,
             simplex=simplex,
+            strategy=strategy,
         )
 
     def result_values(self, result) -> dict[str, float]:
