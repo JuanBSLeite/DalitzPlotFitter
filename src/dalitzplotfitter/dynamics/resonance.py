@@ -19,6 +19,7 @@ from .angular import CovariantAngular
 from .context import ResonanceContext, resolve_value
 from .lineshape import (
     RelativisticBreitWigner,
+    bachelor_momentum_parent_frame,
     bachelor_momentum_resonance_frame,
     blatt_weisskopf_from_momenta,
     breakup_momentum,
@@ -224,16 +225,32 @@ class ResonanceAmplitude:
 
         pole_mass_for_momenta = effective_pole_mass(context)
         q0 = breakup_momentum(pole_mass_for_momenta, m1, m2)
-        p0 = bachelor_momentum_resonance_frame(
-            context.parent_mass,
-            pole_mass_for_momenta,
-            context.bachelor_mass,
+        parent_barrier_frame = getattr(
+            angular_model, "parent_barrier_frame", "resonance"
         )
+        if parent_barrier_frame == "parent":
+            parent_momentum = kin.p_star
+            p0 = bachelor_momentum_parent_frame(
+                context.parent_mass,
+                pole_mass_for_momenta,
+                context.bachelor_mass,
+            )
+        elif parent_barrier_frame == "resonance":
+            parent_momentum = kin.p
+            p0 = bachelor_momentum_resonance_frame(
+                context.parent_mass,
+                pole_mass_for_momenta,
+                context.bachelor_mass,
+            )
+        else:
+            raise ValueError(
+                "parent_barrier_frame must be either 'parent' or 'resonance'"
+            )
         x_res = blatt_weisskopf_from_momenta(
             kin.q, q0, l, context.resonance_radius
         )
         x_parent = blatt_weisskopf_from_momenta(
-            kin.p, p0, l, context.parent_radius
+            parent_momentum, p0, l, context.parent_radius
         )
 
         prefix = _kinematics_prefix(daughter_key, partner_key, bachelor_key)
