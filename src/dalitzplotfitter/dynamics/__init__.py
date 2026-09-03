@@ -1,16 +1,23 @@
 """Numerical resonance dynamics."""
 
-from .angular import CovariantAngular, covariant_spin_factor
+from .angular import (
+    CovariantAngular,
+    GooFitLegacyAngular,
+    covariant_spin_factor,
+    goofit_legacy_spin_factor,
+)
 from .context import ResonanceContext
 from .lineshape import (
     BaBarFlatte,
     Flatte,
+    GooFitLegacyGounarisSakurai,
     GounarisSakurai,
     KMatrix,
     LASS,
     Pole,
     QMI,
     RelativisticBreitWigner,
+    bachelor_momentum_parent_frame,
     bachelor_momentum_resonance_frame,
     blatt_weisskopf_from_momenta,
     breakup_momentum,
@@ -25,6 +32,8 @@ __all__ = [
     "BaBarFlatte",
     "CovariantAngular",
     "Flatte",
+    "GooFitLegacyAngular",
+    "GooFitLegacyGounarisSakurai",
     "GounarisSakurai",
     "KMatrix",
     "LASS",
@@ -34,12 +43,14 @@ __all__ = [
     "RelativisticBreitWigner",
     "ResonanceAmplitude",
     "ResonanceContext",
+    "bachelor_momentum_parent_frame",
     "bachelor_momentum_resonance_frame",
     "blatt_weisskopf_from_momenta",
     "breakup_momentum",
     "covariant_spin_factor",
     "effective_pole_mass",
     "energy_dependent_width",
+    "goofit_legacy_spin_factor",
     "kallen",
     "physical_bin_mask",
 ]
