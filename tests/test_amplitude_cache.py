@@ -107,6 +107,41 @@ def test_component_normalization_sets_matrix_diagonal_to_one():
     assert jnp.allclose(diagonal, jnp.ones(2), rtol=1e-12, atol=1e-12)
 
 
+def test_component_normalization_can_be_disabled_for_one_component():
+    f1 = CountingAmplitude([1.0 + 0.0j, 2.0 - 0.2j])
+    f2 = CountingAmplitude([0.2 + 0.1j, 0.4 - 0.2j])
+    c1 = _coefficient("a", 1.0, 0.0, fixed=True)
+    c2 = _coefficient("b", 0.5, 0.3)
+    weights = jnp.linspace(0.5, 1.5, 24)
+    components = (
+        AmplitudeComponent("a", f1, c1, normalize_component=False),
+        AmplitudeComponent("b", f2, c2),
+    )
+    norm_data = {"x": jnp.arange(24.0)}
+    cache = PreparedAmplitudeCache.prepare(
+        components,
+        data={"x": jnp.arange(8.0)},
+        normalization_data=norm_data,
+        normalization_weights=weights,
+        parameters=(*c1.parameters, *c2.parameters),
+        normalize_components=True,
+    )
+
+    raw_norm = jnp.stack(
+        [component.function(norm_data, None) for component in components], axis=1
+    )
+    raw_matrix = normalization_matrix(raw_norm, weights)
+    expected_scales = jnp.asarray(
+        [1.0, 1.0 / jnp.sqrt(jnp.real(raw_matrix[1, 1]))]
+    )
+    expected = normalization_matrix(raw_norm * expected_scales, weights)
+
+    assert jnp.allclose(cache.component_scales, expected_scales)
+    assert jnp.allclose(cache.normalization_matrix_fixed, expected)
+    assert not jnp.isclose(jnp.real(cache.normalization_matrix_fixed[0, 0]), 1.0)
+    assert jnp.isclose(jnp.real(cache.normalization_matrix_fixed[1, 1]), 1.0)
+
+
 def test_compact_efficiency_weighted_matrix_matches_direct_recomputation():
     f1 = CountingAmplitude([1.0 + 0.0j, 2.0 - 0.2j, 0.3 + 0.4j])
     f2 = CountingAmplitude([0.2 + 0.1j, 0.4 - 0.2j, -0.7 + 0.3j])
@@ -233,6 +268,38 @@ def test_floating_component_is_renormalized_after_dynamic_change():
     matrix = cache._matrix_with_dynamic_blocks(norm_components)
     diagonal = jnp.real(jnp.diag(matrix))
     assert jnp.allclose(diagonal, jnp.ones(2), rtol=1e-12, atol=1e-12)
+
+
+def test_floating_component_override_preserves_raw_dynamic_scale():
+    f1 = CountingAmplitude([1.0 + 0.0j, 2.0 + 0.0j])
+    f2 = CountingAmplitude([0.2 + 0.1j, 0.4 - 0.2j])
+    c1 = _coefficient("a", 1.0, 0.0, fixed=True)
+    c2 = _coefficient("b", 0.5, 0.3)
+    dynamic = Parameter.dynamics(
+        "a.scale", 1.0, backend_name="scale", owner="a"
+    )
+    cache = PreparedAmplitudeCache.prepare(
+        (
+            AmplitudeComponent("a", f1, c1, normalize_component=False),
+            AmplitudeComponent("b", f2, c2),
+        ),
+        data={"x": jnp.arange(8.0)},
+        normalization_data={"x": jnp.arange(32.0)},
+        normalization_weights=jnp.ones(32),
+        parameters=(*c1.parameters, *c2.parameters, dynamic),
+        normalize_components=True,
+    )
+
+    _, norm_at_one = cache._evaluate_components({"a.scale": 1.0})
+    _, norm_at_four = cache._evaluate_components({"a.scale": 4.0})
+    matrix_at_one = cache._matrix_with_dynamic_blocks(norm_at_one)
+    matrix_at_four = cache._matrix_with_dynamic_blocks(norm_at_four)
+
+    assert jnp.isclose(
+        jnp.real(matrix_at_four[0, 0]),
+        16.0 * jnp.real(matrix_at_one[0, 0]),
+    )
+    assert jnp.isclose(jnp.real(matrix_at_four[1, 1]), 1.0)
 
 
 def test_multiple_dynamic_rows_match_full_matrix_recomputation():

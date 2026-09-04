@@ -162,6 +162,7 @@ class Resonance:
     resonance_radius: object = 1.5
     parent_radius: object = 5.0
     bachelor_momentum_frame: Literal["resonance", "parent"] = "resonance"
+    normalize_component: bool | None = None
 
     def __post_init__(self) -> None:
         if len(set(self.pair)) != 2 or any(
@@ -182,12 +183,23 @@ class Resonance:
             raise ValueError(
                 "bachelor_momentum_frame must be either 'resonance' or 'parent'"
             )
+        if self.normalize_component is not None and not isinstance(
+            self.normalize_component, bool
+        ):
+            raise ValueError("normalize_component must be a boolean or None")
 
 
 @dataclass(frozen=True)
 class NonResonant:
     coefficient: object
     name: str = "NR"
+    normalize_component: bool | None = None
+
+    def __post_init__(self) -> None:
+        if self.normalize_component is not None and not isinstance(
+            self.normalize_component, bool
+        ):
+            raise ValueError("normalize_component must be a boolean or None")
 
 
 @dataclass(frozen=True)
@@ -202,6 +214,13 @@ class DalitzAmplitude:
     name: str
     dynamics: object
     coefficient: object
+    normalize_component: bool | None = None
+
+    def __post_init__(self) -> None:
+        if self.normalize_component is not None and not isinstance(
+            self.normalize_component, bool
+        ):
+            raise ValueError("normalize_component must be a boolean or None")
 
 
 @dataclass(frozen=True)
@@ -369,7 +388,12 @@ class DecayModel:
             angular=component.angular,
             bachelor_momentum_frame=component.bachelor_momentum_frame,
         )
-        return AmplitudeComponent(component.name, dynamics, component.coefficient)
+        return AmplitudeComponent(
+            component.name,
+            dynamics,
+            component.coefficient,
+            component.normalize_component,
+        )
 
     @property
     def amplitude_model(self) -> CoherentAmplitudeModel:
@@ -381,13 +405,21 @@ class DecayModel:
             if isinstance(component, Resonance):
                 built.append(self._build_resonance(component))
             elif isinstance(component, NonResonant):
-                built.append(AmplitudeComponent(component.name, ConstantAmplitude(), component.coefficient))
+                built.append(
+                    AmplitudeComponent(
+                        component.name,
+                        ConstantAmplitude(),
+                        component.coefficient,
+                        component.normalize_component,
+                    )
+                )
             elif isinstance(component, DalitzAmplitude):
                 built.append(
                     AmplitudeComponent(
                         component.name,
                         _ResolvedDirectDynamics(component.dynamics),
                         component.coefficient,
+                        component.normalize_component,
                     )
                 )
             else:
@@ -423,7 +455,12 @@ class DecayModel:
         return PhaseSpaceMC(self.channel.parent_mass, self.channel.daughter_masses).generate(size, seed=seed)
 
     def _component_scale(self, component: AmplitudeComponent, values=None):
-        if not self.normalize_components:
+        normalize = (
+            self.normalize_components
+            if component.normalize_component is None
+            else component.normalize_component
+        )
+        if not normalize:
             return 1.0
         sample = self.normalization_sample
         raw = jnp.asarray(component.function(sample.as_dict(), values))

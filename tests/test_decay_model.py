@@ -134,6 +134,32 @@ def test_component_normalization_can_be_disabled():
     assert cache.normalize_components is False
 
 
+def test_component_normalization_override_reaches_amplitude_model():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    model = _model(
+        channel,
+        [
+            Resonance(
+                "rho_test",
+                pair=(0, 1),
+                coefficient=RealImag(1.0, 0.0),
+                mass=0.775,
+                width=0.149,
+                spin=1,
+                normalize_component=False,
+            ),
+            NonResonant(RealImag(0.3, -0.2)),
+        ],
+        normalize_components=True,
+    )
+
+    built = model.amplitude_model.components
+    assert built[0].normalize_component is False
+    assert built[1].normalize_component is None
+    assert model._component_scale(built[0]) == 1.0
+    assert not jnp.isclose(model._component_scale(built[1]), 1.0)
+
+
 def test_decay_model_computes_and_prints_fit_fractions(capsys):
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     model = _model(

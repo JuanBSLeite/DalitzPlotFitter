@@ -16,6 +16,13 @@ class AmplitudeComponent:
     name: str
     function: object
     coefficient: object
+    normalize_component: bool | None = None
+
+    def __post_init__(self) -> None:
+        if self.normalize_component is not None and not isinstance(
+            self.normalize_component, bool
+        ):
+            raise ValueError("normalize_component must be a boolean or None")
 
     def value(
         self,

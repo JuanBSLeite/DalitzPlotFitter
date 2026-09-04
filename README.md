@@ -230,13 +230,31 @@ Square-Dalitz histogram values are scalar efficiency/background values; they do 
 
 ## Component normalization convention
 
-Every dynamical component is normalized before applying its complex coefficient:
+Every dynamical component is normalized by default before applying its complex coefficient:
 
 ```text
 integral dPhi |F_j|^2 = 1
 ```
 
 Detector efficiency is excluded from individual component normalization and enters only total PDF normalization.
+
+An individual component can keep its raw dynamical scale while all other
+components retain the model default:
+
+```python
+Resonance(
+    "S_wave_QMI",
+    pair=(0, 2),
+    coefficient=coefficient,
+    lineshape=qmi,
+    normalize_component=False,
+)
+```
+
+This disables only the unit-integral rescaling of that component. It remains
+included in the coherent amplitude, interference terms, and total PDF
+normalization. The default `normalize_component=None` inherits
+`DecayModel.normalize_components`.
 
 ## Detector-resolution convolution
 
