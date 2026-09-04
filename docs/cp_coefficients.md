@@ -65,6 +65,27 @@ When only coefficient parameters float, the dynamical basis and normalization ma
 
 At least one complex-amplitude convention must be fixed, as in an ordinary amplitude fit, to remove the overall scale/phase degeneracy.
 
+
+## Derived-observable uncertainties
+
+Post-fit tables that transform `(x, y, dx, dy)` into charge-specific
+magnitudes and phases, coefficient asymmetries, or phase differences must
+propagate the full HESSE covariance matrix. In particular, the correlations
+between all four Cartesian parameters are retained through
+
+```text
+Cov(f) = J Cov(x, y, dx, dy) J^T,
+```
+
+where `J` is the Jacobian of the derived observables. Angular differences in
+the numerical Jacobian are wrapped to the principal interval so that crossing
+the `-pi`/`+pi` boundary does not generate a spurious large uncertainty.
+Parameters fixed in the fit are absent from the Minuit covariance and are
+treated as having zero covariance. Consequently, components fitted with
+`dx = dy = 0` fixed have exactly zero propagated uncertainty on their
+coefficient `A_CP` and CP phase difference, while their common magnitude and
+phase can still carry uncertainty from `x` and `y`.
+
 ## Efficiency and background mixtures
 
 `CPJointNLL` also supports efficiency-weighted signal and background while preserving the same joint charge normalization.
