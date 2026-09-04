@@ -17,6 +17,7 @@ from .lass import LASS
 from .pole import Pole
 from .qmi import QMI
 from .relativistic_breit_wigner import RelativisticBreitWigner
+from .rescattering2 import Rescattering2
 
 __all__ = [
     "BaBarFlatte",
@@ -27,6 +28,7 @@ __all__ = [
     "Pole",
     "QMI",
     "RelativisticBreitWigner",
+    "Rescattering2",
     "bachelor_momentum_parent_frame",
     "bachelor_momentum_resonance_frame",
     "blatt_weisskopf_from_momenta",
