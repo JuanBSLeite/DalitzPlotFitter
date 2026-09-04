@@ -95,11 +95,14 @@ with Chebyshev expansions in two mass regions: from the charged-kaon threshold
 constructed to be continuous at 1.47 GeV.
 
 ```python
-from dalitzplotfitter import Rescattering2, Resonance
+from dalitzplotfitter import RealImag, Rescattering2, Resonance
 
 rescattering = Resonance(
     "rescattering",
     pair=(0, 1),
+    coefficient=RealImag(1.0, 0.0),
+    mass=1.47,
+    width=0.0,
     spin=0,
     lineshape=Rescattering2(),
 )
