@@ -357,9 +357,9 @@ class Minimizer:
                 minuit.errors[parameter.name] = parameter.step
         if simplex:
             minuit.simplex()
-        minuit.migrad(ncall=ncall)
+        minuit.migrad(ncall=ncall, use_simplex=False)
         if strategy == 2:
-            minuit.migrad(ncall=ncall)
+            minuit.migrad(ncall=ncall, use_simplex=False)
         if hesse:
             minuit.hesse()
         return minuit
