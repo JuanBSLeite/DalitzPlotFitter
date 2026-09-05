@@ -17,6 +17,7 @@ import time
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from dalitzplotfitter import (
     DecayChannel,
@@ -163,21 +164,29 @@ def main() -> None:
     _block(cache.normalization_components)
     cache_prepare_seconds = time.perf_counter() - start
 
-    point = {parameter.name: parameter.value for parameter in session.parameters}
-    objective = jax.jit(session.objective)
+    # Use the exact compiled value+gradient backend used by Minimizer rather
+    # than wrapping the mapping-based objective in another jax.jit. The latter
+    # can make the frozen FitSession/objective participate in JAX static
+    # hashing, which is both unrepresentative of a real fit and fails when the
+    # session contains mappings.
+    minimizer = session.minimizer()
+    free, names, fcn, grad = minimizer._backend()
+    point = np.asarray([parameter.value for parameter in free], dtype=float)
+    qmi_phase_index = names.index("S_QMI.phase[8]")
 
     start = time.perf_counter()
-    first = objective(point)
-    first.block_until_ready()
+    first = fcn(*point)
+    first_gradient = grad(*point)
     first_seconds = time.perf_counter() - start
 
     times = []
+    values = []
     for i in range(args.repeats):
-        shifted = dict(point)
-        shifted["S_QMI.phase[8]"] = 1e-6 * (i + 1)
+        shifted = point.copy()
+        shifted[qmi_phase_index] += 1e-6 * (i + 1)
         start = time.perf_counter()
-        value = objective(shifted)
-        value.block_until_ready()
+        values.append(fcn(*shifted))
+        grad(*shifted)
         times.append(time.perf_counter() - start)
 
     retained = {
@@ -202,6 +211,8 @@ def main() -> None:
         "retained_cache_bytes_by_category": retained,
         "retained_cache_bytes_total": sum(retained.values()),
         "nll": float(first),
+        "gradient_norm": float(np.linalg.norm(first_gradient)),
+        "last_nll": float(values[-1]) if values else float(first),
     }
     print("QMI_MEMORY_SPEED_BENCHMARK_JSON=" + json.dumps(payload, sort_keys=True))
 
