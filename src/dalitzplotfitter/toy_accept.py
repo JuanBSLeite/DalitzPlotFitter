@@ -69,8 +69,17 @@ def _merge_samples(samples: Sequence[PhaseSpaceSample]) -> PhaseSpaceSample:
     )
 
 
-def _empty_sample(model, seed: int | None = None) -> PhaseSpaceSample:
-    sample = model.generate_phase_space(1, seed=seed)
+def _empty_sample(
+    model,
+    seed: int | None = None,
+    *,
+    include_momenta: bool = True,
+) -> PhaseSpaceSample:
+    sample = model.generate_phase_space(
+        1,
+        seed=seed,
+        include_momenta=include_momenta,
+    )
     return PhaseSpaceSample(
         s12=sample.s12[:0],
         s13=sample.s13[:0],
@@ -330,6 +339,7 @@ def generate_signal_toy(
     batch_size: int | None = None,
     envelope_safety: float = 1.20,
     max_restarts: int = 10,
+    include_momenta: bool = True,
 ) -> PhaseSpaceSample:
     values = {} if parameters is None else parameters
     intensity = _frozen_model_intensity(model, values)
@@ -347,6 +357,8 @@ def generate_signal_toy(
         envelope_safety=envelope_safety,
         max_restarts=max_restarts,
     )
+    if include_momenta:
+        toy = _attach_momenta(model, toy, _derived_seed(seed, 900_001))
     return toy
 
 
@@ -365,6 +377,7 @@ def generate_toy(
     batch_size: int | None = None,
     envelope_safety: float = 1.20,
     max_restarts: int = 10,
+    include_momenta: bool = True,
 ) -> PhaseSpaceSample:
     if size <= 0:
         raise ValueError("toy size must be positive")
@@ -447,6 +460,8 @@ def generate_toy(
             p2=toy.p2,
             p3=toy.p3,
         )
+    if include_momenta:
+        toy = _attach_momenta(model, toy, _derived_seed(seed, 900_002))
     return toy
 
 
@@ -479,6 +494,7 @@ def generate_cp_toy(
     batch_size: int | None = None,
     envelope_safety: float = 1.20,
     max_restarts: int = 10,
+    include_momenta: bool = True,
 ) -> tuple[PhaseSpaceSample, PhaseSpaceSample]:
     if size <= 0:
         raise ValueError("toy size must be positive")
@@ -610,7 +626,11 @@ def generate_cp_toy(
 
     def finish(samples: list[PhaseSpaceSample], model, key_seed: int) -> PhaseSpaceSample:
         if not samples:
-            return _empty_sample(model, _derived_seed(seed, 500 + key_seed))
+            return _empty_sample(
+                model,
+                _derived_seed(seed, 500 + key_seed),
+                include_momenta=include_momenta,
+            )
         toy = _merge_samples(samples)
         if shuffle and toy.size > 1:
             toy = toy.take(
@@ -629,6 +649,12 @@ def generate_cp_toy(
                 p1=toy.p1,
                 p2=toy.p2,
                 p3=toy.p3,
+            )
+        if include_momenta:
+            toy = _attach_momenta(
+                model,
+                toy,
+                _derived_seed(seed, 910_000 + key_seed),
             )
         return toy
 
