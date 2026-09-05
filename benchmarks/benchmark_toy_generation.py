@@ -53,6 +53,23 @@ class CountingModel:
             include_momenta=include_momenta,
         )
 
+    def generate_stratified_phase_space(
+        self,
+        size,
+        *,
+        cell_probabilities,
+        grid_shape,
+        seed=None,
+    ):
+        self.phase_space_calls += 1
+        self.phase_space_points += int(size)
+        return self._model.generate_stratified_phase_space(
+            size,
+            cell_probabilities=cell_probabilities,
+            grid_shape=grid_shape,
+            seed=seed,
+        )
+
 
 @dataclass
 class Result:
@@ -238,7 +255,7 @@ def main() -> None:
     accept_full, _ = run_accept(
         model,
         args.size,
-        args.seed + 17,
+        args.seed,
         include_momenta=True,
     )
     inverse_total, inverse_prepared, inverse_sample, preparation_seconds = run_inverse(
