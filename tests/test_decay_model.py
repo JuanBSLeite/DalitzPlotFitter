@@ -342,6 +342,21 @@ def test_decay_model_rejects_unphysical_core_parameter_bounds():
         )
 
 
+def test_decay_model_can_generate_compact_phase_space():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    model = _model(channel, [NonResonant(RealImag(1.0, 0.0))])
+
+    full = model.generate_phase_space(128, seed=16)
+    compact = model.generate_phase_space(128, seed=16, include_momenta=False)
+
+    assert compact.p1 is None and compact.p2 is None and compact.p3 is None
+    assert jnp.array_equal(compact.s12, full.s12)
+    assert jnp.array_equal(compact.s13, full.s13)
+    assert jnp.array_equal(compact.s23, full.s23)
+    assert jnp.array_equal(compact.weights, full.weights)
+    assert compact.nbytes * 4 == full.nbytes
+
+
 def test_decay_model_builds_symmetrized_resonance_without_manual_particle_masses():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     model = _model(
