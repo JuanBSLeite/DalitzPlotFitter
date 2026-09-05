@@ -97,10 +97,24 @@ def _scores(pool: PhaseSpaceSample, density) -> jax.Array:
         raise ValueError(
             f"toy density must return one value per event, got {values.shape} for {pool.size} events"
         )
-    valid = jnp.all(jnp.isfinite(values)) & jnp.all(values >= 0.0)
-    if not bool(jax.device_get(valid)):
-        raise ValueError("toy generation weights must be finite and non-negative")
     return values
+
+
+def _score_statistics(values: jax.Array, *, include_mean: bool = False):
+    valid = jnp.all(jnp.isfinite(values)) & jnp.all(values >= 0.0)
+    maximum = jnp.max(values)
+    if include_mean:
+        valid_host, maximum_host, mean_host = jax.device_get(
+            (valid, maximum, jnp.mean(values))
+        )
+        if not bool(valid_host):
+            raise ValueError("toy generation weights must be finite and non-negative")
+        return float(maximum_host), float(mean_host)
+
+    valid_host, maximum_host = jax.device_get((valid, maximum))
+    if not bool(valid_host):
+        raise ValueError("toy generation weights must be finite and non-negative")
+    return float(maximum_host)
 
 
 def _frozen_model_intensity(model, values: Mapping[str, object]):
@@ -185,15 +199,15 @@ def _accept_reject_component(
         )
         pilot_scores = _scores(pilot, compiled_density(pilot.as_dict()))
 
-    observed_max_device, mean_score_device = jax.device_get(
-        (jnp.max(pilot_scores), jnp.mean(pilot_scores))
+    observed_max, mean_score = _score_statistics(
+        pilot_scores,
+        include_mean=True,
     )
-    observed_max = float(observed_max_device)
     if observed_max <= 0.0:
         raise ValueError("toy density is zero over the pilot phase-space sample")
     envelope = envelope_safety * observed_max
 
-    estimated_efficiency = float(mean_score_device) / envelope
+    estimated_efficiency = mean_score / envelope
     estimated_efficiency = min(max(estimated_efficiency, 1e-4), 1.0)
     if batch_size is None:
         batch_size = int(
@@ -207,6 +221,7 @@ def _accept_reject_component(
     else:
         batch_size = int(batch_size)
 
+    accept_rng = np.random.default_rng(_derived_seed(seed, 913_579))
     accepted: list[PhaseSpaceSample] = []
     n_accepted = 0
     restarts = 0
@@ -222,7 +237,7 @@ def _accept_reject_component(
             include_momenta=not compact_proposal,
         )
         score = _scores(pool, compiled_density(pool.as_dict()))
-        batch_max = float(jax.device_get(jnp.max(score)))
+        batch_max = _score_statistics(score)
         if batch_max > envelope:
             restarts += 1
             if restarts > max_restarts:
@@ -236,9 +251,7 @@ def _accept_reject_component(
             continue
 
         accept_key = jax.random.key(
-            0
-            if seed is None
-            else _derived_seed(seed, 913_579 + proposal_index)
+            int(accept_rng.integers(0, 2**32, dtype=np.uint32))
         )
         mask = jax.random.uniform(
             accept_key,
@@ -465,15 +478,15 @@ def generate_toy(
     return toy
 
 
-def _integral(model, parameters, efficiency, veto) -> float:
+def _integral(model, intensity, efficiency, veto) -> float:
     sample = model.normalization_sample
     data = sample.as_dict()
     value = jnp.mean(
         jnp.asarray(sample.weights)
         * _acceptance(efficiency, veto, data)
-        * jnp.asarray(model.intensity(data, parameters))
+        * jnp.asarray(intensity(data))
     )
-    return float(value)
+    return float(jax.device_get(value))
 
 
 def generate_cp_toy(
@@ -511,8 +524,10 @@ def generate_cp_toy(
     n_signal = int(rng.binomial(size, float(signal_fraction))) if backgrounds else size
     n_background = size - n_signal
 
-    i_plus = _integral(plus_model, values, plus_efficiency, plus_veto)
-    i_minus = _integral(minus_model, values, minus_efficiency, minus_veto)
+    plus_intensity = _frozen_model_intensity(plus_model, values)
+    minus_intensity = _frozen_model_intensity(minus_model, values)
+    i_plus = _integral(plus_model, plus_intensity, plus_efficiency, plus_veto)
+    i_minus = _integral(minus_model, minus_intensity, minus_efficiency, minus_veto)
     signal_plus_probability = i_plus / (i_plus + i_minus)
     n_signal_plus = int(rng.binomial(n_signal, signal_plus_probability))
     n_signal_minus = n_signal - n_signal_plus
@@ -527,8 +542,6 @@ def generate_cp_toy(
     minus_samples: list[PhaseSpaceSample] = []
 
     if n_signal_plus > 0:
-        plus_intensity = _frozen_model_intensity(plus_model, values)
-
         def plus_signal_density(data):
             return _acceptance(plus_efficiency, plus_veto, data) * plus_intensity(data)
 
@@ -546,8 +559,6 @@ def generate_cp_toy(
         )
 
     if n_signal_minus > 0:
-        minus_intensity = _frozen_model_intensity(minus_model, values)
-
         def minus_signal_density(data):
             return _acceptance(minus_efficiency, minus_veto, data) * minus_intensity(data)
 
