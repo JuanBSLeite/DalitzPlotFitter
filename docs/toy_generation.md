@@ -97,19 +97,15 @@ toy = generate_toy(
 
 The accept-reject implementation follows the Laura++ safety principle: if a proposal exceeds the current envelope, already accepted events from that component are discarded and generation restarts with a larger envelope. Probabilities are never clipped.
 
-The current accept-reject proposal is `PhaseSpaceMC`. It is intentionally retained as an independent validation path, but its single global envelope is inefficient for strongly structured amplitude models.
+The accept-reject proposal retains the exact weighted `PhaseSpaceMC` measure, but its invariant-only path is optimized for rejection sampling. Candidate pools are generated directly in `s12/s13/s23` without constructing four-momenta. Component normalization scales and coefficients are frozen once at the requested toy truth, and the proposal density is JIT-compiled. Acceptance decisions stay on the JAX device apart from the compact boolean selection mask.
+
+If four-momenta are requested, they are reconstructed only for the final accepted events. Rejected candidates therefore never pay the cost of parent-rest-frame orientations and boosts. A custom efficiency, veto, or amplitude that explicitly requests `p1/p2/p3` automatically falls back to the full proposal representation for density evaluation, while the final selected sample is still reconstructed only once.
+
+The sampler intentionally keeps a monitored global envelope as an independent validation path. That global envelope can still be inefficient for strongly structured amplitude models; proposal-shape improvements are a separate optimization from the exact computational fast path described above.
 
 ## Performance
 
-On GitHub Actions CPU with the full paper-inspired `B+ -> K+ pi+ pi-` model and `inverse_resolution=1024`, the benchmark gave:
-
-| Events | Accept-reject | Inverse total | Inverse prepared |
-|---:|---:|---:|---:|
-| 10,000 | 3.49 s | 1.63 s | 0.0235 s |
-| 100,000 | 15.74 s | 1.84 s | 0.115 s |
-| 1,000,000 | 93.01 s | 3.28 s | 1.245 s |
-
-For one million events, inverse transform was about 28x faster including CDF preparation and about 75x faster once the sampler had already been prepared. The prepared rate was approximately `8.0e5 events/s` on CPU.
+The repository benchmark should be used for current timings because both the accept-reject and compact phase-space paths are actively optimized. It reports accept-reject separately with and without retained four-momenta, as well as inverse-transform preparation and prepared-generation throughput.
 
 ## Accuracy and validation
 
@@ -123,7 +119,8 @@ python benchmarks/benchmark_toy_generation.py --size 100000
 
 The benchmark reports:
 
-- accept-reject end-to-end time and proposal efficiency;
+- compact accept-reject end-to-end time and proposal efficiency;
+- accept-reject time when final four-momenta are requested;
 - inverse-transform preparation + first-generation time;
 - generation time from an already prepared inverse sampler;
 - 1D projection closure and 2D Dalitz total-variation distance.
@@ -155,10 +152,13 @@ toy = generate_toy(
 ```
 
 For float64 arrays this reduces the retained array payload for one million
-unweighted events from about 128 MiB to about 32 MiB. In the inverse-transform
-path the momentum reconstruction is skipped entirely, so the peak memory and
-generation work are also reduced. The Dalitz invariants and event weights are
-identical to a generation with the same seed and `include_momenta=True`.
+unweighted events from about 128 MiB to about 32 MiB. In both toy-generation paths, `include_momenta=False` skips final momentum
+reconstruction, reducing peak memory and generation work. Accept-reject
+candidate pools are invariant-only even when final momenta are requested, so
+rejected candidates never construct four-vectors. The compact and full
+phase-space generators use independent random-coordinate streams; a common
+seed guarantees reproducibility within each mode, not event-by-event identity
+between the two representations.
 
 Existing samples can be compacted with
 
