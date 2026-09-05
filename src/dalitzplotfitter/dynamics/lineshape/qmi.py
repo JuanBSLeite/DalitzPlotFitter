@@ -11,6 +11,30 @@ import numpy as np
 from ..context import ResonanceContext
 
 
+def _interval_index_and_fraction(x, xp, prepared_index=None):
+    """Return the interpolation interval and local fraction.
+
+    A prepared index lets large repeated QMI evaluations reuse the fixed knot
+    lookup while recomputing only the inexpensive local fraction.
+    """
+
+    x = jnp.asarray(x)
+    xp = jnp.asarray(xp, dtype=x.dtype)
+    x_clamped = jnp.clip(x, xp[0], xp[-1])
+    if prepared_index is None:
+        index = jnp.clip(
+            jnp.searchsorted(xp, x_clamped, side="right") - 1,
+            0,
+            xp.shape[0] - 2,
+        )
+    else:
+        index = jnp.asarray(prepared_index, dtype=jnp.int32)
+        index = jnp.clip(index, 0, xp.shape[0] - 2)
+    x0 = xp[index]
+    x1 = xp[index + 1]
+    fraction = (x_clamped - x0) / (x1 - x0)
+    return index, fraction
+
 def _linear_spline(x, xp, fp):
     """Piecewise-linear interpolation with endpoint clamping.
 
@@ -24,15 +48,8 @@ def _linear_spline(x, xp, fp):
     xp = jnp.asarray(xp, dtype=x.dtype)
     fp = jnp.asarray(fp, dtype=x.dtype)
 
-    x_clamped = jnp.clip(x, xp[0], xp[-1])
-    index = jnp.clip(
-        jnp.searchsorted(xp, x_clamped, side="right") - 1,
-        0,
-        xp.shape[0] - 2,
-    )
-    x0, x1 = xp[index], xp[index + 1]
+    index, fraction = _interval_index_and_fraction(x, xp)
     y0, y1 = fp[index], fp[index + 1]
-    fraction = (x_clamped - x0) / (x1 - x0)
     return y0 + fraction * (y1 - y0)
 
 def _natural_cubic_spline(x, xp, fp, inverse=None):
@@ -127,26 +144,99 @@ class QMI:
             matrix = matrix + np.diag(off, 1) + np.diag(off, -1)
         return jnp.asarray(np.linalg.inv(matrix))
 
-    def _interpolate(self, s, knot_s, values):
+    def _interpolate(self, s, knot_s, values, prepared_index=None):
         if self.interpolation == "linear":
-            return _linear_spline(s, knot_s, values)
-        return _natural_cubic_spline(
-            s,
-            knot_s,
-            values,
-            inverse=self._cubic_inverse,
+            index, fraction = _interval_index_and_fraction(
+                s, knot_s, prepared_index
+            )
+            return values[index] + fraction * (values[index + 1] - values[index])
+        if prepared_index is None:
+            return _natural_cubic_spline(
+                s,
+                knot_s,
+                values,
+                inverse=self._cubic_inverse,
+            )
+
+        index, fraction = _interval_index_and_fraction(
+            s, knot_s, prepared_index
+        )
+        n = knot_s.shape[0]
+        h = knot_s[1:] - knot_s[:-1]
+        interior = n - 2
+        if interior > 0:
+            rhs = 6.0 * (
+                (values[2:] - values[1:-1]) / h[1:]
+                - (values[1:-1] - values[:-2]) / h[:-1]
+            )
+            second_inner = jnp.asarray(self._cubic_inverse, dtype=values.dtype) @ rhs
+            second = jnp.concatenate(
+                (
+                    jnp.zeros(1, dtype=values.dtype),
+                    second_inner,
+                    jnp.zeros(1, dtype=values.dtype),
+                )
+            )
+        else:
+            second = jnp.zeros(n, dtype=values.dtype)
+        width = knot_s[index + 1] - knot_s[index]
+        a = 1.0 - fraction
+        b = fraction
+        return (
+            a * values[index]
+            + b * values[index + 1]
+            + (
+                (a**3 - a) * second[index]
+                + (b**3 - b) * second[index + 1]
+            )
+            * width**2
+            / 6.0
         )
 
-    def interpolated_magnitude_phase(self, mass):
+    def _interpolated_magnitude_phase(self, mass, prepared_index=None):
         mass = jnp.asarray(mass)
         knot_s = jnp.asarray(self.knots, dtype=mass.dtype) ** 2
         s = mass**2
         magnitudes = jnp.asarray(self.magnitudes, dtype=mass.dtype)
         phases = jnp.asarray(self.phases, dtype=mass.dtype)
+
+        if self.interpolation == "linear":
+            index, fraction = _interval_index_and_fraction(
+                s, knot_s, prepared_index
+            )
+            magnitude = (
+                magnitudes[index]
+                + fraction * (magnitudes[index + 1] - magnitudes[index])
+            )
+            phase = phases[index] + fraction * (phases[index + 1] - phases[index])
+            return magnitude, phase
+
         return (
-            self._interpolate(s, knot_s, magnitudes),
-            self._interpolate(s, knot_s, phases),
+            self._interpolate(s, knot_s, magnitudes, prepared_index),
+            self._interpolate(s, knot_s, phases, prepared_index),
         )
+
+    def interpolated_magnitude_phase(self, mass):
+        return self._interpolated_magnitude_phase(mass)
+
+    def prepare_mass(self, mass, context: ResonanceContext):
+        """Cache only the fixed knot interval for repeated QMI evaluations."""
+
+        if int(context.spin) != 0:
+            raise ValueError("QMI is defined for a scalar S-wave")
+        mass = jnp.asarray(mass)
+        knot_s = jnp.asarray(self.knots, dtype=mass.dtype) ** 2
+        index, _ = _interval_index_and_fraction(mass**2, knot_s)
+        dtype = jnp.int16 if self.size <= 32767 else jnp.int32
+        return index.astype(dtype)
+
+    def evaluate_prepared(self, mass, prepared_index, context: ResonanceContext):
+        if int(context.spin) != 0:
+            raise ValueError("QMI is defined for a scalar S-wave")
+        magnitude, phase = self._interpolated_magnitude_phase(
+            mass, prepared_index=prepared_index
+        )
+        return magnitude * jnp.exp(1j * phase)
 
     def __call__(self, mass, context: ResonanceContext):
         if int(context.spin) != 0:
