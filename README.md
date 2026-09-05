@@ -85,6 +85,13 @@ toy_reference = generate_toy(
 )
 ```
 
+The accept-reject reference path is also optimized for large toys: proposal
+candidates are generated directly in Dalitz invariants, model normalization
+scales are frozen once at the toy truth, and four-momenta are reconstructed
+only after selection. Thus rejected candidates do not pay the cost of
+four-vector construction. The global rejection envelope and restart safety
+logic are unchanged.
+
 For repeated toys, prepare the inverse CDFs once:
 
 ```python
