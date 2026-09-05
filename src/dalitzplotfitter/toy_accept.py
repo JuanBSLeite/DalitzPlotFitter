@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from dalitzplotfitter.amplitude.components import coefficient_value
+from dalitzplotfitter.fit import ParameterKind
 from dalitzplotfitter.kinematics import (
     PhaseSpaceMC,
     PhaseSpaceSample,
@@ -206,17 +207,45 @@ def _update_local_envelopes(
 
 
 def _frozen_model_intensity(model, values: Mapping[str, object]):
-    """Build one JIT intensity with component scales frozen at the toy truth.
+    """Build one JIT intensity with scales and coefficients frozen at toy truth.
 
-    Calling DecayModel.intensity directly inside every proposal batch also
-    recomputes component-normalization integrals.  Toy truth parameters are
-    fixed, so those scales and complex coefficients can be resolved once.
+    For coefficient-only models, reuse the same compact normalization template
+    used by FitSession rather than integrating each component separately. This
+    turns component-scale preparation into a one-time model cost shared by
+    fits and repeated toy generation.
     """
 
     components = tuple(model.amplitude_model.components)
+    has_floating_dynamics = any(
+        parameter.kind is ParameterKind.DYNAMICS and not parameter.fixed
+        for parameter in model.parameters
+    )
+
+    scales = None
+    if not has_floating_dynamics:
+        template_key = bool(model.normalize_components)
+        template = model._fixed_normalization_templates.get(template_key)
+        if template is None:
+            # One physical point is sufficient for the data side; the compact
+            # preparation kernel computes all normalization scales together and
+            # stores the reusable fixed-normalization template on the model.
+            seed_sample = model.generate_phase_space(
+                1,
+                seed=781_237,
+                include_momenta=False,
+            )
+            cache = model.prepare_cache(seed_sample)
+            scales = jnp.asarray(cache.component_scales)
+        else:
+            scales = jnp.asarray(template[0])
+
     resolved = []
-    for component in components:
-        scale = jnp.asarray(model._component_scale(component, values))
+    for index, component in enumerate(components):
+        scale = (
+            jnp.asarray(scales[index])
+            if scales is not None
+            else jnp.asarray(model._component_scale(component, values))
+        )
         coefficient = jnp.asarray(coefficient_value(component.coefficient, values))
         jax.block_until_ready(scale)
         jax.block_until_ready(coefficient)
