@@ -17,6 +17,7 @@ from dalitzplotfitter.amplitude import (
     PreparedAmplitudeCache,
 )
 from dalitzplotfitter.amplitude.components import coefficient_value
+from dalitzplotfitter.amplitude.cache import DEFAULT_NORMALIZATION_CHUNK_SIZE
 from dalitzplotfitter.dynamics import (
     CovariantAngular,
     RelativisticBreitWigner,
@@ -295,8 +296,10 @@ class DecayModel:
         tensor-product Gauss-Legendre quadrature in the conventional (m13,m23)
         mass plane. "square-dalitz" uses Gauss-Legendre quadrature in
         Square-Dalitz (m-prime, theta-prime) coordinates including the
-        coordinate Jacobian. Narrow-resonance adaptation is automatic in both
-        methods and is not a separate method.
+        coordinate Jacobian. "toy-mc" uses an externally supplied
+        normalization sample and its event weights directly. Supplying
+        normalization_sample automatically selects "toy-mc". Narrow-resonance
+        adaptation applies only to the deterministic grid methods.
     normalization_pair:
         Daughter-index pair (i,j) whose invariant mass defines the Square-
         Dalitz mass coordinate. Indices follow the daughter ordering in
@@ -326,6 +329,18 @@ class DecayModel:
     normalization_binning_factor:
         Narrow-resonance refinement factor. The target local mass spacing is
         Gamma / normalization_binning_factor. Default: 100.0, i.e. Gamma/100.
+    normalization_sample:
+        Optional external Monte Carlo sample used for every normalization
+        integral. The package convention is mean(sample.weights * f). A
+        weighted toy should therefore contain integration/importance weights;
+        an unweighted toy uses unit weights. Within one model, any common
+        overall weight factor cancels in normalized PDFs and fit/interference
+        fractions.
+    normalization_chunk_size:
+        Maximum number of normalization points evaluated by one compiled
+        coefficient-only normalization chunk. Smaller values reduce temporary
+        device memory approximately linearly at the cost of more chunk
+        executions. Default: 100000.
 
     Notes
     -----
@@ -337,7 +352,7 @@ class DecayModel:
     components: tuple[Resonance | NonResonant | DalitzAmplitude, ...]
     normalize_components: bool
     normalization_resolution: int
-    normalization_method: Literal["gauss-legendre", "square-dalitz"]
+    normalization_method: Literal["gauss-legendre", "square-dalitz", "toy-mc"]
     normalization_pair: tuple[int, int]
     normalization_bin_width: float
     normalization_order_m13: int | None
@@ -345,6 +360,7 @@ class DecayModel:
     normalization_narrow_width: float
     normalization_narrow_window: float
     normalization_binning_factor: float
+    normalization_chunk_size: int
     _normalization_sample: PhaseSpaceSample | None
     _amplitude_model: CoherentAmplitudeModel | None
     _compact_prepare_kernels: dict[tuple[bool, bool], object]
@@ -358,7 +374,7 @@ class DecayModel:
         *,
         normalize_components: bool = True,
         normalization_resolution: int = 1000,
-        normalization_method: Literal["gauss-legendre", "square-dalitz"] = "gauss-legendre",
+        normalization_method: Literal["gauss-legendre", "square-dalitz", "toy-mc"] = "gauss-legendre",
         normalization_pair: tuple[int, int] = (0, 1),
         normalization_bin_width: float = 0.005,
         normalization_order_m13: int | None = None,
@@ -366,12 +382,32 @@ class DecayModel:
         normalization_narrow_width: float = 0.020,
         normalization_narrow_window: float = 5.0,
         normalization_binning_factor: float = 100.0,
+        normalization_sample: PhaseSpaceSample | None = None,
+        normalization_chunk_size: int = DEFAULT_NORMALIZATION_CHUNK_SIZE,
     ) -> None:
         if normalization_resolution < 2:
             raise ValueError("normalization_resolution must be at least 2")
-        if normalization_method not in ("gauss-legendre", "square-dalitz"):
+        if normalization_method not in ("gauss-legendre", "square-dalitz", "toy-mc"):
             raise ValueError(
-                "normalization_method must be either 'gauss-legendre' or 'square-dalitz'"
+                "normalization_method must be 'gauss-legendre', 'square-dalitz', or 'toy-mc'"
+            )
+        if normalization_sample is not None:
+            if not isinstance(normalization_sample, PhaseSpaceSample):
+                raise TypeError("normalization_sample must be a PhaseSpaceSample")
+            if normalization_sample.size < 1:
+                raise ValueError("normalization_sample must contain at least one event")
+            expected_shape = (normalization_sample.size,)
+            for name in ("s12", "s13", "s23", "weights"):
+                shape = tuple(jnp.asarray(getattr(normalization_sample, name)).shape)
+                if shape != expected_shape:
+                    raise ValueError(
+                        f"normalization_sample.{name} must have shape "
+                        f"{expected_shape}, got {shape}"
+                    )
+            normalization_method = "toy-mc"
+        elif normalization_method == "toy-mc":
+            raise ValueError(
+                "normalization_method='toy-mc' requires normalization_sample"
             )
         if len(set(normalization_pair)) != 2 or any(
             index not in (0, 1, 2) for index in normalization_pair
@@ -391,6 +427,8 @@ class DecayModel:
             raise ValueError("normalization_narrow_window must be positive")
         if normalization_binning_factor <= 0.0:
             raise ValueError("normalization_binning_factor must be positive")
+        if normalization_chunk_size < 1:
+            raise ValueError("normalization_chunk_size must be positive")
         object.__setattr__(self, "channel", channel)
         object.__setattr__(self, "components", tuple(components))
         object.__setattr__(self, "normalize_components", bool(normalize_components))
@@ -409,7 +447,8 @@ class DecayModel:
         object.__setattr__(
             self, "normalization_binning_factor", float(normalization_binning_factor)
         )
-        object.__setattr__(self, "_normalization_sample", None)
+        object.__setattr__(self, "normalization_chunk_size", int(normalization_chunk_size))
+        object.__setattr__(self, "_normalization_sample", normalization_sample)
         object.__setattr__(self, "_amplitude_model", None)
         object.__setattr__(self, "_compact_prepare_kernels", {})
         object.__setattr__(self, "_compact_data_kernels", {})
@@ -536,7 +575,17 @@ class DecayModel:
 
     @property
     def normalization_scheme(self) -> dict[str, object]:
-        """Describe the actual deterministic normalization strategy."""
+        """Describe the active normalization strategy."""
+
+        if self.normalization_method == "toy-mc":
+            sample = self.normalization_sample
+            return {
+                "method": "toy-mc",
+                "adaptive": False,
+                "sample_size": sample.size,
+                "weighted": bool(jnp.any(jnp.asarray(sample.weights) != 1.0)),
+                "chunk_size": self.normalization_chunk_size,
+            }
 
         narrow = self._adaptive_narrow_resonances()
         has_narrow = any(narrow[axis] for axis in ("m12", "m13", "m23"))
@@ -809,6 +858,7 @@ class DecayModel:
                 self.amplitude_model.components,
                 normalize_components=normalize_components,
                 has_efficiency=has_efficiency,
+                normalization_chunk_size=self.normalization_chunk_size,
             )
             self._compact_prepare_kernels[key] = kernel
         return kernel
@@ -824,8 +874,41 @@ class DecayModel:
             self._compact_data_kernels[key] = kernel
         return kernel
 
-    def generate_phase_space(self, size: int, *, seed: int | None = None) -> PhaseSpaceSample:
-        return PhaseSpaceMC(self.channel.parent_mass, self.channel.daughter_masses).generate(size, seed=seed)
+    def generate_phase_space(
+        self,
+        size: int,
+        *,
+        seed: int | None = None,
+        include_momenta: bool = True,
+    ) -> PhaseSpaceSample:
+        return PhaseSpaceMC(
+            self.channel.parent_mass,
+            self.channel.daughter_masses,
+        ).generate(
+            size,
+            seed=seed,
+            include_momenta=include_momenta,
+        )
+
+    def generate_stratified_phase_space(
+        self,
+        size: int,
+        *,
+        cell_probabilities,
+        grid_shape: tuple[int, int],
+        seed: int | None = None,
+    ):
+        """Generate invariant-only phase-space proposals from weighted Dalitz cells."""
+
+        return PhaseSpaceMC(
+            self.channel.parent_mass,
+            self.channel.daughter_masses,
+        ).generate_stratified_invariants(
+            size,
+            cell_probabilities=cell_probabilities,
+            grid_shape=grid_shape,
+            seed=seed,
+        )
 
     def _component_scale(self, component: AmplitudeComponent, values=None):
         normalize = (

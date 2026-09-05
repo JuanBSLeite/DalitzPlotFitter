@@ -9,7 +9,13 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from dalitzplotfitter.kinematics import PhaseSpaceSample
+from dalitzplotfitter.amplitude.components import coefficient_value
+from dalitzplotfitter.fit import ParameterKind
+from dalitzplotfitter.kinematics import (
+    PhaseSpaceMC,
+    PhaseSpaceSample,
+    dalitz_s13_limits,
+)
 
 
 def _acceptance(efficiency, veto, data: dict[str, object]) -> jnp.ndarray:
@@ -68,8 +74,17 @@ def _merge_samples(samples: Sequence[PhaseSpaceSample]) -> PhaseSpaceSample:
     )
 
 
-def _empty_sample(model, seed: int | None = None) -> PhaseSpaceSample:
-    sample = model.generate_phase_space(1, seed=seed)
+def _empty_sample(
+    model,
+    seed: int | None = None,
+    *,
+    include_momenta: bool = True,
+) -> PhaseSpaceSample:
+    sample = model.generate_phase_space(
+        1,
+        seed=seed,
+        include_momenta=include_momenta,
+    )
     return PhaseSpaceSample(
         s12=sample.s12[:0],
         s13=sample.s13[:0],
@@ -81,18 +96,181 @@ def _empty_sample(model, seed: int | None = None) -> PhaseSpaceSample:
     )
 
 
-def _scores(pool: PhaseSpaceSample, density) -> np.ndarray:
-    values = np.asarray(
-        jax.device_get(jnp.asarray(pool.weights) * jnp.asarray(density)),
-        dtype=float,
-    )
+def _scores(pool: PhaseSpaceSample, density) -> jax.Array:
+    values = jnp.asarray(pool.weights) * jnp.asarray(density)
     if values.shape != (pool.size,):
         raise ValueError(
             f"toy density must return one value per event, got {values.shape} for {pool.size} events"
         )
-    if np.any(~np.isfinite(values)) or np.any(values < 0.0):
-        raise ValueError("toy generation weights must be finite and non-negative")
     return values
+
+
+def _score_statistics(values: jax.Array, *, include_mean: bool = False):
+    valid = jnp.all(jnp.isfinite(values)) & jnp.all(values >= 0.0)
+    maximum = jnp.max(values)
+    if include_mean:
+        valid_host, maximum_host, mean_host = jax.device_get(
+            (valid, maximum, jnp.mean(values))
+        )
+        if not bool(valid_host):
+            raise ValueError("toy generation weights must be finite and non-negative")
+        return float(maximum_host), float(mean_host)
+
+    valid_host, maximum_host = jax.device_get((valid, maximum))
+    if not bool(valid_host):
+        raise ValueError("toy generation weights must be finite and non-negative")
+    return float(maximum_host)
+
+
+def _stratified_grid_shape(n_pilot: int) -> tuple[int, int]:
+    """Choose a square cell grid with enough pilot occupancy per cell."""
+
+    side = int(np.sqrt(max(int(n_pilot), 1) / 32.0))
+    side = min(32, max(2, side))
+    return side, side
+
+
+def _phase_space_cells(
+    model,
+    sample: PhaseSpaceSample,
+    grid_shape: tuple[int, int],
+) -> jax.Array:
+    """Map physical invariant proposals back to their equal unit-square cells."""
+
+    u_bins, v_bins = grid_shape
+    mother_mass = float(model.channel.parent_mass)
+    masses = tuple(float(value) for value in model.channel.daughter_masses)
+    m1, m2, m3 = masses
+
+    s12 = jnp.asarray(sample.s12)
+    s13 = jnp.asarray(sample.s13)
+    s_min = (m1 + m2) ** 2
+    s_max = (mother_mass - m3) ** 2
+    u = (s12 - s_min) / (s_max - s_min)
+    low, high = dalitz_s13_limits(
+        s12,
+        mother_mass=mother_mass,
+        masses=masses,
+    )
+    width = jnp.maximum(high - low, jnp.finfo(s12.dtype).tiny)
+    v = (s13 - low) / width
+
+    iu = jnp.clip(jnp.floor(u * u_bins).astype(jnp.int32), 0, u_bins - 1)
+    iv = jnp.clip(jnp.floor(v * v_bins).astype(jnp.int32), 0, v_bins - 1)
+    return iu * v_bins + iv
+
+
+def _pilot_local_envelopes(
+    model,
+    pilot: PhaseSpaceSample,
+    pilot_scores: jax.Array,
+    *,
+    grid_shape: tuple[int, int],
+    envelope_safety: float,
+) -> np.ndarray:
+    """Build strictly positive local envelopes from a uniform pilot sample."""
+
+    cells = np.asarray(
+        jax.device_get(_phase_space_cells(model, pilot, grid_shape)),
+        dtype=np.int32,
+    )
+    scores = np.asarray(jax.device_get(pilot_scores), dtype=float)
+    n_cells = int(grid_shape[0] * grid_shape[1])
+    maxima = np.zeros((n_cells,), dtype=float)
+    np.maximum.at(maxima, cells, scores)
+
+    global_max = float(np.max(scores))
+    if global_max <= 0.0:
+        raise ValueError("toy density is zero over the pilot phase-space sample")
+
+    # An unvisited cell must retain non-zero proposal support. With the
+    # occupancy-aware grid this is uncommon; use the conservative global pilot
+    # maximum there so no physical region is excluded.
+    maxima[maxima <= 0.0] = global_max
+    return float(envelope_safety) * maxima
+
+
+def _update_local_envelopes(
+    envelopes: np.ndarray,
+    cells: jax.Array,
+    scores: jax.Array,
+    *,
+    envelope_safety: float,
+) -> np.ndarray:
+    """Raise every exceeded local envelope before a full safe restart."""
+
+    cells_host = np.asarray(jax.device_get(cells), dtype=np.int32)
+    scores_host = np.asarray(jax.device_get(scores), dtype=float)
+    maxima = np.zeros_like(envelopes)
+    np.maximum.at(maxima, cells_host, scores_host)
+    return np.maximum(envelopes, float(envelope_safety) * maxima)
+
+
+def _frozen_model_intensity(model, values: Mapping[str, object]):
+    """Build one JIT intensity with scales and coefficients frozen at toy truth.
+
+    For coefficient-only models, reuse the same compact normalization template
+    used by FitSession rather than integrating each component separately. This
+    turns component-scale preparation into a one-time model cost shared by
+    fits and repeated toy generation.
+    """
+
+    components = tuple(model.amplitude_model.components)
+    has_floating_dynamics = any(
+        parameter.kind is ParameterKind.DYNAMICS and not parameter.fixed
+        for parameter in model.parameters
+    )
+
+    scales = None
+    if not has_floating_dynamics:
+        template_key = bool(model.normalize_components)
+        template = model._fixed_normalization_templates.get(template_key)
+        if template is None:
+            # One physical point is sufficient for the data side; the compact
+            # preparation kernel computes all normalization scales together and
+            # stores the reusable fixed-normalization template on the model.
+            seed_sample = model.generate_phase_space(
+                1,
+                seed=781_237,
+                include_momenta=False,
+            )
+            cache = model.prepare_cache(seed_sample)
+            scales = jnp.asarray(cache.component_scales)
+        else:
+            scales = jnp.asarray(template[0])
+
+    resolved = []
+    for index, component in enumerate(components):
+        scale = (
+            jnp.asarray(scales[index])
+            if scales is not None
+            else jnp.asarray(model._component_scale(component, values))
+        )
+        coefficient = jnp.asarray(coefficient_value(component.coefficient, values))
+        jax.block_until_ready(scale)
+        jax.block_until_ready(coefficient)
+        resolved.append((component, scale, coefficient))
+
+    def intensity(data):
+        total = None
+        for component, scale, coefficient in resolved:
+            dynamics = jnp.asarray(component.function(data, values))
+            term = coefficient * scale * dynamics
+            total = term if total is None else total + term
+        total = jnp.asarray(total)
+        return jnp.real(total * jnp.conj(total))
+
+    return jax.jit(intensity)
+
+
+def _attach_momenta(model, sample: PhaseSpaceSample, seed: int | None) -> PhaseSpaceSample:
+    if sample.p1 is not None:
+        return sample
+    generator = PhaseSpaceMC(
+        model.channel.parent_mass,
+        model.channel.daughter_masses,
+    )
+    return generator.attach_momenta(sample, seed=seed)
 
 
 def _accept_reject_component(
@@ -106,7 +284,14 @@ def _accept_reject_component(
     envelope_safety: float,
     max_restarts: int,
 ) -> PhaseSpaceSample:
-    """Generate one unweighted component with a monitored global envelope."""
+    """Generate one unweighted component with monitored safe envelopes.
+
+    Invariant-only densities use equal cells in the unit Dalitz proposal square
+    with a separately monitored envelope per cell. The cell is drawn with
+    probability proportional to its envelope, so accepting with score/envelope
+    preserves the exact target density. Momentum-dependent custom densities
+    retain the original monitored global-envelope fallback.
+    """
 
     if size <= 0:
         raise ValueError("toy size must be positive")
@@ -115,29 +300,74 @@ def _accept_reject_component(
     if max_restarts < 0:
         raise ValueError("max_restarts must be non-negative")
 
+    compiled_density = jax.jit(density_function)
     n_pilot = _pilot_size(size, pool_size)
-    pilot = model.generate_phase_space(n_pilot, seed=_derived_seed(seed, 1))
-    pilot_scores = _scores(pilot, density_function(pilot.as_dict()))
-    observed_max = float(np.max(pilot_scores))
+
+    # Built-in amplitudes need only Dalitz invariants.  Try the compact proposal
+    # first and fall back to full four-vectors only for custom densities that
+    # explicitly request momentum fields.
+    compact_proposal = True
+    pilot = model.generate_phase_space(
+        n_pilot,
+        seed=_derived_seed(seed, 1),
+        include_momenta=False,
+    )
+    try:
+        pilot_scores = _scores(pilot, compiled_density(pilot.as_dict()))
+    except KeyError:
+        compact_proposal = False
+        pilot = model.generate_phase_space(
+            n_pilot,
+            seed=_derived_seed(seed, 1),
+            include_momenta=True,
+        )
+        pilot_scores = _scores(pilot, compiled_density(pilot.as_dict()))
+
+    observed_max, mean_score = _score_statistics(
+        pilot_scores,
+        include_mean=True,
+    )
     if observed_max <= 0.0:
         raise ValueError("toy density is zero over the pilot phase-space sample")
-    envelope = envelope_safety * observed_max
 
-    estimated_efficiency = float(np.mean(pilot_scores) / envelope)
+    grid_shape = None
+    local_envelopes = None
+    if compact_proposal:
+        grid_shape = _stratified_grid_shape(n_pilot)
+        local_envelopes = _pilot_local_envelopes(
+            model,
+            pilot,
+            pilot_scores,
+            grid_shape=grid_shape,
+            envelope_safety=envelope_safety,
+        )
+        estimated_efficiency = mean_score / float(np.mean(local_envelopes))
+    else:
+        envelope = envelope_safety * observed_max
+        estimated_efficiency = mean_score / envelope
+
     estimated_efficiency = min(max(estimated_efficiency, 1e-4), 1.0)
     if batch_size is None:
-        batch_size = int(
-            min(
-                500_000,
-                max(4_096, np.ceil(1.25 * size / estimated_efficiency)),
+        if compact_proposal:
+            # Reuse the pilot array shape for proposal-density evaluation.
+            # JAX specializes on array shape, so the previous adaptive batch
+            # (often 500k after a 100k pilot) compiled the full amplitude twice
+            # on the first toy. Local envelopes make smaller repeated batches
+            # efficient enough that avoiding this second compilation wins.
+            batch_size = int(n_pilot)
+        else:
+            batch_size = int(
+                min(
+                    500_000,
+                    max(4_096, np.ceil(1.25 * size / estimated_efficiency)),
+                )
             )
-        )
     elif batch_size <= 0:
         raise ValueError("batch_size must be positive")
     else:
         batch_size = int(batch_size)
 
-    rng = np.random.default_rng(_derived_seed(seed, 913_579))
+    accept_rng = np.random.default_rng(_derived_seed(seed, 913_579))
     accepted: list[PhaseSpaceSample] = []
     n_accepted = 0
     restarts = 0
@@ -147,31 +377,82 @@ def _accept_reject_component(
         proposal_index += 1
         if proposal_index > 10_000:
             raise RuntimeError("accept-reject toy generation did not converge")
-        pool = model.generate_phase_space(
-            batch_size,
-            seed=_derived_seed(seed, 10_000 + proposal_index),
-        )
-        score = _scores(pool, density_function(pool.as_dict()))
-        batch_max = float(np.max(score))
-        if batch_max > envelope:
-            restarts += 1
-            if restarts > max_restarts:
-                raise RuntimeError(
-                    "accept-reject envelope was exceeded too many times; "
-                    "increase pool_size or envelope_safety"
-                )
-            envelope = envelope_safety * batch_max
-            accepted.clear()
-            n_accepted = 0
-            continue
+        if compact_proposal:
+            probabilities = local_envelopes / np.sum(local_envelopes)
+            pool, proposal_cells = model.generate_stratified_phase_space(
+                batch_size,
+                cell_probabilities=jnp.asarray(probabilities),
+                grid_shape=grid_shape,
+                seed=_derived_seed(seed, 10_000 + proposal_index),
+            )
+        else:
+            pool = model.generate_phase_space(
+                batch_size,
+                seed=_derived_seed(seed, 10_000 + proposal_index),
+                include_momenta=True,
+            )
+            proposal_cells = None
 
-        probabilities = score / envelope
-        indices = np.flatnonzero(rng.random(pool.size) < probabilities)
+        score = _scores(pool, compiled_density(pool.as_dict()))
+        if compact_proposal:
+            envelope_values = jnp.asarray(local_envelopes, dtype=score.dtype)[
+                proposal_cells
+            ]
+            valid_device = jnp.all(jnp.isfinite(score)) & jnp.all(score >= 0.0)
+            exceeded_device = jnp.any(score > envelope_values)
+            valid, exceeded = jax.device_get((valid_device, exceeded_device))
+            if not bool(valid):
+                raise ValueError(
+                    "toy generation weights must be finite and non-negative"
+                )
+            if bool(exceeded):
+                restarts += 1
+                if restarts > max_restarts:
+                    raise RuntimeError(
+                        "accept-reject local envelope was exceeded too many times; "
+                        "increase pool_size or envelope_safety"
+                    )
+                local_envelopes = _update_local_envelopes(
+                    local_envelopes,
+                    proposal_cells,
+                    score,
+                    envelope_safety=envelope_safety,
+                )
+                accepted.clear()
+                n_accepted = 0
+                continue
+            denominator = envelope_values
+        else:
+            batch_max = _score_statistics(score)
+            if batch_max > envelope:
+                restarts += 1
+                if restarts > max_restarts:
+                    raise RuntimeError(
+                        "accept-reject envelope was exceeded too many times; "
+                        "increase pool_size or envelope_safety"
+                    )
+                envelope = envelope_safety * batch_max
+                accepted.clear()
+                n_accepted = 0
+                continue
+            denominator = envelope
+
+        accept_key = jax.random.key(
+            int(accept_rng.integers(0, 2**32, dtype=np.uint32))
+        )
+        mask = jax.random.uniform(
+            accept_key,
+            (pool.size,),
+            dtype=score.dtype,
+        ) < (score / denominator)
+        indices = np.flatnonzero(np.asarray(jax.device_get(mask), dtype=bool))
         if indices.size == 0:
             continue
         needed = size - n_accepted
         selected = indices[:needed]
-        accepted.append(pool.take(jnp.asarray(selected)))
+        accepted.append(
+            pool.take(jnp.asarray(selected, dtype=jnp.int32)).without_momenta()
+        )
         n_accepted += int(selected.size)
 
     toy = _merge_samples(accepted)
@@ -258,15 +539,15 @@ def generate_signal_toy(
     batch_size: int | None = None,
     envelope_safety: float = 1.20,
     max_restarts: int = 10,
+    include_momenta: bool = True,
 ) -> PhaseSpaceSample:
     values = {} if parameters is None else parameters
+    intensity = _frozen_model_intensity(model, values)
 
     def signal_density(data):
-        return _acceptance(efficiency, veto, data) * jnp.asarray(
-            model.intensity(data, values)
-        )
+        return _acceptance(efficiency, veto, data) * intensity(data)
 
-    return _accept_reject_component(
+    toy = _accept_reject_component(
         model,
         size,
         signal_density,
@@ -276,6 +557,9 @@ def generate_signal_toy(
         envelope_safety=envelope_safety,
         max_restarts=max_restarts,
     )
+    if include_momenta:
+        toy = _attach_momenta(model, toy, _derived_seed(seed, 900_001))
+    return toy
 
 
 def generate_toy(
@@ -293,6 +577,7 @@ def generate_toy(
     batch_size: int | None = None,
     envelope_safety: float = 1.20,
     max_restarts: int = 10,
+    include_momenta: bool = True,
 ) -> PhaseSpaceSample:
     if size <= 0:
         raise ValueError("toy size must be positive")
@@ -317,10 +602,10 @@ def generate_toy(
     samples: list[PhaseSpaceSample] = []
 
     if n_signal > 0:
+        intensity = _frozen_model_intensity(model, values)
+
         def signal_density(data):
-            return _acceptance(efficiency, veto, data) * jnp.asarray(
-                model.intensity(data, values)
-            )
+            return _acceptance(efficiency, veto, data) * intensity(data)
 
         samples.append(
             _accept_reject_component(
@@ -375,18 +660,30 @@ def generate_toy(
             p2=toy.p2,
             p3=toy.p3,
         )
+    if include_momenta:
+        toy = _attach_momenta(model, toy, _derived_seed(seed, 900_002))
     return toy
 
 
-def _integral(model, parameters, efficiency, veto) -> float:
+def _integral(model, parameters_or_intensity, efficiency, veto) -> float:
+    """Integrate accepted signal density for both toy-generation backends."""
+
+    if callable(parameters_or_intensity):
+        intensity = parameters_or_intensity
+    else:
+        parameters = parameters_or_intensity
+
+        def intensity(data):
+            return model.intensity(data, parameters)
+
     sample = model.normalization_sample
     data = sample.as_dict()
     value = jnp.mean(
         jnp.asarray(sample.weights)
         * _acceptance(efficiency, veto, data)
-        * jnp.asarray(model.intensity(data, parameters))
+        * jnp.asarray(intensity(data))
     )
-    return float(value)
+    return float(jax.device_get(value))
 
 
 def generate_cp_toy(
@@ -407,6 +704,7 @@ def generate_cp_toy(
     batch_size: int | None = None,
     envelope_safety: float = 1.20,
     max_restarts: int = 10,
+    include_momenta: bool = True,
 ) -> tuple[PhaseSpaceSample, PhaseSpaceSample]:
     if size <= 0:
         raise ValueError("toy size must be positive")
@@ -423,8 +721,10 @@ def generate_cp_toy(
     n_signal = int(rng.binomial(size, float(signal_fraction))) if backgrounds else size
     n_background = size - n_signal
 
-    i_plus = _integral(plus_model, values, plus_efficiency, plus_veto)
-    i_minus = _integral(minus_model, values, minus_efficiency, minus_veto)
+    plus_intensity = _frozen_model_intensity(plus_model, values)
+    minus_intensity = _frozen_model_intensity(minus_model, values)
+    i_plus = _integral(plus_model, plus_intensity, plus_efficiency, plus_veto)
+    i_minus = _integral(minus_model, minus_intensity, minus_efficiency, minus_veto)
     signal_plus_probability = i_plus / (i_plus + i_minus)
     n_signal_plus = int(rng.binomial(n_signal, signal_plus_probability))
     n_signal_minus = n_signal - n_signal_plus
@@ -440,9 +740,7 @@ def generate_cp_toy(
 
     if n_signal_plus > 0:
         def plus_signal_density(data):
-            return _acceptance(plus_efficiency, plus_veto, data) * jnp.asarray(
-                plus_model.intensity(data, values)
-            )
+            return _acceptance(plus_efficiency, plus_veto, data) * plus_intensity(data)
 
         plus_samples.append(
             _accept_reject_component(
@@ -459,9 +757,7 @@ def generate_cp_toy(
 
     if n_signal_minus > 0:
         def minus_signal_density(data):
-            return _acceptance(minus_efficiency, minus_veto, data) * jnp.asarray(
-                minus_model.intensity(data, values)
-            )
+            return _acceptance(minus_efficiency, minus_veto, data) * minus_intensity(data)
 
         minus_samples.append(
             _accept_reject_component(
@@ -538,7 +834,11 @@ def generate_cp_toy(
 
     def finish(samples: list[PhaseSpaceSample], model, key_seed: int) -> PhaseSpaceSample:
         if not samples:
-            return _empty_sample(model, _derived_seed(seed, 500 + key_seed))
+            return _empty_sample(
+                model,
+                _derived_seed(seed, 500 + key_seed),
+                include_momenta=include_momenta,
+            )
         toy = _merge_samples(samples)
         if shuffle and toy.size > 1:
             toy = toy.take(
@@ -557,6 +857,12 @@ def generate_cp_toy(
                 p1=toy.p1,
                 p2=toy.p2,
                 p3=toy.p3,
+            )
+        if include_momenta:
+            toy = _attach_momenta(
+                model,
+                toy,
+                _derived_seed(seed, 910_000 + key_seed),
             )
         return toy
 

@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 
 from dalitzplotfitter import (
@@ -5,6 +6,7 @@ from dalitzplotfitter import (
     GounarisSakurai,
     LASS,
     Pole,
+    QMI,
     ResonanceContext,
     enable_x64,
 )
@@ -135,3 +137,105 @@ def test_lass_cutoff_only_removes_nonresonant_term():
     assert abs(complex(nonresonant)) < 1e-12
     assert abs(complex(resonant)) > 0.0
     assert abs(complex(model(mass, context) - resonant)) < 1e-12
+
+
+def test_qmi_prepared_intervals_match_direct_linear_evaluation():
+    context = _scalar_context()
+    qmi = QMI(
+        knots=(0.30, 0.55, 0.90, 1.40),
+        magnitudes=(1.0, 1.8, 0.7, 1.2),
+        phases=(0.1, -0.4, 0.8, 1.1),
+        interpolation="linear",
+    )
+    mass = jnp.linspace(0.28, 1.45, 257)
+    prepared = qmi.prepare_mass(mass, context)
+    direct = qmi(mass, context)
+    cached = qmi.evaluate_prepared(mass, prepared, context)
+
+    index, fraction, order, starts, ends = prepared
+    assert index.dtype == jnp.int16
+    assert order.dtype == jnp.int32
+    assert starts.shape == ends.shape == (qmi.size - 1,)
+    assert fraction.dtype == mass.dtype
+    assert jnp.allclose(cached, direct, rtol=1e-12, atol=1e-12)
+    assert jnp.allclose(
+        qmi.evaluate_prepared(None, prepared, context),
+        direct,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
+def test_qmi_linear_custom_vjp_matches_generic_autodiff():
+    context = _scalar_context()
+    knots = (0.30, 0.55, 0.90, 1.40)
+    magnitudes = jnp.asarray((1.0, 1.8, 0.7, 1.2), dtype=jnp.float64)
+    phases = jnp.asarray((0.1, -0.4, 0.8, 1.1), dtype=jnp.float64)
+    mass = jnp.linspace(0.28, 1.45, 4097)
+    weights = jnp.sin(jnp.linspace(0.2, 2.7, mass.size)) + 1.3
+
+    template = QMI(
+        knots=knots,
+        magnitudes=tuple(magnitudes),
+        phases=tuple(phases),
+        interpolation="linear",
+    )
+    prepared = template.prepare_mass(mass, context)
+
+    def direct_loss(mags, phs):
+        qmi = QMI(
+            knots=knots,
+            magnitudes=tuple(mags),
+            phases=tuple(phs),
+            interpolation="linear",
+        )
+        return jnp.real(jnp.sum(weights * qmi(mass, context)))
+
+    def prepared_loss(mags, phs):
+        qmi = QMI(
+            knots=knots,
+            magnitudes=tuple(mags),
+            phases=tuple(phs),
+            interpolation="linear",
+        )
+        return jnp.real(
+            jnp.sum(weights * qmi.evaluate_prepared(None, prepared, context))
+        )
+
+    direct_gradient = jax.grad(direct_loss, argnums=(0, 1))(magnitudes, phases)
+    prepared_gradient = jax.grad(prepared_loss, argnums=(0, 1))(magnitudes, phases)
+
+    assert jnp.allclose(
+        prepared_gradient[0],
+        direct_gradient[0],
+        rtol=1e-11,
+        atol=1e-10,
+    )
+    assert jnp.allclose(
+        prepared_gradient[1],
+        direct_gradient[1],
+        rtol=1e-11,
+        atol=1e-10,
+    )
+
+
+def test_qmi_prepared_intervals_match_direct_cubic_evaluation():
+    context = _scalar_context()
+    qmi = QMI(
+        knots=(0.30, 0.55, 0.90, 1.40),
+        magnitudes=(1.0, 1.8, 0.7, 1.2),
+        phases=(0.1, -0.4, 0.8, 1.1),
+        interpolation="cubic",
+    )
+    mass = jnp.linspace(0.28, 1.45, 257)
+    prepared = qmi.prepare_mass(mass, context)
+    direct = qmi(mass, context)
+    cached = qmi.evaluate_prepared(mass, prepared, context)
+
+    assert jnp.allclose(cached, direct, rtol=1e-12, atol=1e-12)
+    assert jnp.allclose(
+        qmi.evaluate_prepared(None, prepared, context),
+        direct,
+        rtol=1e-12,
+        atol=1e-12,
+    )

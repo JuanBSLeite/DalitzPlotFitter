@@ -58,3 +58,53 @@ def test_phase_space_mc_rejects_seed_and_key_together():
         assert "either seed or key" in str(error)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_compact_phase_space_is_physical_without_building_momenta():
+    mother_mass = 1.86966
+    masses = (0.13957, 0.13957, 0.13957)
+    generator = PhaseSpaceMC(mother_mass, masses)
+    sample = generator.generate(2048, seed=29, include_momenta=False)
+
+    assert sample.p1 is None and sample.p2 is None and sample.p3 is None
+    assert sample.size == 2048
+    assert bool(jnp.all(jnp.isfinite(sample.weights)))
+    assert bool(jnp.all(sample.weights > 0.0))
+    invariant_sum = sample.s12 + sample.s13 + sample.s23
+    expected = mother_mass**2 + sum(mass**2 for mass in masses)
+    assert jnp.allclose(invariant_sum, expected, rtol=0.0, atol=1e-12)
+
+
+def test_attach_momenta_reconstructs_compact_invariants():
+    mother_mass = 1.86966
+    masses = (0.13957, 0.13957, 0.13957)
+    generator = PhaseSpaceMC(mother_mass, masses)
+    compact = generator.generate(1024, seed=31, include_momenta=False)
+    full = generator.attach_momenta(compact, seed=32)
+
+    assert jnp.array_equal(full.s12, compact.s12)
+    assert jnp.array_equal(full.s13, compact.s13)
+    assert jnp.array_equal(full.s23, compact.s23)
+    assert jnp.array_equal(full.weights, compact.weights)
+
+    total = full.p1 + full.p2 + full.p3
+    assert jnp.allclose(total[:, 0], mother_mass, rtol=0.0, atol=1e-9)
+    assert jnp.allclose(total[:, 1:], 0.0, rtol=0.0, atol=1e-9)
+    assert jnp.allclose(
+        invariant_mass_squared(full.p1 + full.p2),
+        compact.s12,
+        rtol=1e-9,
+        atol=1e-10,
+    )
+    assert jnp.allclose(
+        invariant_mass_squared(full.p1 + full.p3),
+        compact.s13,
+        rtol=1e-9,
+        atol=1e-10,
+    )
+    assert jnp.allclose(
+        invariant_mass_squared(full.p2 + full.p3),
+        compact.s23,
+        rtol=1e-9,
+        atol=1e-10,
+    )

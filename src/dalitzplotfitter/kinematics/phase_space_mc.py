@@ -54,6 +54,196 @@ def _boost_from_rest(energy: Array, spatial: Array, beta: Array) -> Array:
 
 
 @partial(jax.jit, static_argnames=("size",))
+def _generate_three_body_invariants(
+    key: Array,
+    mother_mass: Array,
+    masses: Array,
+    *,
+    size: int,
+) -> tuple[Array, Array, Array, Array]:
+    """Generate the same weighted phase-space proposal directly in invariants.
+
+    Sampling s12 uniformly and a uniform coordinate across its exact s13
+    limits is equivalent to the invariant projection of the full generator.
+    The importance weight is unchanged up to the same physical normalization,
+    while orientations, boosts, and four-vectors are never constructed.
+    """
+
+    dtype = mother_mass.dtype
+    m1, m2, m3 = masses
+    s_min = (m1 + m2) ** 2
+    s_max = (mother_mass - m3) ** 2
+    delta_s = s_max - s_min
+
+    key_s, key_v = jax.random.split(key)
+    eps = jnp.finfo(dtype).eps
+    u = jnp.clip(
+        jax.random.uniform(key_s, (size,), dtype=dtype),
+        eps,
+        1.0 - eps,
+    )
+    v = jax.random.uniform(key_v, (size,), dtype=dtype)
+    s12 = s_min + delta_s * u
+
+    root_s12 = jnp.sqrt(s12)
+    e1 = (s12 + m1**2 - m2**2) / (2.0 * root_s12)
+    e3 = (mother_mass**2 - s12 - m3**2) / (2.0 * root_s12)
+    q = jnp.sqrt(jnp.maximum(_kallen(s12, m1**2, m2**2), 0.0)) / (
+        2.0 * root_s12
+    )
+    p = jnp.sqrt(
+        jnp.maximum(_kallen(mother_mass**2, s12, m3**2), 0.0)
+    ) / (2.0 * root_s12)
+
+    common = m1**2 + m3**2 + 2.0 * e1 * e3
+    spread = 2.0 * q * p
+    low = common - spread
+    high = common + spread
+    width = high - low
+    s13 = low + v * width
+    constant = mother_mass**2 + m1**2 + m2**2 + m3**2
+    s23 = constant - s12 - s13
+
+    # Exact match to the full generator weight:
+    # width(s13 | s12) = sqrt(lambda_parent*lambda_resonance) / s12.
+    weights = delta_s * width / (128.0 * jnp.pi**3 * mother_mass**2)
+    return s12, s13, s23, weights
+
+
+@partial(
+    jax.jit,
+    static_argnames=("size", "u_bins", "v_bins"),
+)
+def _generate_three_body_invariant_cells(
+    key: Array,
+    mother_mass: Array,
+    masses: Array,
+    cell_probabilities: Array,
+    *,
+    size: int,
+    u_bins: int,
+    v_bins: int,
+) -> tuple[Array, Array, Array, Array, Array]:
+    """Generate invariant proposals from equal cells in the unit Dalitz square."""
+
+    if u_bins < 1 or v_bins < 1:
+        raise ValueError("stratified phase-space bins must be positive")
+    n_cells = u_bins * v_bins
+    probabilities = jnp.asarray(cell_probabilities)
+    if probabilities.shape != (n_cells,):
+        raise ValueError(
+            "cell_probabilities must contain one probability per stratified cell"
+        )
+
+    dtype = mother_mass.dtype
+    key_cell, key_u, key_v = jax.random.split(key, 3)
+    cell = jax.random.choice(
+        key_cell,
+        n_cells,
+        shape=(size,),
+        p=probabilities,
+        replace=True,
+    )
+    iu = cell // v_bins
+    iv = cell % v_bins
+
+    ru = jax.random.uniform(key_u, (size,), dtype=dtype)
+    rv = jax.random.uniform(key_v, (size,), dtype=dtype)
+    u = (iu.astype(dtype) + ru) / float(u_bins)
+    v = (iv.astype(dtype) + rv) / float(v_bins)
+
+    m1, m2, m3 = masses
+    s_min = (m1 + m2) ** 2
+    s_max = (mother_mass - m3) ** 2
+    delta_s = s_max - s_min
+    eps = jnp.finfo(dtype).eps
+    u = jnp.clip(u, eps, 1.0 - eps)
+    s12 = s_min + delta_s * u
+
+    root_s12 = jnp.sqrt(s12)
+    e1 = (s12 + m1**2 - m2**2) / (2.0 * root_s12)
+    e3 = (mother_mass**2 - s12 - m3**2) / (2.0 * root_s12)
+    q = jnp.sqrt(jnp.maximum(_kallen(s12, m1**2, m2**2), 0.0)) / (
+        2.0 * root_s12
+    )
+    p = jnp.sqrt(
+        jnp.maximum(_kallen(mother_mass**2, s12, m3**2), 0.0)
+    ) / (2.0 * root_s12)
+    common = m1**2 + m3**2 + 2.0 * e1 * e3
+    spread = 2.0 * q * p
+    low = common - spread
+    width = 2.0 * spread
+    s13 = low + v * width
+    constant = mother_mass**2 + m1**2 + m2**2 + m3**2
+    s23 = constant - s12 - s13
+    weights = delta_s * width / (128.0 * jnp.pi**3 * mother_mass**2)
+    return s12, s13, s23, weights, cell.astype(jnp.int32)
+
+
+@partial(jax.jit, static_argnames=("size",))
+def _momenta_from_invariants(
+    key: Array,
+    mother_mass: Array,
+    masses: Array,
+    s12: Array,
+    s13: Array,
+    s23: Array,
+    *,
+    size: int,
+) -> tuple[Array, Array, Array]:
+    """Reconstruct an isotropic parent-rest-frame orientation from invariants."""
+
+    dtype = mother_mass.dtype
+    m1, m2, m3 = masses
+    mother2 = mother_mass**2
+
+    e1 = (mother2 + m1**2 - s23) / (2.0 * mother_mass)
+    e2 = (mother2 + m2**2 - s13) / (2.0 * mother_mass)
+    e3 = (mother2 + m3**2 - s12) / (2.0 * mother_mass)
+    p1_mag = jnp.sqrt(jnp.maximum(e1**2 - m1**2, 0.0))
+    p2_mag = jnp.sqrt(jnp.maximum(e2**2 - m2**2, 0.0))
+
+    pair_dot = 0.5 * (s12 - m1**2 - m2**2)
+    spatial_dot = e1 * e2 - pair_dot
+    denominator = p1_mag * p2_mag
+    cos12 = jnp.where(denominator > 0.0, spatial_dot / denominator, 1.0)
+    cos12 = jnp.clip(cos12, -1.0, 1.0)
+    sin12 = jnp.sqrt(jnp.maximum(1.0 - cos12**2, 0.0))
+
+    key_n1, key_alpha = jax.random.split(key)
+    n1 = _unit_vectors(key_n1, size, dtype)
+
+    reference_z = jnp.broadcast_to(
+        jnp.asarray((0.0, 0.0, 1.0), dtype=dtype), n1.shape
+    )
+    reference_x = jnp.broadcast_to(
+        jnp.asarray((1.0, 0.0, 0.0), dtype=dtype), n1.shape
+    )
+    reference = jnp.where(
+        (jnp.abs(n1[:, 2]) > 0.9)[:, None], reference_x, reference_z
+    )
+    e_perp1 = jnp.cross(reference, n1)
+    norm = jnp.linalg.norm(e_perp1, axis=1)
+    e_perp1 = e_perp1 / norm[:, None]
+    e_perp2 = jnp.cross(n1, e_perp1)
+
+    alpha = 2.0 * jnp.pi * jax.random.uniform(key_alpha, (size,), dtype=dtype)
+    transverse = (
+        jnp.cos(alpha)[:, None] * e_perp1
+        + jnp.sin(alpha)[:, None] * e_perp2
+    )
+    n2 = cos12[:, None] * n1 + sin12[:, None] * transverse
+
+    spatial1 = p1_mag[:, None] * n1
+    spatial2 = p2_mag[:, None] * n2
+    spatial3 = -(spatial1 + spatial2)
+    p1 = jnp.concatenate((e1[:, None], spatial1), axis=1)
+    p2 = jnp.concatenate((e2[:, None], spatial2), axis=1)
+    p3 = jnp.concatenate((e3[:, None], spatial3), axis=1)
+    return p1, p2, p3
+
+
+@partial(jax.jit, static_argnames=("size",))
 def _generate_three_body(
     key: Array,
     mother_mass: Array,
@@ -169,6 +359,7 @@ class PhaseSpaceMC:
         *,
         seed: int | None = None,
         key: Array | None = None,
+        include_momenta: bool = True,
     ) -> PhaseSpaceSample:
         """Return weighted phase-space events in ``(E, px, py, pz)`` order.
 
@@ -189,18 +380,124 @@ class PhaseSpaceMC:
 
         mother_mass = jnp.asarray(self.mother_mass)
         masses = jnp.asarray(self.masses, dtype=mother_mass.dtype)
+
+        if not include_momenta:
+            s12, s13, s23, weights = _generate_three_body_invariants(
+                key,
+                mother_mass,
+                masses,
+                size=size,
+            )
+            return PhaseSpaceSample(
+                s12=s12,
+                s13=s13,
+                s23=s23,
+                weights=weights,
+            )
+
         p1, p2, p3, weights = _generate_three_body(
             key,
             mother_mass,
             masses,
             size=size,
         )
-
         return PhaseSpaceSample(
             s12=invariant_mass_squared(p1 + p2),
             s13=invariant_mass_squared(p1 + p3),
             s23=invariant_mass_squared(p2 + p3),
             weights=weights,
+            p1=p1,
+            p2=p2,
+            p3=p3,
+        )
+
+    def generate_stratified_invariants(
+        self,
+        size: int,
+        *,
+        cell_probabilities: Array,
+        grid_shape: tuple[int, int],
+        seed: int | None = None,
+        key: Array | None = None,
+    ) -> tuple[PhaseSpaceSample, Array]:
+        """Generate invariant-only proposals from weighted equal Dalitz cells."""
+
+        if size <= 0:
+            raise ValueError("size must be positive")
+        if len(grid_shape) != 2:
+            raise ValueError("grid_shape must contain (u_bins, v_bins)")
+        u_bins, v_bins = (int(grid_shape[0]), int(grid_shape[1]))
+        if u_bins < 1 or v_bins < 1:
+            raise ValueError("grid_shape entries must be positive")
+        probabilities = jnp.asarray(cell_probabilities)
+        if probabilities.shape != (u_bins * v_bins,):
+            raise ValueError(
+                "cell_probabilities must match the requested stratified grid"
+            )
+        if seed is not None and key is not None:
+            raise ValueError("Pass either seed or key, not both")
+        if key is None:
+            if seed is None:
+                seed = secrets.randbits(32)
+            key = jax.random.key(int(seed))
+
+        mother_mass = jnp.asarray(self.mother_mass)
+        masses = jnp.asarray(self.masses, dtype=mother_mass.dtype)
+        s12, s13, s23, weights, cells = _generate_three_body_invariant_cells(
+            key,
+            mother_mass,
+            masses,
+            probabilities,
+            size=size,
+            u_bins=u_bins,
+            v_bins=v_bins,
+        )
+        return (
+            PhaseSpaceSample(
+                s12=s12,
+                s13=s13,
+                s23=s23,
+                weights=weights,
+            ),
+            cells,
+        )
+
+    def attach_momenta(
+        self,
+        sample: PhaseSpaceSample,
+        *,
+        seed: int | None = None,
+        key: Array | None = None,
+    ) -> PhaseSpaceSample:
+        """Attach isotropic four-momenta to an invariant-only physical sample."""
+
+        if sample.p1 is not None or sample.p2 is not None or sample.p3 is not None:
+            if sample.p1 is None or sample.p2 is None or sample.p3 is None:
+                raise ValueError("sample contains an incomplete set of four-momenta")
+            return sample
+        if seed is not None and key is not None:
+            raise ValueError("Pass either seed or key, not both")
+        if key is None:
+            if seed is None:
+                seed = secrets.randbits(32)
+            key = jax.random.key(int(seed))
+
+        mother_mass = jnp.asarray(self.mother_mass)
+        masses = jnp.asarray(self.masses, dtype=mother_mass.dtype)
+        p1, p2, p3 = _momenta_from_invariants(
+            key,
+            mother_mass,
+            masses,
+            jnp.asarray(sample.s12),
+            jnp.asarray(sample.s13),
+            jnp.asarray(sample.s23),
+            size=sample.size,
+        )
+        return PhaseSpaceSample(
+            s12=sample.s12,
+            s13=sample.s13,
+            s23=sample.s23,
+            weights=sample.weights,
             p1=p1,
             p2=p2,
             p3=p3,

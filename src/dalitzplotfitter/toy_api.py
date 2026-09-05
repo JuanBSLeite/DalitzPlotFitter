@@ -57,6 +57,7 @@ def generate_signal_toy(
     output_tree: str = "DecayTree",
     root_include_weights: bool = True,
     root_include_momenta: bool = True,
+    include_momenta: bool = True,
 ) -> PhaseSpaceSample:
     """Generate an unweighted signal toy.
 
@@ -76,6 +77,7 @@ def generate_signal_toy(
             seed=seed,
             resolution=inverse_resolution,
             quantile_resolution=inverse_quantile_resolution,
+            include_momenta=include_momenta,
         )
     else:
         toy = _generate_signal_toy_accept(
@@ -89,6 +91,7 @@ def generate_signal_toy(
             batch_size=batch_size,
             envelope_safety=envelope_safety,
             max_restarts=max_restarts,
+            include_momenta=include_momenta,
         )
     if output_root is not None:
         write_phase_space_sample(
@@ -123,6 +126,7 @@ def generate_toy(
     output_tree: str = "DecayTree",
     root_include_weights: bool = True,
     root_include_momenta: bool = True,
+    include_momenta: bool = True,
 ) -> PhaseSpaceSample:
     """Generate signal/background pseudo-data.
 
@@ -146,6 +150,7 @@ def generate_toy(
             shuffle=shuffle,
             resolution=inverse_resolution,
             quantile_resolution=inverse_quantile_resolution,
+            include_momenta=include_momenta,
         )
     else:
         toy = _generate_toy_accept(
@@ -162,6 +167,7 @@ def generate_toy(
             batch_size=batch_size,
             envelope_safety=envelope_safety,
             max_restarts=max_restarts,
+            include_momenta=include_momenta,
         )
     if output_root is not None:
         write_phase_space_sample(
@@ -200,6 +206,7 @@ def generate_cp_toy(
     charge_branch: str = "charge",
     root_include_weights: bool = True,
     root_include_momenta: bool = True,
+    include_momenta: bool = True,
 ) -> tuple[PhaseSpaceSample, PhaseSpaceSample]:
     """Generate a CP toy and optionally save both charges in one ROOT TTree.
 
@@ -225,6 +232,7 @@ def generate_cp_toy(
             shuffle=shuffle,
             resolution=inverse_resolution,
             quantile_resolution=inverse_quantile_resolution,
+            include_momenta=include_momenta,
         )
     else:
         plus_toy, minus_toy = _generate_cp_toy_accept(
@@ -244,6 +252,7 @@ def generate_cp_toy(
             batch_size=batch_size,
             envelope_safety=envelope_safety,
             max_restarts=max_restarts,
+            include_momenta=include_momenta,
         )
     if output_root is not None:
         write_cp_phase_space_sample(
