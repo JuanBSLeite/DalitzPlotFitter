@@ -40,9 +40,12 @@ class Rescattering2:
     hard-coded in Laura++. The first interval starts at the charged-kaon
     threshold, 2*m_K, and the second ends at 2.0 GeV.
 
-    The original C++ uses strict inequalities at exactly 1.47 and 2.0 GeV,
-    which creates isolated zero-amplitude points. Here the 1.47 GeV boundary
-    is made continuous and 2.0 GeV is included in the upper interval.
+    This implementation intentionally follows the Laura++ C++ literally,
+    including two unusual details: C0 and F0 are initialised by evaluating the
+    region-I functions at transition_mass**2, and resAmp uses strict
+    inequalities at 1.47 and 2.0 GeV. Consequently the amplitude is exactly
+    zero at those two masses. Laura++ also extrapolates region I below 2*m_K;
+    the threshold only defines the Chebyshev scaling interval.
     """
 
     B1: object = 23.6
@@ -93,14 +96,18 @@ class Rescattering2:
         b0 = phase_at_threshold + self.B1 - self.B2 + self.B3
         return (b0, self.B1, self.B2, self.B3)
 
-    def _phase_at_transition(self):
-        # T_n(+1) = 1, so this is the endpoint of the lower expansion.
-        return sum(self._low_phase_coefficients())
+    def _low_phase(self, mass):
+        x_low = self._scaled_mass(
+            mass, self.threshold_mass, float(self.transition_mass)
+        )
+        return _chebyshev_series(x_low, self._low_phase_coefficients())
 
     def _high_phase_coefficients(self):
-        # At the lower edge of interval II, x=-1 and T_n(-1)=(-1)^n.
+        # Literal Laura++ initialise():
+        # C0_ = phi00(sqr_tmax[1]*sqr_tmax[1], 1)
+        #       + C1 - C2 + C3 - C4 + C5
         c0 = (
-            self._phase_at_transition()
+            self._low_phase(float(self.transition_mass) ** 2)
             + self.C1
             - self.C2
             + self.C3
@@ -112,12 +119,18 @@ class Rescattering2:
     def _low_magnitude_coefficients(self):
         return (self.D0, self.D1, self.D2, self.D3)
 
-    def _magnitude_at_transition(self):
-        return sum(self._low_magnitude_coefficients())
+    def _low_magnitude(self, mass):
+        x_low = self._scaled_mass(
+            mass, self.threshold_mass, float(self.transition_mass)
+        )
+        return _chebyshev_series(x_low, self._low_magnitude_coefficients())
 
     def _high_magnitude_coefficients(self):
+        # Literal Laura++ initialise():
+        # F0_ = g00(sqr_tmax[1]*sqr_tmax[1], 1)
+        #       + F1 - F2 + F3 - F4
         f0 = (
-            self._magnitude_at_transition()
+            self._low_magnitude(float(self.transition_mass) ** 2)
             + self.F1
             - self.F2
             + self.F3
@@ -129,29 +142,23 @@ class Rescattering2:
         """Return the Laura++ phase phi_00(m), in radians."""
 
         m = jnp.asarray(mass)
-        x_low = self._scaled_mass(
-            m, self.threshold_mass, float(self.transition_mass)
-        )
         x_high = self._scaled_mass(
             m, float(self.transition_mass), float(self.maximum_mass)
         )
-        low = _chebyshev_series(x_low, self._low_phase_coefficients())
+        low = self._low_phase(m)
         high = _chebyshev_series(x_high, self._high_phase_coefficients())
-        return jnp.where(m <= self.transition_mass, low, high)
+        return jnp.where(m < self.transition_mass, low, high)
 
     def magnitude(self, mass):
         """Return the signed Laura++ function g_00(m)."""
 
         m = jnp.asarray(mass)
-        x_low = self._scaled_mass(
-            m, self.threshold_mass, float(self.transition_mass)
-        )
         x_high = self._scaled_mass(
             m, float(self.transition_mass), float(self.maximum_mass)
         )
-        low = _chebyshev_series(x_low, self._low_magnitude_coefficients())
+        low = self._low_magnitude(m)
         high = _chebyshev_series(x_high, self._high_magnitude_coefficients())
-        return jnp.where(m <= self.transition_mass, low, high)
+        return jnp.where(m < self.transition_mass, low, high)
 
     def __call__(self, mass, context: ResonanceContext):
         if int(context.spin) != 0:
@@ -159,7 +166,9 @@ class Rescattering2:
 
         m = jnp.asarray(mass)
         value = self.magnitude(m) * jnp.exp(1j * self.phase(m))
-        inside = (m >= self.threshold_mass) & (m <= self.maximum_mass)
+        inside = (m < self.transition_mass) | (
+            (m > self.transition_mass) & (m < self.maximum_mass)
+        )
         return jnp.where(inside, value, 0.0j)
 
 
