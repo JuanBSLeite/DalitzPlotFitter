@@ -130,6 +130,51 @@ plus_toy, minus_toy = generate_cp_toy(
 
 See `docs/toy_generation.md` and `notebooks/19_toy_root_output.ipynb`.
 
+## Memory-conscious workflows
+
+Large toys do not need to retain four-momenta when the downstream fit uses only
+Dalitz invariants. Keep the historical default with `include_momenta=True`, or
+request a compact sample explicitly:
+
+```python
+toy = generate_toy(
+    model,
+    1_000_000,
+    parameters=fit_values,
+    seed=2,
+    include_momenta=False,
+)
+
+print(toy.nbytes / 1024**2, "MiB")
+```
+
+For float64 arrays, a one-million-event unweighted sample with
+`s12/s13/s23/weights` occupies about 32 MiB. Retaining the three four-momenta
+adds another 96 MiB, for about 128 MiB total. With inverse-transform generation,
+`include_momenta=False` also skips momentum reconstruction, reducing peak as
+well as retained memory. An existing sample can be compacted without copying its
+invariant arrays:
+
+```python
+compact = sample.without_momenta()
+```
+
+Normalization is already evaluated in fixed-size chunks for coefficient-only
+fits. The chunk size is configurable when device memory is constrained:
+
+```python
+model = DecayModel(
+    channel,
+    components,
+    normalization_sample=integration_toy,
+    normalization_chunk_size=20_000,
+)
+```
+
+The default remains 100,000 points per chunk. Smaller chunks reduce temporary
+normalization memory approximately linearly, at the cost of more chunk
+executions. They do not change the integration sample or normalization formula.
+
 ## Simultaneous CP fits
 
 `CPFitSession` removes the manual construction of the two prepared caches, joint CP likelihood and minimizer:
