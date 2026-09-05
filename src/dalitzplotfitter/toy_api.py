@@ -91,9 +91,8 @@ def generate_signal_toy(
             batch_size=batch_size,
             envelope_safety=envelope_safety,
             max_restarts=max_restarts,
+            include_momenta=include_momenta,
         )
-        if not include_momenta:
-            toy = toy.without_momenta()
     if output_root is not None:
         write_phase_space_sample(
             output_root,
@@ -168,9 +167,8 @@ def generate_toy(
             batch_size=batch_size,
             envelope_safety=envelope_safety,
             max_restarts=max_restarts,
+            include_momenta=include_momenta,
         )
-        if not include_momenta:
-            toy = toy.without_momenta()
     if output_root is not None:
         write_phase_space_sample(
             output_root,
@@ -254,10 +252,8 @@ def generate_cp_toy(
             batch_size=batch_size,
             envelope_safety=envelope_safety,
             max_restarts=max_restarts,
+            include_momenta=include_momenta,
         )
-        if not include_momenta:
-            plus_toy = plus_toy.without_momenta()
-            minus_toy = minus_toy.without_momenta()
     if output_root is not None:
         write_cp_phase_space_sample(
             output_root,
