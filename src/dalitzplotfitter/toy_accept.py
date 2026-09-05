@@ -11,11 +11,7 @@ import numpy as np
 
 from dalitzplotfitter.amplitude.components import coefficient_value
 from dalitzplotfitter.fit import ParameterKind
-from dalitzplotfitter.kinematics import (
-    PhaseSpaceMC,
-    PhaseSpaceSample,
-    dalitz_s13_limits,
-)
+from dalitzplotfitter.kinematics import PhaseSpaceMC, PhaseSpaceSample
 
 
 def _acceptance(efficiency, veto, data: dict[str, object]) -> jnp.ndarray:
@@ -122,90 +118,6 @@ def _score_statistics(values: jax.Array, *, include_mean: bool = False):
     return float(maximum_host)
 
 
-def _stratified_grid_shape(n_pilot: int) -> tuple[int, int]:
-    """Choose a square cell grid with enough pilot occupancy per cell."""
-
-    side = int(np.sqrt(max(int(n_pilot), 1) / 32.0))
-    side = min(32, max(2, side))
-    return side, side
-
-
-def _phase_space_cells(
-    model,
-    sample: PhaseSpaceSample,
-    grid_shape: tuple[int, int],
-) -> jax.Array:
-    """Map physical invariant proposals back to their equal unit-square cells."""
-
-    u_bins, v_bins = grid_shape
-    mother_mass = float(model.channel.parent_mass)
-    masses = tuple(float(value) for value in model.channel.daughter_masses)
-    m1, m2, m3 = masses
-
-    s12 = jnp.asarray(sample.s12)
-    s13 = jnp.asarray(sample.s13)
-    s_min = (m1 + m2) ** 2
-    s_max = (mother_mass - m3) ** 2
-    u = (s12 - s_min) / (s_max - s_min)
-    low, high = dalitz_s13_limits(
-        s12,
-        mother_mass=mother_mass,
-        masses=masses,
-    )
-    width = jnp.maximum(high - low, jnp.finfo(s12.dtype).tiny)
-    v = (s13 - low) / width
-
-    iu = jnp.clip(jnp.floor(u * u_bins).astype(jnp.int32), 0, u_bins - 1)
-    iv = jnp.clip(jnp.floor(v * v_bins).astype(jnp.int32), 0, v_bins - 1)
-    return iu * v_bins + iv
-
-
-def _pilot_local_envelopes(
-    model,
-    pilot: PhaseSpaceSample,
-    pilot_scores: jax.Array,
-    *,
-    grid_shape: tuple[int, int],
-    envelope_safety: float,
-) -> np.ndarray:
-    """Build strictly positive local envelopes from a uniform pilot sample."""
-
-    cells = np.asarray(
-        jax.device_get(_phase_space_cells(model, pilot, grid_shape)),
-        dtype=np.int32,
-    )
-    scores = np.asarray(jax.device_get(pilot_scores), dtype=float)
-    n_cells = int(grid_shape[0] * grid_shape[1])
-    maxima = np.zeros((n_cells,), dtype=float)
-    np.maximum.at(maxima, cells, scores)
-
-    global_max = float(np.max(scores))
-    if global_max <= 0.0:
-        raise ValueError("toy density is zero over the pilot phase-space sample")
-
-    # An unvisited cell must retain non-zero proposal support. With the
-    # occupancy-aware grid this is uncommon; use the conservative global pilot
-    # maximum there so no physical region is excluded.
-    maxima[maxima <= 0.0] = global_max
-    return float(envelope_safety) * maxima
-
-
-def _update_local_envelopes(
-    envelopes: np.ndarray,
-    cells: jax.Array,
-    scores: jax.Array,
-    *,
-    envelope_safety: float,
-) -> np.ndarray:
-    """Raise every exceeded local envelope before a full safe restart."""
-
-    cells_host = np.asarray(jax.device_get(cells), dtype=np.int32)
-    scores_host = np.asarray(jax.device_get(scores), dtype=float)
-    maxima = np.zeros_like(envelopes)
-    np.maximum.at(maxima, cells_host, scores_host)
-    return np.maximum(envelopes, float(envelope_safety) * maxima)
-
-
 def _frozen_model_intensity(model, values: Mapping[str, object]):
     """Build one JIT intensity with scales and coefficients frozen at toy truth.
 
@@ -284,13 +196,15 @@ def _accept_reject_component(
     envelope_safety: float,
     max_restarts: int,
 ) -> PhaseSpaceSample:
-    """Generate one unweighted component with monitored safe envelopes.
+    """Generate one unweighted component with a monitored global envelope.
 
-    Invariant-only densities use equal cells in the unit Dalitz proposal square
-    with a separately monitored envelope per cell. The cell is drawn with
-    probability proportional to its envelope, so accepting with score/envelope
-    preserves the exact target density. Momentum-dependent custom densities
-    retain the original monitored global-envelope fallback.
+    The proposal is evaluated in Dalitz invariants whenever possible, but the
+    rejection envelope is deliberately global.  A local pilot maximum can
+    underestimate a narrow peak and then suppress proposals from that same
+    region; the global proposal avoids that self-hiding failure mode.  If any
+    later proposal exceeds the envelope, all accepted events are discarded and
+    generation restarts with the enlarged envelope. Probabilities are never
+    clipped.
     """
 
     if size <= 0:
@@ -303,9 +217,6 @@ def _accept_reject_component(
     compiled_density = jax.jit(density_function)
     n_pilot = _pilot_size(size, pool_size)
 
-    # Built-in amplitudes need only Dalitz invariants.  Try the compact proposal
-    # first and fall back to full four-vectors only for custom densities that
-    # explicitly request momentum fields.
     compact_proposal = True
     pilot = model.generate_phase_space(
         n_pilot,
@@ -329,31 +240,14 @@ def _accept_reject_component(
     )
     if observed_max <= 0.0:
         raise ValueError("toy density is zero over the pilot phase-space sample")
+    envelope = envelope_safety * observed_max
 
-    grid_shape = None
-    local_envelopes = None
-    if compact_proposal:
-        grid_shape = _stratified_grid_shape(n_pilot)
-        local_envelopes = _pilot_local_envelopes(
-            model,
-            pilot,
-            pilot_scores,
-            grid_shape=grid_shape,
-            envelope_safety=envelope_safety,
-        )
-        estimated_efficiency = mean_score / float(np.mean(local_envelopes))
-    else:
-        envelope = envelope_safety * observed_max
-        estimated_efficiency = mean_score / envelope
-
+    estimated_efficiency = mean_score / envelope
     estimated_efficiency = min(max(estimated_efficiency, 1e-4), 1.0)
     if batch_size is None:
+        # Reuse the pilot shape for invariant-only amplitudes to avoid a second
+        # JAX compilation of the full density at a different proposal shape.
         if compact_proposal:
-            # Reuse the pilot array shape for proposal-density evaluation.
-            # JAX specializes on array shape, so the previous adaptive batch
-            # (often 500k after a 100k pilot) compiled the full amplitude twice
-            # on the first toy. Local envelopes make smaller repeated batches
-            # efficient enough that avoiding this second compilation wins.
             batch_size = int(n_pilot)
         else:
             batch_size = int(
@@ -376,66 +270,29 @@ def _accept_reject_component(
     while n_accepted < size:
         proposal_index += 1
         if proposal_index > 10_000:
-            raise RuntimeError("accept-reject toy generation did not converge")
-        if compact_proposal:
-            probabilities = local_envelopes / np.sum(local_envelopes)
-            pool, proposal_cells = model.generate_stratified_phase_space(
-                batch_size,
-                cell_probabilities=jnp.asarray(probabilities),
-                grid_shape=grid_shape,
-                seed=_derived_seed(seed, 10_000 + proposal_index),
+            raise RuntimeError(
+                "accept-reject generation exceeded 10000 proposal batches"
             )
-        else:
-            pool = model.generate_phase_space(
-                batch_size,
-                seed=_derived_seed(seed, 10_000 + proposal_index),
-                include_momenta=True,
-            )
-            proposal_cells = None
 
+        pool = model.generate_phase_space(
+            batch_size,
+            seed=_derived_seed(seed, 10_000 + proposal_index),
+            include_momenta=not compact_proposal,
+        )
         score = _scores(pool, compiled_density(pool.as_dict()))
-        if compact_proposal:
-            envelope_values = jnp.asarray(local_envelopes, dtype=score.dtype)[
-                proposal_cells
-            ]
-            valid_device = jnp.all(jnp.isfinite(score)) & jnp.all(score >= 0.0)
-            exceeded_device = jnp.any(score > envelope_values)
-            valid, exceeded = jax.device_get((valid_device, exceeded_device))
-            if not bool(valid):
-                raise ValueError(
-                    "toy generation weights must be finite and non-negative"
+        batch_max = _score_statistics(score)
+
+        if batch_max > envelope:
+            restarts += 1
+            if restarts > max_restarts:
+                raise RuntimeError(
+                    "accept-reject envelope was exceeded too many times; "
+                    "increase pool_size or envelope_safety"
                 )
-            if bool(exceeded):
-                restarts += 1
-                if restarts > max_restarts:
-                    raise RuntimeError(
-                        "accept-reject local envelope was exceeded too many times; "
-                        "increase pool_size or envelope_safety"
-                    )
-                local_envelopes = _update_local_envelopes(
-                    local_envelopes,
-                    proposal_cells,
-                    score,
-                    envelope_safety=envelope_safety,
-                )
-                accepted.clear()
-                n_accepted = 0
-                continue
-            denominator = envelope_values
-        else:
-            batch_max = _score_statistics(score)
-            if batch_max > envelope:
-                restarts += 1
-                if restarts > max_restarts:
-                    raise RuntimeError(
-                        "accept-reject envelope was exceeded too many times; "
-                        "increase pool_size or envelope_safety"
-                    )
-                envelope = envelope_safety * batch_max
-                accepted.clear()
-                n_accepted = 0
-                continue
-            denominator = envelope
+            envelope = envelope_safety * batch_max
+            accepted.clear()
+            n_accepted = 0
+            continue
 
         accept_key = jax.random.key(
             int(accept_rng.integers(0, 2**32, dtype=np.uint32))
@@ -444,10 +301,11 @@ def _accept_reject_component(
             accept_key,
             (pool.size,),
             dtype=score.dtype,
-        ) < (score / denominator)
+        ) < (score / envelope)
         indices = np.flatnonzero(np.asarray(jax.device_get(mask), dtype=bool))
         if indices.size == 0:
             continue
+
         needed = size - n_accepted
         selected = indices[:needed]
         accepted.append(
@@ -455,76 +313,8 @@ def _accept_reject_component(
         )
         n_accepted += int(selected.size)
 
-    toy = _merge_samples(accepted)
-    if toy.size != size:
-        raise RuntimeError("internal accept-reject toy generation count mismatch")
-    return toy
+    return _merge_samples(accepted)
 
-
-@dataclass(frozen=True)
-class ToyBackground:
-    """One background component for high-level toy generation."""
-
-    name: str
-    shape: object
-    fraction: float | None = None
-    apply_veto: bool = True
-
-    def __post_init__(self) -> None:
-        if not self.name:
-            raise ValueError("toy background name must be non-empty")
-        if not callable(self.shape):
-            raise TypeError("toy background shape must be callable")
-        if self.fraction is not None and not 0.0 <= float(self.fraction) <= 1.0:
-            raise ValueError("toy background fraction must lie in [0, 1]")
-
-
-@dataclass(frozen=True)
-class CPToyBackground:
-    """One charge-aware background component for CP toy generation."""
-
-    name: str
-    plus_shape: object
-    minus_shape: object | None = None
-    fraction: float | None = None
-    apply_veto: bool = True
-
-    def __post_init__(self) -> None:
-        if not self.name:
-            raise ValueError("CP toy background name must be non-empty")
-        if not callable(self.plus_shape):
-            raise TypeError("CP toy plus_shape must be callable")
-        if self.minus_shape is not None and not callable(self.minus_shape):
-            raise TypeError("CP toy minus_shape must be callable")
-        if self.fraction is not None and not 0.0 <= float(self.fraction) <= 1.0:
-            raise ValueError("CP toy background fraction must lie in [0, 1]")
-
-    @property
-    def resolved_minus_shape(self):
-        return self.plus_shape if self.minus_shape is None else self.minus_shape
-
-
-def _background_weights(backgrounds: Sequence[object]) -> np.ndarray:
-    backgrounds = tuple(backgrounds)
-    if not backgrounds:
-        return np.empty((0,), dtype=float)
-    if len(backgrounds) == 1:
-        if getattr(backgrounds[0], "fraction") is not None:
-            raise ValueError("a single toy background does not need a relative fraction")
-        return np.ones((1,), dtype=float)
-
-    explicit = []
-    for background in backgrounds[:-1]:
-        if getattr(background, "fraction") is None:
-            raise ValueError("all toy backgrounds except the last require a relative fraction")
-        explicit.append(float(background.fraction))
-    if getattr(backgrounds[-1], "fraction") is not None:
-        raise ValueError("the last toy background is the remainder and must not define fraction")
-    remainder = 1.0 - sum(explicit)
-    weights = np.asarray(explicit + [remainder], dtype=float)
-    if np.any(weights < 0.0):
-        raise ValueError("toy background fractions sum to more than one")
-    return weights
 
 
 def generate_signal_toy(
