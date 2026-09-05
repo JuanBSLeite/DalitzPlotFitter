@@ -30,6 +30,7 @@ from dalitzplotfitter.integration import (
     DalitzGaussLegendreGrid,
     GridIntegrator,
 )
+from dalitzplotfitter.integration.adaptive_square_dalitz import AdaptiveSquareDalitzGrid
 from dalitzplotfitter.kinematics import PhaseSpaceMC, PhaseSpaceSample, SquareDalitzGrid
 from dalitzplotfitter.pdf import SignalPDF
 
@@ -272,7 +273,7 @@ class DecayModel:
     components: tuple[Resonance | NonResonant | DalitzAmplitude, ...]
     normalize_components: bool
     normalization_resolution: int
-    normalization_method: Literal["gauss-legendre", "square-dalitz", "auto"]
+    normalization_method: Literal["gauss-legendre", "square-dalitz"]
     normalization_pair: tuple[int, int]
     normalization_bin_width: float
     normalization_order_m13: int | None
@@ -293,7 +294,7 @@ class DecayModel:
         *,
         normalize_components: bool = True,
         normalization_resolution: int = 1000,
-        normalization_method: Literal["gauss-legendre", "square-dalitz", "auto"] = "gauss-legendre",
+        normalization_method: Literal["gauss-legendre", "square-dalitz"] = "gauss-legendre",
         normalization_pair: tuple[int, int] = (0, 1),
         normalization_bin_width: float = 0.005,
         normalization_order_m13: int | None = None,
@@ -304,9 +305,9 @@ class DecayModel:
     ) -> None:
         if normalization_resolution < 2:
             raise ValueError("normalization_resolution must be at least 2")
-        if normalization_method not in ("gauss-legendre", "square-dalitz", "auto"):
+        if normalization_method not in ("gauss-legendre", "square-dalitz"):
             raise ValueError(
-                "normalization_method must be 'gauss-legendre', 'square-dalitz', or 'auto'"
+                "normalization_method must be either 'gauss-legendre' or 'square-dalitz'"
             )
         if len(set(normalization_pair)) != 2 or any(
             index not in (0, 1, 2) for index in normalization_pair
@@ -439,36 +440,97 @@ class DecayModel:
             for axis, values in result.items()
         }
 
+    def _flatten_narrow_resonances(
+        self,
+        narrow: dict[str, tuple[tuple[float, float], ...]] | None = None,
+    ) -> tuple[tuple[tuple[int, int], float, float], ...]:
+        """Return unique narrow bands as (pair, pole_mass, pole_width)."""
+
+        values = self._adaptive_narrow_resonances() if narrow is None else narrow
+        axis_to_pair = {
+            "m12": (0, 1),
+            "m13": (0, 2),
+            "m23": (1, 2),
+        }
+        flattened = []
+        for axis, pair in axis_to_pair.items():
+            for mass, width in values[axis]:
+                flattened.append((pair, mass, width))
+        return tuple(flattened)
+
+    @staticmethod
+    def _format_narrow_bands(
+        narrow: dict[str, tuple[tuple[float, float], ...]],
+    ) -> str:
+        entries = []
+        for axis in ("m12", "m13", "m23"):
+            for mass, width in narrow[axis]:
+                entries.append(
+                    f"{axis}: m0={mass:.6f} GeV, Gamma={1000.0 * width:.3f} MeV"
+                )
+        return "; ".join(entries)
+
     @property
-    def auto_normalization_scheme(self) -> dict[str, object]:
-        """Describe the integration strategy selected by ``normalization_method="auto"``."""
+    def normalization_scheme(self) -> dict[str, object]:
+        """Describe the actual deterministic normalization strategy."""
 
         narrow = self._adaptive_narrow_resonances()
-        if narrow["m12"]:
+        has_narrow = any(narrow[axis] for axis in ("m12", "m13", "m23"))
+
+        if not has_narrow:
+            if self.normalization_method == "gauss-legendre":
+                return {
+                    "method": "gauss-legendre",
+                    "adaptive": False,
+                    "bin_width": self.normalization_bin_width,
+                    "order_m13": self.normalization_order_m13,
+                    "order_m23": self.normalization_order_m23,
+                }
             return {
-                "mode": "square-dalitz",
-                "pair": (0, 1),
+                "method": "square-dalitz",
+                "adaptive": False,
+                "pair": self.normalization_pair,
                 "resolution": self.normalization_resolution,
-                "m12_narrow_resonances": narrow["m12"],
             }
 
-        grid = AdaptiveDalitzGaussLegendreGrid(
-            self.channel.parent_mass,
-            self.channel.daughter_masses,
-            m13_narrow_resonances=narrow["m13"],
-            m23_narrow_resonances=narrow["m23"],
-            bin_width=self.normalization_bin_width,
-            narrow_width=self.normalization_narrow_width,
-            window_n_widths=self.normalization_narrow_window,
-            binning_factor=self.normalization_binning_factor,
-        )
+        if self.normalization_method == "gauss-legendre" and not narrow["m12"]:
+            grid = AdaptiveDalitzGaussLegendreGrid(
+                self.channel.parent_mass,
+                self.channel.daughter_masses,
+                m13_narrow_resonances=narrow["m13"],
+                m23_narrow_resonances=narrow["m23"],
+                bin_width=self.normalization_bin_width,
+                narrow_width=self.normalization_narrow_width,
+                window_n_widths=self.normalization_narrow_window,
+                binning_factor=self.normalization_binning_factor,
+            )
+            return {
+                "method": "gauss-legendre",
+                "adaptive": True,
+                "internal_coordinates": "m13-m23",
+                "narrow_resonances": narrow,
+                "m13_segments": grid.m13_segments,
+                "m23_segments": grid.m23_segments,
+                "estimated_tensor_points": grid.estimated_tensor_points,
+            }
+
+        if self.normalization_method == "gauss-legendre":
+            return {
+                "method": "gauss-legendre",
+                "adaptive": True,
+                "internal_coordinates": "square-dalitz",
+                "reason": "narrow m12 band is diagonal in the conventional m13-m23 plane",
+                "pair": (0, 1),
+                "resolution": self.normalization_resolution,
+                "narrow_resonances": narrow,
+            }
+
         return {
-            "mode": "adaptive-gauss-legendre",
-            "m13_narrow_resonances": narrow["m13"],
-            "m23_narrow_resonances": narrow["m23"],
-            "m13_segments": grid.m13_segments,
-            "m23_segments": grid.m23_segments,
-            "estimated_tensor_points": grid.estimated_tensor_points,
+            "method": "square-dalitz",
+            "adaptive": True,
+            "pair": self.normalization_pair,
+            "resolution": self.normalization_resolution,
+            "narrow_resonances": narrow,
         }
 
     @property
@@ -483,28 +545,45 @@ class DecayModel:
     def normalization_sample(self) -> PhaseSpaceSample:
         sample = self._normalization_sample
         if sample is None:
+            narrow = self._adaptive_narrow_resonances()
+            has_narrow = any(
+                narrow[axis] for axis in ("m12", "m13", "m23")
+            )
+
             if self.normalization_method == "gauss-legendre":
-                sample = DalitzGaussLegendreGrid(
-                    self.channel.parent_mass,
-                    self.channel.daughter_masses,
-                    bin_width=self.normalization_bin_width,
-                    order_m13=self.normalization_order_m13,
-                    order_m23=self.normalization_order_m23,
-                ).sample()
-            elif self.normalization_method == "auto":
-                narrow = self._adaptive_narrow_resonances()
-                if narrow["m12"]:
-                    # Laura++ switches to a full SDP grid when a narrow band
-                    # lies on the diagonal m12 axis of the conventional
-                    # (m13,m23) integration plane.
-                    sample = SquareDalitzGrid(
+                if not has_narrow:
+                    sample = DalitzGaussLegendreGrid(
                         self.channel.parent_mass,
                         self.channel.daughter_masses,
+                        bin_width=self.normalization_bin_width,
+                        order_m13=self.normalization_order_m13,
+                        order_m23=self.normalization_order_m23,
+                    ).sample()
+                elif narrow["m12"]:
+                    print(
+                        "INFO DalitzPlotFitter normalization: narrow resonance "
+                        "band(s) detected ("
+                        + self._format_narrow_bands(narrow)
+                        + "); using adaptive integration and Square-Dalitz "
+                        "coordinates internally because m12 is diagonal in the "
+                        "conventional m13-m23 plane."
+                    )
+                    sample = AdaptiveSquareDalitzGrid(
+                        self.channel.parent_mass,
+                        self.channel.daughter_masses,
+                        narrow_resonances=self._flatten_narrow_resonances(narrow),
                         resolution=self.normalization_resolution,
                         pair=(0, 1),
-                        quadrature="gauss-legendre",
+                        window_n_widths=self.normalization_narrow_window,
+                        binning_factor=self.normalization_binning_factor,
                     ).sample()
                 else:
+                    print(
+                        "INFO DalitzPlotFitter normalization: narrow resonance "
+                        "band(s) detected ("
+                        + self._format_narrow_bands(narrow)
+                        + "); using adaptive Gauss-Legendre normalization."
+                    )
                     sample = AdaptiveDalitzGaussLegendreGrid(
                         self.channel.parent_mass,
                         self.channel.daughter_masses,
@@ -516,13 +595,31 @@ class DecayModel:
                         binning_factor=self.normalization_binning_factor,
                     ).sample()
             else:
-                sample = SquareDalitzGrid(
-                    self.channel.parent_mass,
-                    self.channel.daughter_masses,
-                    resolution=self.normalization_resolution,
-                    pair=self.normalization_pair,
-                    quadrature="gauss-legendre",
-                ).sample()
+                if not has_narrow:
+                    sample = SquareDalitzGrid(
+                        self.channel.parent_mass,
+                        self.channel.daughter_masses,
+                        resolution=self.normalization_resolution,
+                        pair=self.normalization_pair,
+                        quadrature="gauss-legendre",
+                    ).sample()
+                else:
+                    print(
+                        "INFO DalitzPlotFitter normalization: narrow resonance "
+                        "band(s) detected ("
+                        + self._format_narrow_bands(narrow)
+                        + "); using adaptive Square-Dalitz normalization."
+                    )
+                    sample = AdaptiveSquareDalitzGrid(
+                        self.channel.parent_mass,
+                        self.channel.daughter_masses,
+                        narrow_resonances=self._flatten_narrow_resonances(narrow),
+                        resolution=self.normalization_resolution,
+                        pair=self.normalization_pair,
+                        window_n_widths=self.normalization_narrow_window,
+                        binning_factor=self.normalization_binning_factor,
+                    ).sample()
+
             object.__setattr__(self, "_normalization_sample", sample)
         return sample
 
