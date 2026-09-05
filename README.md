@@ -214,15 +214,15 @@ See `docs/root_io.md` for details.
 
 ## Normalization
 
-Amplitude and PDF normalization use deterministic quadrature. The supported methods are `gauss-legendre`, `square-dalitz`, and `adaptive`.
+Amplitude and PDF normalization use deterministic quadrature. The supported normalization choices are `gauss-legendre`, `square-dalitz`, and `auto`.
 
-The `adaptive` method follows the Laura++ integration strategy for explicit narrow resonances. Resonances with nominal width at or below 20 MeV are refined locally in a mass window `m0 ± 5*Gamma`; the default fine target spacing is `Gamma/100`, while the rest of the conventional Dalitz plane keeps the 5 MeV target spacing. Identical-particle symmetrisation is included when locating narrow bands, and overlapping bands automatically use the finest requested spacing. If a narrow band lies on the diagonal `m12` axis of the conventional `(m13,m23)` plane, the integration switches to a full Square-Dalitz grid, matching the Laura++ prescription.
+The `auto` choice selects a Laura++-style integration strategy from the declared resonance content. Resonances with nominal width at or below 20 MeV are refined locally in a mass window `m0 ± 5*Gamma`; the default fine target spacing is `Gamma/100`, while the rest of the conventional Dalitz plane keeps the 5 MeV target spacing. Identical-particle symmetrisation is included when locating narrow bands, and overlapping bands automatically use the finest requested spacing. If a narrow band lies on the diagonal `m12` axis of the conventional `(m13,m23)` plane, the integration switches to a full Square-Dalitz grid, matching the Laura++ prescription.
 
 ```python
 model = DecayModel(
     channel,
     components,
-    normalization_method="adaptive",
+    normalization_method="auto",
     normalization_bin_width=0.005,       # 5 MeV outside narrow bands
     normalization_narrow_width=0.020,    # Gamma <= 20 MeV is narrow
     normalization_narrow_window=5.0,     # m0 ± 5 Gamma
@@ -231,7 +231,7 @@ model = DecayModel(
 )
 ```
 
-The integration scheme is fixed from the declared/initial resonance masses and widths, as in Laura++. It can be inspected through `model.adaptive_normalization_scheme`.
+With `normalization_method="auto"`, the integration scheme is fixed from the declared/initial resonance masses and widths, as in Laura++. The selected strategy can be inspected through `model.auto_normalization_scheme`.
 
 The original fixed grids remain available explicitly:
 
