@@ -159,7 +159,8 @@ class Rescattering2:
 
         m = jnp.asarray(mass)
         value = self.magnitude(m) * jnp.exp(1j * self.phase(m))
-        return jnp.where(m <= self.maximum_mass, value, 0.0j)
+        inside = (m >= self.threshold_mass) & (m <= self.maximum_mass)
+        return jnp.where(inside, value, 0.0j)
 
 
 __all__ = ["Rescattering2"]
