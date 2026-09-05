@@ -275,9 +275,12 @@ model = DecayModel(
 The Monte Carlo estimator follows the package-wide convention
 `mean(sample.weights * f)`. For an unweighted integration toy the weights are
 unit values; for a weighted toy they must be the integration/importance
-weights appropriate to the proposal that generated the events. A common
-overall factor in the weights cancels in normalized PDFs, component fit
-fractions and interference fractions.
+weights appropriate to the proposal that generated the events. Within one
+model, a common overall factor in the weights cancels in normalized PDFs,
+component fit fractions and interference fractions. In a simultaneous CP fit,
+the B+ and B- integration samples must use the same global weight convention,
+because a relative rescaling between charges would alter the integrated charge
+fraction.
 
 An unweighted sample may only be treated as unit-weight integration MC when
 its sampling distribution is appropriate for the desired integration measure.
