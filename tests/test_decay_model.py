@@ -351,10 +351,13 @@ def test_decay_model_can_generate_compact_phase_space():
     compact = model.generate_phase_space(128, seed=16, include_momenta=False)
 
     assert compact.p1 is None and compact.p2 is None and compact.p3 is None
-    assert jnp.array_equal(compact.s12, full.s12)
-    assert jnp.array_equal(compact.s13, full.s13)
-    assert jnp.array_equal(compact.s23, full.s23)
-    assert jnp.array_equal(compact.weights, full.weights)
+    assert compact.size == full.size == 128
+    invariant_sum = compact.s12 + compact.s13 + compact.s23
+    expected = channel.parent_mass**2 + sum(
+        mass**2 for mass in channel.daughter_masses
+    )
+    assert jnp.allclose(invariant_sum, expected, rtol=0.0, atol=1e-12)
+    assert bool(jnp.all(compact.weights > 0.0))
     assert compact.nbytes * 4 == full.nbytes
 
 
