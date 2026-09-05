@@ -1,12 +1,13 @@
-"""Physics-informed adaptive quadrature in Square-Dalitz coordinates.
+"""Mass-axis adaptive quadrature in Square-Dalitz coordinates.
 
-This grid keeps the user-selected Square-Dalitz coordinates but refines only
-cells crossed by declared narrow-resonance bands. The broad region retains an
-effective resolution comparable to SquareDalitzGrid.
+The Square-Dalitz transformation uses one invariant mass as the m-prime
+coordinate and a helicity angle as theta-prime. Narrow-resonance refinement is
+therefore applied only along m-prime. The theta-prime axis keeps the ordinary
+fixed Gauss-Legendre resolution.
 
-Refinement targets the Laura++ narrow-resonance convention: a band is relevant
-inside m0 +/- 5 Gamma and the local Gauss-Legendre node spacing is driven toward
-Gamma/100 by default.
+This avoids the expensive 2D quadtree refinement previously used here while
+retaining fine sampling for narrow structures aligned with the selected
+Square-Dalitz mass pair.
 """
 
 from __future__ import annotations
@@ -24,72 +25,13 @@ from dalitzplotfitter.kinematics import (
 )
 
 
-_PAIR_KEY = {
-    (0, 1): 0,
-    (0, 2): 1,
-    (1, 2): 2,
-}
-
-
 def _sorted_pair(pair: tuple[int, int]) -> tuple[int, int]:
     return tuple(sorted(pair))
 
 
-def _kallen(x, y, z):
-    return x**2 + y**2 + z**2 - 2.0 * x * y - 2.0 * x * z - 2.0 * y * z
-
-
-def _square_to_invariants_numpy(
-    mprime,
-    thetaprime,
-    *,
-    mother_mass: float,
-    masses: tuple[float, float, float],
-    pair: tuple[int, int],
-):
-    """NumPy version used only while constructing the adaptive cell layout."""
-
-    i, j = pair
-    k = next(index for index in range(3) if index not in pair)
-    mi, mj, mk = masses[i], masses[j], masses[k]
-
-    mp = np.asarray(mprime, dtype=np.float64)
-    tp = np.asarray(thetaprime, dtype=np.float64)
-
-    m_min = mi + mj
-    m_max = mother_mass - mk
-    delta_m = m_max - m_min
-
-    m_ij = m_min + 0.5 * delta_m * (1.0 + np.cos(np.pi * mp))
-    s_ij = m_ij**2
-    theta = np.pi * tp
-
-    e_i = (s_ij + mi**2 - mj**2) / (2.0 * m_ij)
-    e_k = (mother_mass**2 - s_ij - mk**2) / (2.0 * m_ij)
-    q = np.sqrt(np.maximum(_kallen(s_ij, mi**2, mj**2), 0.0)) / (2.0 * m_ij)
-    p = np.sqrt(
-        np.maximum(_kallen(mother_mass**2, s_ij, mk**2), 0.0)
-    ) / (2.0 * m_ij)
-
-    s_ik = mi**2 + mk**2 + 2.0 * (e_i * e_k - q * p * np.cos(theta))
-    total = mother_mass**2 + sum(value**2 for value in masses)
-    s_jk = total - s_ij - s_ik
-
-    values = {
-        _sorted_pair((i, j)): s_ij,
-        _sorted_pair((i, k)): s_ik,
-        _sorted_pair((j, k)): s_jk,
-    }
-    return (
-        values[(0, 1)],
-        values[(0, 2)],
-        values[(1, 2)],
-    )
-
-
 @dataclass(frozen=True)
 class AdaptiveSquareDalitzGrid:
-    """Locally refined Square-Dalitz Gauss-Legendre quadrature."""
+    """Square-Dalitz quadrature with adaptive refinement only in mass."""
 
     mother_mass: float
     masses: tuple[float, float, float]
@@ -120,148 +62,149 @@ class AdaptiveSquareDalitzGrid:
         if self.max_depth < 0:
             raise ValueError("max_depth must be non-negative")
 
-    def _cell_mass_ranges(
+    @property
+    def aligned_narrow_resonances(
         self,
-        mp_low: float,
-        mp_high: float,
-        tp_low: float,
-        tp_high: float,
-    ) -> tuple[tuple[float, float], ...]:
-        mp_mid = 0.5 * (mp_low + mp_high)
-        tp_mid = 0.5 * (tp_low + tp_high)
-        mp = np.asarray(
-            [
-                mp_low, mp_low, mp_low,
-                mp_mid, mp_mid, mp_mid,
-                mp_high, mp_high, mp_high,
-            ]
+    ) -> tuple[tuple[tuple[int, int], float, float], ...]:
+        selected = _sorted_pair(self.pair)
+        return tuple(
+            (pair, float(mass), float(width))
+            for pair, mass, width in self.narrow_resonances
+            if _sorted_pair(pair) == selected and float(width) > 0.0
         )
-        tp = np.asarray(
-            [
-                tp_low, tp_mid, tp_high,
-                tp_low, tp_mid, tp_high,
-                tp_low, tp_mid, tp_high,
-            ]
-        )
-        invariants = _square_to_invariants_numpy(
-            mp,
-            tp,
-            mother_mass=self.mother_mass,
-            masses=self.masses,
-            pair=self.pair,
-        )
-        ranges = []
-        for invariant in invariants:
-            mass = np.sqrt(np.maximum(invariant, 0.0))
-            ranges.append((float(np.min(mass)), float(np.max(mass))))
-        return tuple(ranges)
 
-    def _needs_refinement(
+    @property
+    def crossed_narrow_resonances(
         self,
-        mp_low: float,
-        mp_high: float,
-        tp_low: float,
-        tp_high: float,
-    ) -> bool:
-        ranges = self._cell_mass_ranges(mp_low, mp_high, tp_low, tp_high)
+    ) -> tuple[tuple[tuple[int, int], float, float], ...]:
+        selected = _sorted_pair(self.pair)
+        return tuple(
+            (pair, float(mass), float(width))
+            for pair, mass, width in self.narrow_resonances
+            if _sorted_pair(pair) != selected and float(width) > 0.0
+        )
 
-        for pair, pole_mass, pole_width in self.narrow_resonances:
-            if pole_width <= 0.0:
-                continue
-            index = _PAIR_KEY[_sorted_pair(pair)]
-            mass_low, mass_high = ranges[index]
+    @property
+    def mass_range(self) -> tuple[float, float]:
+        i, j = self.pair
+        bachelor = next(index for index in range(3) if index not in self.pair)
+        return (
+            self.masses[i] + self.masses[j],
+            self.mother_mass - self.masses[bachelor],
+        )
+
+    def _mass_from_mprime(self, mprime: float | np.ndarray) -> np.ndarray:
+        m_min, m_max = self.mass_range
+        mp = np.asarray(mprime, dtype=np.float64)
+        return m_min + 0.5 * (m_max - m_min) * (1.0 + np.cos(np.pi * mp))
+
+    def _needs_refinement(self, mp_low: float, mp_high: float) -> bool:
+        endpoint_masses = self._mass_from_mprime(np.asarray([mp_low, mp_high]))
+        mass_low = float(np.min(endpoint_masses))
+        mass_high = float(np.max(endpoint_masses))
+        mass_span = mass_high - mass_low
+
+        for _, pole_mass, pole_width in self.aligned_narrow_resonances:
             window_low = pole_mass - self.window_n_widths * pole_width
             window_high = pole_mass + self.window_n_widths * pole_width
             if mass_high < window_low or mass_low > window_high:
                 continue
 
             allowed_span = self.cell_order * pole_width / self.binning_factor
-            if mass_high - mass_low > allowed_span:
+            if mass_span > allowed_span:
                 return True
 
         return False
 
-    def _leaf_cells(self) -> list[tuple[float, float, float, float]]:
+    def _mprime_cells(self) -> tuple[tuple[float, float], ...]:
         base_cells = max(1, int(math.ceil(self.resolution / self.cell_order)))
         edges = np.linspace(0.0, 1.0, base_cells + 1)
 
-        stack: list[tuple[float, float, float, float, int]] = []
-        for i in range(base_cells):
-            for j in range(base_cells):
-                stack.append(
-                    (edges[i], edges[i + 1], edges[j], edges[j + 1], 0)
-                )
+        stack: list[tuple[float, float, int]] = [
+            (float(edges[index]), float(edges[index + 1]), 0)
+            for index in range(base_cells)
+        ]
+        leaves: list[tuple[float, float]] = []
 
-        leaves: list[tuple[float, float, float, float]] = []
         while stack:
-            mp_low, mp_high, tp_low, tp_high, depth = stack.pop()
-            if (
-                depth < self.max_depth
-                and self._needs_refinement(mp_low, mp_high, tp_low, tp_high)
-            ):
-                mp_mid = 0.5 * (mp_low + mp_high)
-                tp_mid = 0.5 * (tp_low + tp_high)
+            low, high, depth = stack.pop()
+            if depth < self.max_depth and self._needs_refinement(low, high):
+                middle = 0.5 * (low + high)
                 next_depth = depth + 1
-                stack.extend(
-                    [
-                        (mp_low, mp_mid, tp_low, tp_mid, next_depth),
-                        (mp_low, mp_mid, tp_mid, tp_high, next_depth),
-                        (mp_mid, mp_high, tp_low, tp_mid, next_depth),
-                        (mp_mid, mp_high, tp_mid, tp_high, next_depth),
-                    ]
-                )
+                stack.append((low, middle, next_depth))
+                stack.append((middle, high, next_depth))
             else:
-                leaves.append((mp_low, mp_high, tp_low, tp_high))
-        return leaves
+                leaves.append((low, high))
+
+        leaves.sort()
+        return tuple(leaves)
 
     @property
-    def leaf_cell_count(self) -> int:
-        return len(self._leaf_cells())
+    def mprime_cell_count(self) -> int:
+        return len(self._mprime_cells())
+
+    @property
+    def mprime_node_count(self) -> int:
+        return self.cell_order * self.mprime_cell_count
+
+    @property
+    def estimated_points(self) -> int:
+        return self.mprime_node_count * self.resolution
 
     def sample(self) -> PhaseSpaceSample:
         x, w = np.polynomial.legendre.leggauss(self.cell_order)
-        leaves = self._leaf_cells()
 
         mp_parts: list[np.ndarray] = []
-        tp_parts: list[np.ndarray] = []
-        raw_weight_parts: list[np.ndarray] = []
+        mp_weight_parts: list[np.ndarray] = []
+        for low, high in self._mprime_cells():
+            mp_parts.append(0.5 * (high - low) * x + 0.5 * (high + low))
+            mp_weight_parts.append(0.5 * (high - low) * w)
 
-        for mp_low, mp_high, tp_low, tp_high in leaves:
-            mp_nodes = 0.5 * (mp_high - mp_low) * x + 0.5 * (mp_high + mp_low)
-            tp_nodes = 0.5 * (tp_high - tp_low) * x + 0.5 * (tp_high + tp_low)
-            mp_weights = 0.5 * (mp_high - mp_low) * w
-            tp_weights = 0.5 * (tp_high - tp_low) * w
+        mprime_axis = np.concatenate(mp_parts)
+        mprime_weights = np.concatenate(mp_weight_parts)
 
-            mp, tp = np.meshgrid(mp_nodes, tp_nodes, indexing="ij")
-            wm, wt = np.meshgrid(mp_weights, tp_weights, indexing="ij")
+        theta_x, theta_w = np.polynomial.legendre.leggauss(self.resolution)
+        theta_axis = 0.5 * (theta_x + 1.0)
+        theta_weights = 0.5 * theta_w
 
-            mp_parts.append(mp.reshape(-1))
-            tp_parts.append(tp.reshape(-1))
-            raw_weight_parts.append((wm * wt).reshape(-1))
+        mprime, thetaprime = np.meshgrid(
+            mprime_axis,
+            theta_axis,
+            indexing="ij",
+        )
+        wm, wt = np.meshgrid(
+            mprime_weights,
+            theta_weights,
+            indexing="ij",
+        )
 
-        mp = np.concatenate(mp_parts)
-        tp = np.concatenate(tp_parts)
-        raw_weights = np.concatenate(raw_weight_parts)
+        mp = jnp.asarray(mprime.reshape(-1))
+        tp = jnp.asarray(thetaprime.reshape(-1))
 
-        mp_jax = jnp.asarray(mp)
-        tp_jax = jnp.asarray(tp)
         s12, s13, s23 = square_dalitz_to_invariants(
-            mp_jax,
-            tp_jax,
+            mp,
+            tp,
             mother_mass=self.mother_mass,
             masses=self.masses,
             pair=self.pair,
         )
         jacobian = square_dalitz_jacobian(
-            mp_jax,
-            tp_jax,
+            mp,
+            tp,
             mother_mass=self.mother_mass,
             masses=self.masses,
             pair=self.pair,
         )
 
-        weights = jacobian * jnp.asarray(raw_weights * float(mp.size))
-        return PhaseSpaceSample(s12=s12, s13=s13, s23=s23, weights=weights)
+        raw_weights = jnp.asarray((wm * wt).reshape(-1))
+        weights = jacobian * raw_weights * float(mp.size)
+
+        return PhaseSpaceSample(
+            s12=s12,
+            s13=s13,
+            s23=s23,
+            weights=weights,
+        )
 
 
 __all__ = ["AdaptiveSquareDalitzGrid"]
