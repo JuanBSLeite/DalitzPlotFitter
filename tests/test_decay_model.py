@@ -6,6 +6,7 @@ from dalitzplotfitter import (
     DecayModel,
     NonResonant,
     Parameter,
+    PhaseSpaceSample,
     RealImag,
     Resonance,
     enable_x64,
@@ -91,12 +92,78 @@ def test_internal_normalization_grid_is_lazy_and_reused():
     assert bool(jnp.any(first.weights != first.weights[0]))
 
 
-def test_decay_model_exposes_only_two_normalization_methods():
+def test_decay_model_rejects_unknown_normalization_methods():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     components = [NonResonant(RealImag(1.0, 0.0))]
     for method in ("equal_area", "adaptive", "auto"):
-        with pytest.raises(ValueError, match="gauss-legendre.*square-dalitz"):
+        with pytest.raises(ValueError, match="gauss-legendre.*square-dalitz.*toy-mc"):
             DecayModel(channel, components, normalization_method=method)
+
+
+def test_toy_mc_normalization_requires_sample():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    with pytest.raises(ValueError, match="requires normalization_sample"):
+        DecayModel(
+            channel,
+            [NonResonant(RealImag(1.0, 0.0))],
+            normalization_method="toy-mc",
+        )
+
+
+def test_external_toy_mc_sample_replaces_grid_for_all_normalization():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    toy = PhaseSpaceSample(
+        s12=jnp.asarray([0.20, 0.30, 0.40, 0.50]),
+        s13=jnp.asarray([0.60, 0.70, 0.80, 0.90]),
+        s23=jnp.asarray([2.20, 2.00, 1.80, 1.60]),
+        weights=jnp.asarray([0.5, 1.0, 1.5, 2.0]),
+    )
+    model = DecayModel(
+        channel,
+        [NonResonant(RealImag(1.0, 0.0))],
+        normalize_components=False,
+        normalization_sample=toy,
+    )
+
+    assert model.normalization_method == "toy-mc"
+    assert model.normalization_sample is toy
+    assert model.normalization_scheme == {
+        "method": "toy-mc",
+        "adaptive": False,
+        "sample_size": 4,
+        "weighted": True,
+    }
+
+    data = PhaseSpaceSample(
+        s12=toy.s12[:2],
+        s13=toy.s13[:2],
+        s23=toy.s23[:2],
+        weights=jnp.ones((2,)),
+    )
+    cache = model.prepare_cache(data)
+    _, normalization = cache.evaluate({})
+    assert jnp.allclose(normalization, jnp.mean(toy.weights))
+
+
+def test_unweighted_toy_mc_sample_uses_unit_weights():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    toy = PhaseSpaceSample(
+        s12=jnp.asarray([0.20, 0.30, 0.40]),
+        s13=jnp.asarray([0.60, 0.70, 0.80]),
+        s23=jnp.asarray([2.20, 2.00, 1.80]),
+        weights=jnp.ones((3,)),
+    )
+    model = DecayModel(
+        channel,
+        [NonResonant(RealImag(1.0, 0.0))],
+        normalize_components=False,
+        normalization_method="toy-mc",
+        normalization_sample=toy,
+    )
+    assert model.normalization_scheme["weighted"] is False
+    cache = model.prepare_cache(toy)
+    _, normalization = cache.evaluate({})
+    assert jnp.allclose(normalization, 1.0)
 
 
 def test_component_normalization_is_unit_diagonal_by_default():
