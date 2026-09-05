@@ -526,11 +526,14 @@ def test_square_dalitz_automatically_adapts_and_prints(capsys):
     assert scheme["method"] == "square-dalitz"
     assert scheme["adaptive"] is True
     assert scheme["narrow_resonances"]["m13"] == ((0.9, 0.01),)
+    assert scheme["adaptive_axis"] == "mprime"
+    assert scheme["mprime_nodes"] > 16
+    assert scheme["estimated_points"] == scheme["mprime_nodes"] * 16
 
     sample = model.normalization_sample
     output = capsys.readouterr().out
     assert "narrow resonance band(s) detected" in output
-    assert "adaptive Square-Dalitz normalization" in output
+    assert "adaptive Square-Dalitz refinement only along the mass axis" in output
     assert sample.size > 16**2
 
 
