@@ -413,6 +413,7 @@ The repository contains a progressive set of examples:
 - `notebooks/18_user_friendly_toy_generation.ipynb`: signal/background and CP pseudo-data generation;
 - `notebooks/19_toy_root_output.ipynb`: non-CP and CP toy generation with ROOT TTree output;
 - `notebooks/20_pdf_convolution_resolution.ipynb`: relativistic Breit-Wigner intensity convolved with Gaussian detector resolution.
+- `notebooks/22_flat_dalitz_toy_mc_integration.ipynb`: one million flat conventional-Dalitz events used as an external toy-MC normalization sample, with matrix/fit-fraction comparison and a non-CP closure fit.
 
 The B-to-Kpipi examples consistently use
 
