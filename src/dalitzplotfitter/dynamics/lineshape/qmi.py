@@ -5,10 +5,144 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import cached_property
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 
 from ..context import ResonanceContext
+
+
+@jax.custom_vjp
+def _linear_qmi_prepared(
+    magnitudes,
+    phases,
+    index,
+    fraction,
+    order,
+    starts,
+    ends,
+):
+    """Evaluate prepared linear QMI interpolation with a reduction-based VJP.
+
+    The ordinary reverse-mode derivative of indexed interpolation is expressed
+    by XLA as large scatter-add operations.  On consumer GPUs, FP64 atomics can
+    dominate the fit time by orders of magnitude.  Because linear QMI support
+    is local, each event contributes only to the two knots bordering its fixed
+    interval.  The custom VJP accumulates those contributions after grouping
+    events by interval, avoiding the large reverse scatter while preserving the
+    exact forward model.
+    """
+
+    index32 = jnp.asarray(index, dtype=jnp.int32)
+    fraction = jnp.asarray(fraction, dtype=magnitudes.dtype)
+    magnitude = (
+        magnitudes[index32]
+        + fraction * (magnitudes[index32 + 1] - magnitudes[index32])
+    )
+    phase = phases[index32] + fraction * (phases[index32 + 1] - phases[index32])
+    return magnitude * jnp.exp(1j * phase)
+
+
+def _linear_qmi_prepared_fwd(
+    magnitudes,
+    phases,
+    index,
+    fraction,
+    order,
+    starts,
+    ends,
+):
+    index32 = jnp.asarray(index, dtype=jnp.int32)
+    fraction = jnp.asarray(fraction, dtype=magnitudes.dtype)
+    magnitude = (
+        magnitudes[index32]
+        + fraction * (magnitudes[index32 + 1] - magnitudes[index32])
+    )
+    phase = phases[index32] + fraction * (phases[index32 + 1] - phases[index32])
+    exp_phase = jnp.exp(1j * phase)
+    value = magnitude * exp_phase
+    residual = (value, exp_phase, fraction, order, starts, ends)
+    return value, residual
+
+
+def _grouped_interval_sums(values, starts, ends):
+    """Sum a sorted value vector over the fixed QMI interpolation intervals."""
+
+    prefix = jnp.concatenate(
+        (
+            jnp.zeros((1,), dtype=values.dtype),
+            jnp.cumsum(values),
+        )
+    )
+    starts = jnp.asarray(starts, dtype=jnp.int32)
+    ends = jnp.asarray(ends, dtype=jnp.int32)
+    return prefix[ends] - prefix[starts]
+
+
+def _linear_qmi_prepared_bwd(residual, cotangent):
+    value, exp_phase, fraction, order, starts, ends = residual
+
+    # JAX's real-parameter/complex-output VJP convention is
+    # dL/dx = Re(g * dy/dx), where g is the incoming complex cotangent.
+    d_magnitude = jnp.real(cotangent * exp_phase)
+    d_phase = jnp.real(cotangent * (1j * value))
+
+    order = jnp.asarray(order, dtype=jnp.int32)
+    sorted_fraction = fraction[order]
+    sorted_d_magnitude = d_magnitude[order]
+    sorted_d_phase = d_phase[order]
+
+    left_magnitude = _grouped_interval_sums(
+        (1.0 - sorted_fraction) * sorted_d_magnitude,
+        starts,
+        ends,
+    )
+    right_magnitude = _grouped_interval_sums(
+        sorted_fraction * sorted_d_magnitude,
+        starts,
+        ends,
+    )
+    left_phase = _grouped_interval_sums(
+        (1.0 - sorted_fraction) * sorted_d_phase,
+        starts,
+        ends,
+    )
+    right_phase = _grouped_interval_sums(
+        sorted_fraction * sorted_d_phase,
+        starts,
+        ends,
+    )
+
+    magnitude_gradient = jnp.concatenate(
+        (
+            left_magnitude[:1],
+            left_magnitude[1:] + right_magnitude[:-1],
+            right_magnitude[-1:],
+        )
+    )
+    phase_gradient = jnp.concatenate(
+        (
+            left_phase[:1],
+            left_phase[1:] + right_phase[:-1],
+            right_phase[-1:],
+        )
+    )
+
+    return (
+        magnitude_gradient,
+        phase_gradient,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+
+
+_linear_qmi_prepared.defvjp(
+    _linear_qmi_prepared_fwd,
+    _linear_qmi_prepared_bwd,
+)
 
 
 def _interval_index_and_fraction(x, xp, prepared_index=None):
@@ -195,8 +329,15 @@ class QMI:
 
     def _interpolated_magnitude_phase(self, mass, prepared_index=None):
         prepared_fraction = None
+        prepared_order = None
+        prepared_starts = None
+        prepared_ends = None
         if isinstance(prepared_index, tuple):
-            prepared_index, prepared_fraction = prepared_index
+            if len(prepared_index) < 2:
+                raise ValueError("prepared QMI data are incomplete")
+            prepared_index, prepared_fraction, *extra = prepared_index
+            if extra:
+                prepared_order, prepared_starts, prepared_ends = extra
 
         if mass is None:
             if prepared_fraction is None:
@@ -293,11 +434,39 @@ class QMI:
         knot_s = jnp.asarray(self.knots, dtype=mass.dtype) ** 2
         index, fraction = _interval_index_and_fraction(mass**2, knot_s)
         dtype = jnp.int16 if self.size <= 32767 else jnp.int32
-        return index.astype(dtype), fraction
+        compact_index = index.astype(dtype)
+
+        # The fixed ordering and interval boundaries are used only by the
+        # custom reverse-mode rule.  They cost one int32 per event but replace
+        # the much more expensive FP64 scatter-add generated by generic AD.
+        order = jnp.argsort(index).astype(jnp.int32)
+        counts = jnp.bincount(index.astype(jnp.int32), length=self.size - 1)
+        ends = jnp.cumsum(counts).astype(jnp.int32)
+        starts = jnp.concatenate(
+            (jnp.zeros((1,), dtype=jnp.int32), ends[:-1])
+        )
+        return compact_index, fraction, order, starts, ends
 
     def evaluate_prepared(self, mass, prepared_index, context: ResonanceContext):
         if int(context.spin) != 0:
             raise ValueError("QMI is defined for a scalar S-wave")
+
+        if self.interpolation == "linear" and isinstance(prepared_index, tuple):
+            if len(prepared_index) >= 5:
+                index, fraction, order, starts, ends = prepared_index[:5]
+                dtype_source = jnp.asarray(fraction)
+                magnitudes = jnp.asarray(self.magnitudes, dtype=dtype_source.dtype)
+                phases = jnp.asarray(self.phases, dtype=dtype_source.dtype)
+                return _linear_qmi_prepared(
+                    magnitudes,
+                    phases,
+                    index,
+                    fraction,
+                    order,
+                    starts,
+                    ends,
+                )
+
         magnitude, phase = self._interpolated_magnitude_phase(
             mass, prepared_index=prepared_index
         )
