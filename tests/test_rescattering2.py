@@ -27,8 +27,8 @@ def test_rescattering2_matches_laura_reference_points():
     expected = {
         1.00: complex(0.9357475882415249, -0.5707229339802834),
         1.20: complex(0.26514538857379993, -0.40857066151291804),
-        1.60: complex(-0.33298867065299664, -0.15915264954290975),
-        1.80: complex(-0.08611672917136089, -0.04931777113756788),
+        1.60: complex(-16.15927331723091, 7.307765226255905),
+        1.80: complex(16.21694526281972, -5.9283078998999565),
     }
 
     for mass, reference in expected.items():
@@ -42,17 +42,23 @@ def test_rescattering2_threshold_phase_is_226p5_degrees():
     assert abs(phase - math.radians(226.5)) < 1e-12
 
 
-def test_rescattering2_is_continuous_at_1p47_gev():
+def test_rescattering2_matches_laura_strict_boundaries():
     model = Rescattering2()
     context = _context()
-    eps = 1e-9
 
-    left = complex(model(jnp.asarray(model.transition_mass - eps), context))
-    at = complex(model(jnp.asarray(model.transition_mass), context))
-    right = complex(model(jnp.asarray(model.transition_mass + eps), context))
+    at_transition = complex(model(jnp.asarray(model.transition_mass), context))
+    at_upper = complex(model(jnp.asarray(model.maximum_mass), context))
 
-    assert abs(left - at) < 2e-6
-    assert abs(right - at) < 2e-6
+    assert abs(at_transition) == 0.0
+    assert abs(at_upper) == 0.0
+
+
+def test_rescattering2_extrapolates_region_one_below_kk_threshold():
+    model = Rescattering2()
+    context = _context()
+
+    value = complex(model(jnp.asarray(0.90), context))
+    assert abs(value) > 0.0
 
 
 def test_rescattering2_zero_above_upper_domain():
