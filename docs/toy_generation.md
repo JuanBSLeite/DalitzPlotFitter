@@ -138,6 +138,38 @@ The benchmark workflow is manual (`workflow_dispatch`) because the 1,000,000-eve
 
 Passing `pool_size` or `batch_size` together with the default inverse-transform method is rejected rather than silently ignored. If those options are needed, set `method="accept-reject"` explicitly.
 
+## Compact toys for memory-constrained fits
+
+By default generated toys retain reconstructed four-momenta together with the
+three Dalitz invariants. If the downstream fit, plotting, efficiency and veto
+models use only `s12`, `s13` and `s23`, the four-momenta can be omitted:
+
+```python
+toy = generate_toy(
+    model,
+    1_000_000,
+    parameters=truth,
+    seed=2,
+    include_momenta=False,
+)
+```
+
+For float64 arrays this reduces the retained array payload for one million
+unweighted events from about 128 MiB to about 32 MiB. In the inverse-transform
+path the momentum reconstruction is skipped entirely, so the peak memory and
+generation work are also reduced. The Dalitz invariants and event weights are
+identical to a generation with the same seed and `include_momenta=True`.
+
+Existing samples can be compacted with
+
+```python
+compact = sample.without_momenta()
+print(compact.nbytes)
+```
+
+The default remains `include_momenta=True` for backward compatibility and for
+workflows that need momentum branches in ROOT output.
+
 ## Save a non-CP toy to ROOT
 
 ```python
