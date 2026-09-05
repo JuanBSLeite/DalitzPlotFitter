@@ -144,6 +144,17 @@ def test_external_toy_mc_sample_replaces_grid_for_all_normalization():
     _, normalization = cache.evaluate({})
     assert jnp.allclose(normalization, jnp.mean(toy.weights))
 
+    normalized_model = DecayModel(
+        channel,
+        [NonResonant(RealImag(1.0, 0.0))],
+        normalization_sample=toy,
+    )
+    component = normalized_model.amplitude_model.components[0]
+    assert jnp.allclose(
+        normalized_model._component_scale(component),
+        1.0 / jnp.sqrt(jnp.mean(toy.weights)),
+    )
+
 
 def test_unweighted_toy_mc_sample_uses_unit_weights():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
