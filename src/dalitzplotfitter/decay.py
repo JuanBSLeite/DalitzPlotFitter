@@ -295,8 +295,10 @@ class DecayModel:
         tensor-product Gauss-Legendre quadrature in the conventional (m13,m23)
         mass plane. "square-dalitz" uses Gauss-Legendre quadrature in
         Square-Dalitz (m-prime, theta-prime) coordinates including the
-        coordinate Jacobian. Narrow-resonance adaptation is automatic in both
-        methods and is not a separate method.
+        coordinate Jacobian. "toy-mc" uses an externally supplied
+        normalization sample and its event weights directly. Supplying
+        normalization_sample automatically selects "toy-mc". Narrow-resonance
+        adaptation applies only to the deterministic grid methods.
     normalization_pair:
         Daughter-index pair (i,j) whose invariant mass defines the Square-
         Dalitz mass coordinate. Indices follow the daughter ordering in
@@ -326,6 +328,12 @@ class DecayModel:
     normalization_binning_factor:
         Narrow-resonance refinement factor. The target local mass spacing is
         Gamma / normalization_binning_factor. Default: 100.0, i.e. Gamma/100.
+    normalization_sample:
+        Optional external Monte Carlo sample used for every normalization
+        integral. The package convention is mean(sample.weights * f). A
+        weighted toy should therefore contain integration/importance weights;
+        an unweighted toy uses unit weights. Any common overall weight factor
+        cancels in normalized PDFs and fit/interference fractions.
 
     Notes
     -----
@@ -555,7 +563,16 @@ class DecayModel:
 
     @property
     def normalization_scheme(self) -> dict[str, object]:
-        """Describe the actual deterministic normalization strategy."""
+        """Describe the active normalization strategy."""
+
+        if self.normalization_method == "toy-mc":
+            sample = self.normalization_sample
+            return {
+                "method": "toy-mc",
+                "adaptive": False,
+                "sample_size": sample.size,
+                "weighted": bool(jnp.any(jnp.asarray(sample.weights) != 1.0)),
+            }
 
         narrow = self._adaptive_narrow_resonances()
         has_narrow = any(narrow[axis] for axis in ("m12", "m13", "m23"))
