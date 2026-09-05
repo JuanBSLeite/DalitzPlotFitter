@@ -861,8 +861,21 @@ class DecayModel:
             self._compact_data_kernels[key] = kernel
         return kernel
 
-    def generate_phase_space(self, size: int, *, seed: int | None = None) -> PhaseSpaceSample:
-        return PhaseSpaceMC(self.channel.parent_mass, self.channel.daughter_masses).generate(size, seed=seed)
+    def generate_phase_space(
+        self,
+        size: int,
+        *,
+        seed: int | None = None,
+        include_momenta: bool = True,
+    ) -> PhaseSpaceSample:
+        return PhaseSpaceMC(
+            self.channel.parent_mass,
+            self.channel.daughter_masses,
+        ).generate(
+            size,
+            seed=seed,
+            include_momenta=include_momenta,
+        )
 
     def _component_scale(self, component: AmplitudeComponent, values=None):
         normalize = (
