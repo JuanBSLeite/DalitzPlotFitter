@@ -76,6 +76,7 @@ class PreparedInverseToyGenerator:
         *,
         seed: int | None = None,
         shuffle: bool = True,
+        include_momenta: bool = True,
     ) -> PhaseSpaceSample:
         if size <= 0:
             raise ValueError("toy size must be positive")
@@ -95,12 +96,20 @@ class PreparedInverseToyGenerator:
         samples: list[PhaseSpaceSample] = []
         if n_signal:
             samples.append(
-                self.signal_sampler.generate(n_signal, seed=_derived_seed(seed, 1))
+                self.signal_sampler.generate(
+                    n_signal,
+                    seed=_derived_seed(seed, 1),
+                    include_momenta=include_momenta,
+                )
             )
         for index, (sampler, count) in enumerate(zip(self.background_samplers, counts)):
             if int(count):
                 samples.append(
-                    sampler.generate(int(count), seed=_derived_seed(seed, 100 + index))
+                    sampler.generate(
+                        int(count),
+                        seed=_derived_seed(seed, 100 + index),
+                        include_momenta=include_momenta,
+                    )
                 )
         toy = _merge_samples(samples)
         return _shuffle(toy, seed=seed, offset=100) if shuffle else toy
@@ -173,6 +182,7 @@ def generate_signal_toy_inverse(
     seed: int | None = None,
     resolution: int = 1024,
     quantile_resolution: int | None = None,
+    include_momenta: bool = True,
 ) -> PhaseSpaceSample:
     prepared = prepare_inverse_toy_generator(
         model,
@@ -182,7 +192,12 @@ def generate_signal_toy_inverse(
         resolution=resolution,
         quantile_resolution=quantile_resolution,
     )
-    return prepared.generate(size, seed=seed, shuffle=False)
+    return prepared.generate(
+        size,
+        seed=seed,
+        shuffle=False,
+        include_momenta=include_momenta,
+    )
 
 
 def generate_toy_inverse(
@@ -198,6 +213,7 @@ def generate_toy_inverse(
     shuffle: bool = True,
     resolution: int = 1024,
     quantile_resolution: int | None = None,
+    include_momenta: bool = True,
 ) -> PhaseSpaceSample:
     prepared = prepare_inverse_toy_generator(
         model,
@@ -209,7 +225,12 @@ def generate_toy_inverse(
         resolution=resolution,
         quantile_resolution=quantile_resolution,
     )
-    return prepared.generate(size, seed=seed, shuffle=shuffle)
+    return prepared.generate(
+        size,
+        seed=seed,
+        shuffle=shuffle,
+        include_momenta=include_momenta,
+    )
 
 
 def generate_cp_toy_inverse(
@@ -228,6 +249,7 @@ def generate_cp_toy_inverse(
     shuffle: bool = True,
     resolution: int = 1024,
     quantile_resolution: int | None = None,
+    include_momenta: bool = True,
 ) -> tuple[PhaseSpaceSample, PhaseSpaceSample]:
     """Generate a simultaneous CP toy using inverse-transform component samplers."""
 
@@ -279,11 +301,19 @@ def generate_cp_toy_inverse(
     minus_samples: list[PhaseSpaceSample] = []
     if n_signal_plus:
         plus_samples.append(
-            plus_signal_sampler.generate(n_signal_plus, seed=_derived_seed(seed, 10))
+            plus_signal_sampler.generate(
+                n_signal_plus,
+                seed=_derived_seed(seed, 10),
+                include_momenta=include_momenta,
+            )
         )
     if n_signal_minus:
         minus_samples.append(
-            minus_signal_sampler.generate(n_signal_minus, seed=_derived_seed(seed, 20))
+            minus_signal_sampler.generate(
+                n_signal_minus,
+                seed=_derived_seed(seed, 20),
+                include_momenta=include_momenta,
+            )
         )
 
     bg_mix = _background_weights(backgrounds)
@@ -326,7 +356,11 @@ def generate_cp_toy_inverse(
                 quantile_resolution=quantile_resolution,
             )
             plus_samples.append(
-                sampler.generate(count_plus, seed=_derived_seed(seed, 100 + index))
+                sampler.generate(
+                    count_plus,
+                    seed=_derived_seed(seed, 100 + index),
+                    include_momenta=include_momenta,
+                )
             )
         if count_minus:
             def minus_background_density(data, background=background):
@@ -342,7 +376,11 @@ def generate_cp_toy_inverse(
                 quantile_resolution=quantile_resolution,
             )
             minus_samples.append(
-                sampler.generate(count_minus, seed=_derived_seed(seed, 200 + index))
+                sampler.generate(
+                    count_minus,
+                    seed=_derived_seed(seed, 200 + index),
+                    include_momenta=include_momenta,
+                )
             )
 
     def finish(samples, model, offset):
