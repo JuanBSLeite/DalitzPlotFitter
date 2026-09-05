@@ -174,6 +174,60 @@ def main() -> None:
     point = np.asarray([parameter.value for parameter in free], dtype=float)
     qmi_phase_index = names.index("S_QMI.phase[8]")
 
+    fixed = {
+        parameter.name: parameter.value
+        for parameter in session.parameters
+        if parameter.fixed
+    }
+    objective_mapping = session.objective
+
+    def vector_mapping(vector):
+        mapping = dict(fixed)
+        mapping.update({name: vector[i] for i, name in enumerate(names)})
+        return mapping
+
+    def vector_objective(vector):
+        return objective_mapping(vector_mapping(vector))
+
+    def vector_dynamic(vector):
+        return cache._evaluate_dynamic_components(vector_mapping(vector))
+
+    value_only = jax.jit(vector_objective)
+    dynamic_only = jax.jit(vector_dynamic)
+    matrix_only = jax.jit(lambda dynamic_norm: cache._matrix_from_dynamic(dynamic_norm))
+
+    point_device = jnp.asarray(point)
+
+    start = time.perf_counter()
+    first_value_only = value_only(point_device)
+    first_value_only.block_until_ready()
+    first_value_only_seconds = time.perf_counter() - start
+
+    dynamic_data, dynamic_norm = dynamic_only(point_device)
+    _block((dynamic_data, dynamic_norm))
+    matrix_only(dynamic_norm).block_until_ready()
+
+    forward_times = []
+    matrix_times = []
+    value_times = []
+    for i in range(args.repeats):
+        shifted = point.copy()
+        shifted[qmi_phase_index] += 1e-6 * (i + 1)
+        shifted_device = jnp.asarray(shifted)
+
+        start = time.perf_counter()
+        dyn_data, dyn_norm = dynamic_only(shifted_device)
+        _block((dyn_data, dyn_norm))
+        forward_times.append(time.perf_counter() - start)
+
+        start = time.perf_counter()
+        matrix_only(dyn_norm).block_until_ready()
+        matrix_times.append(time.perf_counter() - start)
+
+        start = time.perf_counter()
+        value_only(shifted_device).block_until_ready()
+        value_times.append(time.perf_counter() - start)
+
     start = time.perf_counter()
     first = fcn(*point)
     first_gradient = grad(*point)
@@ -205,6 +259,16 @@ def main() -> None:
         "qmi_knots": 20,
         "cache_prepare_seconds": cache_prepare_seconds,
         "first_jitted_objective_seconds": first_seconds,
+        "first_value_only_seconds": first_value_only_seconds,
+        "steady_qmi_forward_seconds_mean": sum(forward_times) / len(forward_times),
+        "steady_qmi_forward_seconds_min": min(forward_times),
+        "steady_qmi_forward_seconds_max": max(forward_times),
+        "steady_matrix_update_seconds_mean": sum(matrix_times) / len(matrix_times),
+        "steady_matrix_update_seconds_min": min(matrix_times),
+        "steady_matrix_update_seconds_max": max(matrix_times),
+        "steady_value_only_seconds_mean": sum(value_times) / len(value_times),
+        "steady_value_only_seconds_min": min(value_times),
+        "steady_value_only_seconds_max": max(value_times),
         "steady_objective_seconds_mean": sum(times) / len(times),
         "steady_objective_seconds_min": min(times),
         "steady_objective_seconds_max": max(times),
