@@ -525,11 +525,25 @@ class DecayModel:
                 "narrow_resonances": narrow,
             }
 
+        square_grid = AdaptiveSquareDalitzGrid(
+            self.channel.parent_mass,
+            self.channel.daughter_masses,
+            narrow_resonances=self._flatten_narrow_resonances(narrow),
+            resolution=self.normalization_resolution,
+            pair=self.normalization_pair,
+            window_n_widths=self.normalization_narrow_window,
+            binning_factor=self.normalization_binning_factor,
+        )
         return {
             "method": "square-dalitz",
-            "adaptive": True,
+            "adaptive": bool(square_grid.aligned_narrow_resonances),
+            "adaptive_axis": "mprime",
             "pair": self.normalization_pair,
-            "resolution": self.normalization_resolution,
+            "theta_resolution": self.normalization_resolution,
+            "mprime_nodes": square_grid.mprime_node_count,
+            "estimated_points": square_grid.estimated_points,
+            "aligned_narrow_resonances": square_grid.aligned_narrow_resonances,
+            "crossed_narrow_resonances": square_grid.crossed_narrow_resonances,
             "narrow_resonances": narrow,
         }
 
@@ -560,15 +574,7 @@ class DecayModel:
                         order_m23=self.normalization_order_m23,
                     ).sample()
                 elif narrow["m12"]:
-                    print(
-                        "INFO DalitzPlotFitter normalization: narrow resonance "
-                        "band(s) detected ("
-                        + self._format_narrow_bands(narrow)
-                        + "); using adaptive integration and Square-Dalitz "
-                        "coordinates internally because m12 is diagonal in the "
-                        "conventional m13-m23 plane."
-                    )
-                    sample = AdaptiveSquareDalitzGrid(
+                    grid = AdaptiveSquareDalitzGrid(
                         self.channel.parent_mass,
                         self.channel.daughter_masses,
                         narrow_resonances=self._flatten_narrow_resonances(narrow),
@@ -576,7 +582,19 @@ class DecayModel:
                         pair=(0, 1),
                         window_n_widths=self.normalization_narrow_window,
                         binning_factor=self.normalization_binning_factor,
-                    ).sample()
+                    )
+                    print(
+                        "INFO DalitzPlotFitter normalization: narrow resonance "
+                        "band(s) detected ("
+                        + self._format_narrow_bands(narrow)
+                        + "); using Square-Dalitz coordinates internally because "
+                        "m12 is diagonal in the conventional m13-m23 plane. "
+                        "Adaptive refinement is applied only along the mass "
+                        f"axis m': {grid.mprime_node_count} m' nodes x "
+                        f"{self.normalization_resolution} theta' nodes "
+                        f"({grid.estimated_points:,} points)."
+                    )
+                    sample = grid.sample()
                 else:
                     print(
                         "INFO DalitzPlotFitter normalization: narrow resonance "
@@ -604,13 +622,7 @@ class DecayModel:
                         quadrature="gauss-legendre",
                     ).sample()
                 else:
-                    print(
-                        "INFO DalitzPlotFitter normalization: narrow resonance "
-                        "band(s) detected ("
-                        + self._format_narrow_bands(narrow)
-                        + "); using adaptive Square-Dalitz normalization."
-                    )
-                    sample = AdaptiveSquareDalitzGrid(
+                    grid = AdaptiveSquareDalitzGrid(
                         self.channel.parent_mass,
                         self.channel.daughter_masses,
                         narrow_resonances=self._flatten_narrow_resonances(narrow),
@@ -618,7 +630,42 @@ class DecayModel:
                         pair=self.normalization_pair,
                         window_n_widths=self.normalization_narrow_window,
                         binning_factor=self.normalization_binning_factor,
-                    ).sample()
+                    )
+                    if grid.aligned_narrow_resonances:
+                        print(
+                            "INFO DalitzPlotFitter normalization: narrow resonance "
+                            "band(s) detected ("
+                            + self._format_narrow_bands(narrow)
+                            + "); applying adaptive Square-Dalitz refinement only "
+                            "along the mass axis m'. "
+                            f"Grid: {grid.mprime_node_count} m' nodes x "
+                            f"{self.normalization_resolution} theta' nodes "
+                            f"({grid.estimated_points:,} points; base "
+                            f"{self.normalization_resolution**2:,})."
+                        )
+                        if grid.crossed_narrow_resonances:
+                            print(
+                                "INFO DalitzPlotFitter normalization: crossed narrow "
+                                "band(s) are kept on the standard theta' resolution; "
+                                "only resonances aligned with normalization_pair "
+                                "refine m'."
+                            )
+                        sample = grid.sample()
+                    else:
+                        print(
+                            "INFO DalitzPlotFitter normalization: narrow resonance "
+                            "band(s) detected, but none is aligned with the selected "
+                            "Square-Dalitz mass pair; keeping the standard "
+                            f"{self.normalization_resolution} x "
+                            f"{self.normalization_resolution} grid."
+                        )
+                        sample = SquareDalitzGrid(
+                            self.channel.parent_mass,
+                            self.channel.daughter_masses,
+                            resolution=self.normalization_resolution,
+                            pair=self.normalization_pair,
+                            quadrature="gauss-legendre",
+                        ).sample()
 
             object.__setattr__(self, "_normalization_sample", sample)
         return sample
