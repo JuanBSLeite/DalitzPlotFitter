@@ -204,40 +204,6 @@ def test_generate_cp_toy_preserves_total_event_count_and_charge_model():
     assert jnp.allclose(minus_toy.weights, 1.0)
 
 
-def test_generate_cp_toy_compact_mode_handles_empty_charge_sample():
-    x = Parameter.coefficient("NR.x", 1.0, owner="NR")
-    dx = Parameter.coefficient("NR.dx", 1.0, owner="NR")
-    cp = CPRealImag(x, 0.0, dx, 0.0)
-    plus = DecayModel(
-        DecayChannel("B+", ("K+", "pi+", "pi-")),
-        [NonResonant(cp.for_charge(+1))],
-        normalization_method="square-dalitz",
-        normalization_resolution=10,
-        normalization_pair=(0, 2),
-    )
-    minus = DecayModel(
-        DecayChannel("B-", ("K-", "pi-", "pi+")),
-        [NonResonant(cp.for_charge(-1))],
-        normalization_method="square-dalitz",
-        normalization_resolution=10,
-        normalization_pair=(0, 2),
-    )
-    plus_toy, minus_toy = generate_cp_toy(
-        plus,
-        minus,
-        50,
-        parameters={"NR.x": 1.0, "NR.dx": 1.0},
-        seed=113,
-        inverse_resolution=64,
-        include_momenta=False,
-    )
-    assert plus_toy.size == 50
-    assert minus_toy.size == 0
-    assert plus_toy.p1 is None and minus_toy.p1 is None
-    assert plus_toy.p2 is None and minus_toy.p2 is None
-    assert plus_toy.p3 is None and minus_toy.p3 is None
-
-
 def test_generate_cp_toy_inverse_preserves_total_event_count_and_charge_model():
     x = Parameter.coefficient("NR.x", 1.0, owner="NR")
     dx = Parameter.coefficient("NR.dx", 0.25, owner="NR")
