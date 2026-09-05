@@ -267,7 +267,71 @@ class _ResolvedDirectDynamics:
 
 @dataclass(frozen=True, init=False)
 class DecayModel:
-    """Build a coherent model with deterministic quadrature normalization."""
+    """Build a coherent amplitude model with deterministic DP normalization.
+
+    Parameters
+    ----------
+    channel:
+        Three-body decay channel defining masses, particle ordering, and the
+        kinematic Dalitz-plot boundary.
+    components:
+        Coherent amplitude components: Resonance, NonResonant, or
+        DalitzAmplitude objects.
+    normalize_components:
+        If True, each dynamical component is individually scaled by
+        1/sqrt(integral |F_i|^2 dPhi) before its complex coefficient is
+        applied. A component-level normalize_component value overrides this
+        global default. This is a component convention; the total coherent PDF
+        is still normalized separately.
+    normalization_resolution:
+        Nominal one-dimensional Square-Dalitz resolution. For
+        normalization_method="square-dalitz", this is the standard number of
+        Gauss-Legendre nodes per Square-Dalitz axis before automatic narrow-
+        resonance mass-axis refinement. It is also used if conventional
+        Gauss-Legendre normalization switches internally to Square Dalitz for
+        a narrow m12 resonance. Default: 1000.
+    normalization_method:
+        Normalization coordinate/integration strategy. "gauss-legendre" uses
+        tensor-product Gauss-Legendre quadrature in the conventional (m13,m23)
+        mass plane. "square-dalitz" uses Gauss-Legendre quadrature in
+        Square-Dalitz (m-prime, theta-prime) coordinates including the
+        coordinate Jacobian. Narrow-resonance adaptation is automatic in both
+        methods and is not a separate method.
+    normalization_pair:
+        Daughter-index pair (i,j) whose invariant mass defines the Square-
+        Dalitz mass coordinate. Indices follow the daughter ordering in
+        channel and must be two distinct values from 0,1,2. Default: (0,1),
+        corresponding to m12.
+    normalization_bin_width:
+        Target broad-region mass spacing in GeV for conventional
+        Gauss-Legendre normalization. If explicit axis orders are not given,
+        the m13 and m23 orders are their kinematic mass ranges divided by this
+        value (rounded upward). It is also the coarse scale for adaptive
+        conventional-DP integration. Default: 0.005 GeV (5 MeV).
+    normalization_order_m13:
+        Optional explicit Gauss-Legendre order along m13 for the non-adaptive
+        conventional-DP grid. None means derive it from
+        normalization_bin_width. Default: None.
+    normalization_order_m23:
+        Optional explicit Gauss-Legendre order along m23 for the non-adaptive
+        conventional-DP grid. None means derive it from
+        normalization_bin_width. Default: None.
+    normalization_narrow_width:
+        Maximum nominal resonance width in GeV for automatic narrow-resonance
+        treatment. Default: 0.020 GeV (20 MeV). The classification uses the
+        declared/initial resonance parameters.
+    normalization_narrow_window:
+        Half-width of the fine region around a narrow pole, in units of Gamma.
+        The default 5.0 gives m0 +/- 5*Gamma.
+    normalization_binning_factor:
+        Narrow-resonance refinement factor. The target local mass spacing is
+        Gamma / normalization_binning_factor. Default: 100.0, i.e. Gamma/100.
+
+    Notes
+    -----
+    The narrow-resonance integration scheme is fixed from the nominal/initial
+    masses and widths and is not rebuilt while those parameters float in a fit.
+    """
 
     channel: DecayChannel
     components: tuple[Resonance | NonResonant | DalitzAmplitude, ...]
