@@ -444,6 +444,15 @@ def test_prepared_cache_recomputes_floating_dynamics():
         "rho.x": 0.8,
         "rho.y": 0.2,
     }
+    assert cache.data is not None
+    assert cache.normalization_data is not None
+    assert "p1" not in cache.data and "p2" not in cache.data and "p3" not in cache.data
+    assert (
+        "p1" not in cache.normalization_data
+        and "p2" not in cache.normalization_data
+        and "p3" not in cache.normalization_data
+    )
+
     intensity_initial, norm_initial = cache.evaluate(initial)
     intensity_shifted, norm_shifted = cache.evaluate(shifted)
     assert not jnp.allclose(intensity_initial, intensity_shifted)
