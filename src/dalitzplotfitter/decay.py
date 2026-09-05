@@ -337,7 +337,7 @@ class DecayModel:
     components: tuple[Resonance | NonResonant | DalitzAmplitude, ...]
     normalize_components: bool
     normalization_resolution: int
-    normalization_method: Literal["gauss-legendre", "square-dalitz"]
+    normalization_method: Literal["gauss-legendre", "square-dalitz", "toy-mc"]
     normalization_pair: tuple[int, int]
     normalization_bin_width: float
     normalization_order_m13: int | None
@@ -358,7 +358,7 @@ class DecayModel:
         *,
         normalize_components: bool = True,
         normalization_resolution: int = 1000,
-        normalization_method: Literal["gauss-legendre", "square-dalitz"] = "gauss-legendre",
+        normalization_method: Literal["gauss-legendre", "square-dalitz", "toy-mc"] = "gauss-legendre",
         normalization_pair: tuple[int, int] = (0, 1),
         normalization_bin_width: float = 0.005,
         normalization_order_m13: int | None = None,
@@ -366,12 +366,31 @@ class DecayModel:
         normalization_narrow_width: float = 0.020,
         normalization_narrow_window: float = 5.0,
         normalization_binning_factor: float = 100.0,
+        normalization_sample: PhaseSpaceSample | None = None,
     ) -> None:
         if normalization_resolution < 2:
             raise ValueError("normalization_resolution must be at least 2")
-        if normalization_method not in ("gauss-legendre", "square-dalitz"):
+        if normalization_method not in ("gauss-legendre", "square-dalitz", "toy-mc"):
             raise ValueError(
-                "normalization_method must be either 'gauss-legendre' or 'square-dalitz'"
+                "normalization_method must be 'gauss-legendre', 'square-dalitz', or 'toy-mc'"
+            )
+        if normalization_sample is not None:
+            if not isinstance(normalization_sample, PhaseSpaceSample):
+                raise TypeError("normalization_sample must be a PhaseSpaceSample")
+            if normalization_sample.size < 1:
+                raise ValueError("normalization_sample must contain at least one event")
+            expected_shape = (normalization_sample.size,)
+            for name in ("s12", "s13", "s23", "weights"):
+                shape = tuple(jnp.asarray(getattr(normalization_sample, name)).shape)
+                if shape != expected_shape:
+                    raise ValueError(
+                        f"normalization_sample.{name} must have shape "
+                        f"{expected_shape}, got {shape}"
+                    )
+            normalization_method = "toy-mc"
+        elif normalization_method == "toy-mc":
+            raise ValueError(
+                "normalization_method='toy-mc' requires normalization_sample"
             )
         if len(set(normalization_pair)) != 2 or any(
             index not in (0, 1, 2) for index in normalization_pair
@@ -409,7 +428,7 @@ class DecayModel:
         object.__setattr__(
             self, "normalization_binning_factor", float(normalization_binning_factor)
         )
-        object.__setattr__(self, "_normalization_sample", None)
+        object.__setattr__(self, "_normalization_sample", normalization_sample)
         object.__setattr__(self, "_amplitude_model", None)
         object.__setattr__(self, "_compact_prepare_kernels", {})
         object.__setattr__(self, "_compact_data_kernels", {})
