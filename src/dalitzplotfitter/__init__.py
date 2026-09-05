@@ -49,7 +49,7 @@ from .dynamics import (
     physical_bin_mask,
 )
 from .fit import Minimizer, MultiStartResult, Parameter, ParameterKind
-from .integration import AdaptiveDalitzGaussLegendreGrid, DalitzGaussLegendreGrid
+from .integration import DalitzGaussLegendreGrid
 from .io import (
     histogram_background_from_root,
     histogram_efficiency_from_root,
@@ -115,7 +115,7 @@ __all__ = [
     "ConvolvedPDF1D", "CovariantAngular", "CovariantKinematics", "DalitzAmplitude",
     "DecayChannel", "DecayModel", "Exponential1D", "FactorizedDensity", "FitSession",
     "Flatte", "FunctionalVeto", "Gaussian1D", "GaussianConstraint", "GaussianResolution1D",
-    "GooFitLegacyAngular", "GounarisSakurai", "Histogram1D", "KMatrix", "LASS", "LineshapeIntensity1D", "AdaptiveDalitzGaussLegendreGrid", "DalitzGaussLegendreGrid",
+    "GooFitLegacyAngular", "GounarisSakurai", "Histogram1D", "KMatrix", "LASS", "LineshapeIntensity1D", "DalitzGaussLegendreGrid",
     "MassWindowVeto", "Minimizer", "MultiBackgroundNLL", "MultiStartResult", "NonResonant",
     "Parameter", "ParameterKind", "PhaseSpaceMC", "PhaseSpaceSample", "Pole",
     "PreparedAmplitudeCache", "PreparedInverseToyGenerator", "QMI", "QMI2D", "RealImag", "RelativisticBreitWigner", "Rescattering2",
