@@ -194,22 +194,81 @@ class QMI:
         )
 
     def _interpolated_magnitude_phase(self, mass, prepared_index=None):
-        mass = jnp.asarray(mass)
-        knot_s = jnp.asarray(self.knots, dtype=mass.dtype) ** 2
-        s = mass**2
-        magnitudes = jnp.asarray(self.magnitudes, dtype=mass.dtype)
-        phases = jnp.asarray(self.phases, dtype=mass.dtype)
+        prepared_fraction = None
+        if isinstance(prepared_index, tuple):
+            prepared_index, prepared_fraction = prepared_index
+
+        if mass is None:
+            if prepared_fraction is None:
+                raise ValueError("prepared QMI evaluation requires interpolation fractions")
+            dtype_source = jnp.asarray(prepared_fraction)
+            knot_s = jnp.asarray(self.knots, dtype=dtype_source.dtype) ** 2
+            s = None
+        else:
+            mass = jnp.asarray(mass)
+            knot_s = jnp.asarray(self.knots, dtype=mass.dtype) ** 2
+            s = mass**2
+
+        magnitudes = jnp.asarray(self.magnitudes, dtype=knot_s.dtype)
+        phases = jnp.asarray(self.phases, dtype=knot_s.dtype)
 
         if self.interpolation == "linear":
-            index, fraction = _interval_index_and_fraction(
-                s, knot_s, prepared_index
-            )
+            if prepared_fraction is None:
+                index, fraction = _interval_index_and_fraction(
+                    s, knot_s, prepared_index
+                )
+            else:
+                index = jnp.asarray(prepared_index, dtype=jnp.int32)
+                fraction = jnp.asarray(prepared_fraction, dtype=knot_s.dtype)
             magnitude = (
                 magnitudes[index]
                 + fraction * (magnitudes[index + 1] - magnitudes[index])
             )
             phase = phases[index] + fraction * (phases[index + 1] - phases[index])
             return magnitude, phase
+
+        if prepared_fraction is not None:
+            # Cubic interpolation still uses the fixed interval, but the
+            # precomputed fraction avoids reconstructing it from the mass.
+            index = jnp.asarray(prepared_index, dtype=jnp.int32)
+            fraction = jnp.asarray(prepared_fraction, dtype=knot_s.dtype)
+            n = knot_s.shape[0]
+            h = knot_s[1:] - knot_s[:-1]
+
+            def cubic(values):
+                interior = n - 2
+                if interior > 0:
+                    rhs = 6.0 * (
+                        (values[2:] - values[1:-1]) / h[1:]
+                        - (values[1:-1] - values[:-2]) / h[:-1]
+                    )
+                    second_inner = (
+                        jnp.asarray(self._cubic_inverse, dtype=values.dtype) @ rhs
+                    )
+                    second = jnp.concatenate(
+                        (
+                            jnp.zeros(1, dtype=values.dtype),
+                            second_inner,
+                            jnp.zeros(1, dtype=values.dtype),
+                        )
+                    )
+                else:
+                    second = jnp.zeros(n, dtype=values.dtype)
+                width = knot_s[index + 1] - knot_s[index]
+                a = 1.0 - fraction
+                b = fraction
+                return (
+                    a * values[index]
+                    + b * values[index + 1]
+                    + (
+                        (a**3 - a) * second[index]
+                        + (b**3 - b) * second[index + 1]
+                    )
+                    * width**2
+                    / 6.0
+                )
+
+            return cubic(magnitudes), cubic(phases)
 
         return (
             self._interpolate(s, knot_s, magnitudes, prepared_index),
@@ -219,16 +278,22 @@ class QMI:
     def interpolated_magnitude_phase(self, mass):
         return self._interpolated_magnitude_phase(mass)
 
+    @property
+    def prepared_mass_is_self_contained(self) -> bool:
+        """Prepared QMI data no longer need the resonance-mass array."""
+
+        return True
+
     def prepare_mass(self, mass, context: ResonanceContext):
-        """Cache only the fixed knot interval for repeated QMI evaluations."""
+        """Cache the fixed knot interval and interpolation fraction."""
 
         if int(context.spin) != 0:
             raise ValueError("QMI is defined for a scalar S-wave")
         mass = jnp.asarray(mass)
         knot_s = jnp.asarray(self.knots, dtype=mass.dtype) ** 2
-        index, _ = _interval_index_and_fraction(mass**2, knot_s)
+        index, fraction = _interval_index_and_fraction(mass**2, knot_s)
         dtype = jnp.int16 if self.size <= 32767 else jnp.int32
-        return index.astype(dtype)
+        return index.astype(dtype), fraction
 
     def evaluate_prepared(self, mass, prepared_index, context: ResonanceContext):
         if int(context.spin) != 0:
