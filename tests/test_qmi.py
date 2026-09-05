@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 
 from dalitzplotfitter import (
@@ -161,3 +162,34 @@ def test_qmi_knot_parameters_are_collected_and_resolved_by_decay_model():
     nominal = decay.intensity(data, {"qmi_a0": 1.0, "qmi_d0": 0.0})
     shifted = decay.intensity(data, {"qmi_a0": 2.0, "qmi_d0": 0.3})
     assert bool(jnp.any(jnp.abs(nominal - shifted) > 1e-10))
+
+
+def test_qmi_linear_matches_jnp_interp_and_has_finite_gradients():
+    knots = (0.30, 0.60, 0.90, 1.20)
+    knot_s = jnp.asarray(knots) ** 2
+    values = jnp.asarray((1.0, 2.0, 1.4, 3.0))
+    masses = jnp.linspace(0.20, 1.30, 101)
+    s = masses**2
+
+    model = QMI(
+        knots=knots,
+        magnitudes=tuple(values),
+        phases=(0.0, 0.0, 0.0, 0.0),
+        interpolation="linear",
+    )
+    magnitude, _ = model.interpolated_magnitude_phase(masses)
+    expected = jnp.interp(s, knot_s, values)
+    assert jnp.allclose(magnitude, expected, rtol=1e-13, atol=1e-13)
+
+    def objective(fp):
+        local = QMI(
+            knots=knots,
+            magnitudes=tuple(fp),
+            phases=(0.0, 0.0, 0.0, 0.0),
+            interpolation="linear",
+        )
+        mag, _ = local.interpolated_magnitude_phase(masses)
+        return jnp.sum(mag**2)
+
+    gradient = jax.grad(objective)(values)
+    assert bool(jnp.all(jnp.isfinite(gradient)))
