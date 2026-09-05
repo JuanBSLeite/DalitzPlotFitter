@@ -40,6 +40,25 @@ def _coefficient(prefix, x, y, *, fixed=False):
     )
 
 
+
+def test_fixed_complex_coefficient_is_supported():
+    amplitude = CountingAmplitude([1.0 + 0.0j, 0.5 - 0.2j])
+    component = AmplitudeComponent("fixed", amplitude, 1.0 + 0.3j)
+    data = {"x": jnp.arange(6.0)}
+    norm_data = {"x": jnp.arange(12.0)}
+    cache = PreparedAmplitudeCache.prepare(
+        (component,),
+        data=data,
+        normalization_data=norm_data,
+        normalization_weights=jnp.ones(12),
+        parameters=(),
+    )
+    intensity, normalization = cache.evaluate({})
+    assert intensity.shape == (6,)
+    assert jnp.all(jnp.isfinite(intensity))
+    assert jnp.isfinite(normalization)
+
+
 def test_coefficient_only_fit_never_reevaluates_dynamics():
     f1 = CountingAmplitude([1.0 + 0.0j, 2.0 + 0.0j])
     f2 = CountingAmplitude([0.5 + 0.2j, -0.3 + 0.1j])
