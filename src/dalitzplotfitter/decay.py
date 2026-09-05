@@ -272,7 +272,7 @@ class DecayModel:
     components: tuple[Resonance | NonResonant | DalitzAmplitude, ...]
     normalize_components: bool
     normalization_resolution: int
-    normalization_method: Literal["gauss-legendre", "square-dalitz", "adaptive"]
+    normalization_method: Literal["gauss-legendre", "square-dalitz", "auto"]
     normalization_pair: tuple[int, int]
     normalization_bin_width: float
     normalization_order_m13: int | None
@@ -293,7 +293,7 @@ class DecayModel:
         *,
         normalize_components: bool = True,
         normalization_resolution: int = 1000,
-        normalization_method: Literal["gauss-legendre", "square-dalitz", "adaptive"] = "gauss-legendre",
+        normalization_method: Literal["gauss-legendre", "square-dalitz", "auto"] = "gauss-legendre",
         normalization_pair: tuple[int, int] = (0, 1),
         normalization_bin_width: float = 0.005,
         normalization_order_m13: int | None = None,
@@ -304,9 +304,9 @@ class DecayModel:
     ) -> None:
         if normalization_resolution < 2:
             raise ValueError("normalization_resolution must be at least 2")
-        if normalization_method not in ("gauss-legendre", "square-dalitz", "adaptive"):
+        if normalization_method not in ("gauss-legendre", "square-dalitz", "auto"):
             raise ValueError(
-                "normalization_method must be 'gauss-legendre', 'square-dalitz', or 'adaptive'"
+                "normalization_method must be 'gauss-legendre', 'square-dalitz', or 'auto'"
             )
         if len(set(normalization_pair)) != 2 or any(
             index not in (0, 1, 2) for index in normalization_pair
@@ -440,8 +440,8 @@ class DecayModel:
         }
 
     @property
-    def adaptive_normalization_scheme(self) -> dict[str, object]:
-        """Describe the fixed Laura++-style adaptive normalization scheme."""
+    def auto_normalization_scheme(self) -> dict[str, object]:
+        """Describe the integration strategy selected by ``normalization_method="auto"``."""
 
         narrow = self._adaptive_narrow_resonances()
         if narrow["m12"]:
@@ -491,7 +491,7 @@ class DecayModel:
                     order_m13=self.normalization_order_m13,
                     order_m23=self.normalization_order_m23,
                 ).sample()
-            elif self.normalization_method == "adaptive":
+            elif self.normalization_method == "auto":
                 narrow = self._adaptive_narrow_resonances()
                 if narrow["m12"]:
                     # Laura++ switches to a full SDP grid when a narrow band
