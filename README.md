@@ -214,11 +214,12 @@ See `docs/root_io.md` for details.
 
 ## Normalization
 
-Amplitude and PDF normalization use deterministic quadrature. There are only two public normalization methods:
+Amplitude and PDF normalization can use deterministic quadrature or a user-supplied Monte Carlo integration sample. The public normalization methods are:
 
 ```text
 gauss-legendre
 square-dalitz
+toy-mc
 ```
 
 Narrow-resonance handling is automatic in both methods. Resonances with nominal width at or below 20 MeV are treated as narrow. Their integration region is refined around `m0 ± 5*Gamma`, with default target spacing `Gamma/100`; broad regions retain the usual coarse integration scale. Identical-particle symmetrisation is included when locating narrow bands, and overlapping narrow regions use the finest requested spacing.
@@ -250,6 +251,42 @@ model = DecayModel(
     normalization_pair=(0, 1),
 )
 ```
+
+For Monte Carlo integration, pass a `PhaseSpaceSample` directly. Supplying
+`normalization_sample` automatically selects `normalization_method="toy-mc"`:
+
+```python
+normalization_toy = read_phase_space_sample(
+    "phsp.root",
+    "DecayTree",
+    s12="s12",
+    s13="s13",
+    s23="s23",
+    weight="weight",  # omit this argument for an unweighted sample
+)
+
+model = DecayModel(
+    channel,
+    components,
+    normalization_sample=normalization_toy,
+)
+```
+
+The Monte Carlo estimator follows the package-wide convention
+`mean(sample.weights * f)`. For an unweighted integration toy the weights are
+unit values; for a weighted toy they must be the integration/importance
+weights appropriate to the proposal that generated the events. Within one
+model, a common overall factor in the weights cancels in normalized PDFs,
+component fit fractions and interference fractions. In a simultaneous CP fit,
+the B+ and B- integration samples must use the same global weight convention,
+because a relative rescaling between charges would alter the integrated charge
+fraction.
+
+An unweighted sample may only be treated as unit-weight integration MC when
+its sampling distribution is appropriate for the desired integration measure.
+In particular, an unweighted signal toy generated according to `|A|^2` is not
+a flat phase-space integration sample and must not be substituted directly for
+normalization MC without the corresponding importance weights.
 
 When a narrow resonance is detected, the package prints which adaptive strategy is being used and, for Square Dalitz, the resulting `m' x theta'` point count. The deterministic strategy can also be inspected without constructing the grid through
 
@@ -350,7 +387,7 @@ Gaussian external measurements can be added with `GaussianConstraint` and `Const
 
 ## Phase-space Monte Carlo
 
-`PhaseSpaceMC` is used for accept-reject proposal/event generation and for weighted rendering samples used by smooth fitted projections. It is **not** used for amplitude/PDF normalization or fit fractions, which remain deterministic. The default inverse-transform toy path instead samples the physical Dalitz plane from prepared inverse CDFs.
+`PhaseSpaceMC` is used for accept-reject proposal/event generation and for weighted rendering samples used by smooth fitted projections. It can also be supplied explicitly as `normalization_sample` when Monte Carlo normalization is desired. The default remains deterministic quadrature unless an external normalization sample is supplied. The inverse-transform toy path samples the fitted signal density and therefore should not be confused with flat phase-space integration MC.
 
 ## Tutorial notebooks
 
@@ -376,6 +413,7 @@ The repository contains a progressive set of examples:
 - `notebooks/18_user_friendly_toy_generation.ipynb`: signal/background and CP pseudo-data generation;
 - `notebooks/19_toy_root_output.ipynb`: non-CP and CP toy generation with ROOT TTree output;
 - `notebooks/20_pdf_convolution_resolution.ipynb`: relativistic Breit-Wigner intensity convolved with Gaussian detector resolution.
+- `notebooks/22_flat_dalitz_toy_mc_integration.ipynb`: one million flat conventional-Dalitz events used as an external toy-MC normalization sample, with matrix/fit-fraction comparison and a non-CP closure fit.
 
 The B-to-Kpipi examples consistently use
 
