@@ -9,7 +9,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from dalitzplotfitter.kinematics import PhaseSpaceSample
+from dalitzplotfitter.amplitude.components import coefficient_value
+from dalitzplotfitter.kinematics import PhaseSpaceMC, PhaseSpaceSample
 
 
 def _acceptance(efficiency, veto, data: dict[str, object]) -> jnp.ndarray:
@@ -81,18 +82,55 @@ def _empty_sample(model, seed: int | None = None) -> PhaseSpaceSample:
     )
 
 
-def _scores(pool: PhaseSpaceSample, density) -> np.ndarray:
-    values = np.asarray(
-        jax.device_get(jnp.asarray(pool.weights) * jnp.asarray(density)),
-        dtype=float,
-    )
+def _scores(pool: PhaseSpaceSample, density) -> jax.Array:
+    values = jnp.asarray(pool.weights) * jnp.asarray(density)
     if values.shape != (pool.size,):
         raise ValueError(
             f"toy density must return one value per event, got {values.shape} for {pool.size} events"
         )
-    if np.any(~np.isfinite(values)) or np.any(values < 0.0):
+    valid = jnp.all(jnp.isfinite(values)) & jnp.all(values >= 0.0)
+    if not bool(jax.device_get(valid)):
         raise ValueError("toy generation weights must be finite and non-negative")
     return values
+
+
+def _frozen_model_intensity(model, values: Mapping[str, object]):
+    """Build one JIT intensity with component scales frozen at the toy truth.
+
+    Calling DecayModel.intensity directly inside every proposal batch also
+    recomputes component-normalization integrals.  Toy truth parameters are
+    fixed, so those scales and complex coefficients can be resolved once.
+    """
+
+    components = tuple(model.amplitude_model.components)
+    resolved = []
+    for component in components:
+        scale = jnp.asarray(model._component_scale(component, values))
+        coefficient = jnp.asarray(coefficient_value(component.coefficient, values))
+        jax.block_until_ready(scale)
+        jax.block_until_ready(coefficient)
+        resolved.append((component, scale, coefficient))
+
+    def intensity(data):
+        total = None
+        for component, scale, coefficient in resolved:
+            dynamics = jnp.asarray(component.function(data, values))
+            term = coefficient * scale * dynamics
+            total = term if total is None else total + term
+        total = jnp.asarray(total)
+        return jnp.real(total * jnp.conj(total))
+
+    return jax.jit(intensity)
+
+
+def _attach_momenta(model, sample: PhaseSpaceSample, seed: int | None) -> PhaseSpaceSample:
+    if sample.p1 is not None:
+        return sample
+    generator = PhaseSpaceMC(
+        model.channel.parent_mass,
+        model.channel.daughter_masses,
+    )
+    return generator.attach_momenta(sample, seed=seed)
 
 
 def _accept_reject_component(
@@ -115,15 +153,38 @@ def _accept_reject_component(
     if max_restarts < 0:
         raise ValueError("max_restarts must be non-negative")
 
+    compiled_density = jax.jit(density_function)
     n_pilot = _pilot_size(size, pool_size)
-    pilot = model.generate_phase_space(n_pilot, seed=_derived_seed(seed, 1))
-    pilot_scores = _scores(pilot, density_function(pilot.as_dict()))
-    observed_max = float(np.max(pilot_scores))
+
+    # Built-in amplitudes need only Dalitz invariants.  Try the compact proposal
+    # first and fall back to full four-vectors only for custom densities that
+    # explicitly request momentum fields.
+    compact_proposal = True
+    pilot = model.generate_phase_space(
+        n_pilot,
+        seed=_derived_seed(seed, 1),
+        include_momenta=False,
+    )
+    try:
+        pilot_scores = _scores(pilot, compiled_density(pilot.as_dict()))
+    except KeyError:
+        compact_proposal = False
+        pilot = model.generate_phase_space(
+            n_pilot,
+            seed=_derived_seed(seed, 1),
+            include_momenta=True,
+        )
+        pilot_scores = _scores(pilot, compiled_density(pilot.as_dict()))
+
+    observed_max_device, mean_score_device = jax.device_get(
+        (jnp.max(pilot_scores), jnp.mean(pilot_scores))
+    )
+    observed_max = float(observed_max_device)
     if observed_max <= 0.0:
         raise ValueError("toy density is zero over the pilot phase-space sample")
     envelope = envelope_safety * observed_max
 
-    estimated_efficiency = float(np.mean(pilot_scores) / envelope)
+    estimated_efficiency = float(mean_score_device) / envelope
     estimated_efficiency = min(max(estimated_efficiency, 1e-4), 1.0)
     if batch_size is None:
         batch_size = int(
@@ -137,7 +198,6 @@ def _accept_reject_component(
     else:
         batch_size = int(batch_size)
 
-    rng = np.random.default_rng(_derived_seed(seed, 913_579))
     accepted: list[PhaseSpaceSample] = []
     n_accepted = 0
     restarts = 0
@@ -150,9 +210,10 @@ def _accept_reject_component(
         pool = model.generate_phase_space(
             batch_size,
             seed=_derived_seed(seed, 10_000 + proposal_index),
+            include_momenta=not compact_proposal,
         )
-        score = _scores(pool, density_function(pool.as_dict()))
-        batch_max = float(np.max(score))
+        score = _scores(pool, compiled_density(pool.as_dict()))
+        batch_max = float(jax.device_get(jnp.max(score)))
         if batch_max > envelope:
             restarts += 1
             if restarts > max_restarts:
@@ -165,13 +226,24 @@ def _accept_reject_component(
             n_accepted = 0
             continue
 
-        probabilities = score / envelope
-        indices = np.flatnonzero(rng.random(pool.size) < probabilities)
+        accept_key = jax.random.key(
+            0
+            if seed is None
+            else _derived_seed(seed, 913_579 + proposal_index)
+        )
+        mask = jax.random.uniform(
+            accept_key,
+            (pool.size,),
+            dtype=score.dtype,
+        ) < (score / envelope)
+        indices = np.flatnonzero(np.asarray(jax.device_get(mask), dtype=bool))
         if indices.size == 0:
             continue
         needed = size - n_accepted
         selected = indices[:needed]
-        accepted.append(pool.take(jnp.asarray(selected)))
+        accepted.append(
+            pool.take(jnp.asarray(selected, dtype=jnp.int32)).without_momenta()
+        )
         n_accepted += int(selected.size)
 
     toy = _merge_samples(accepted)
@@ -260,13 +332,12 @@ def generate_signal_toy(
     max_restarts: int = 10,
 ) -> PhaseSpaceSample:
     values = {} if parameters is None else parameters
+    intensity = _frozen_model_intensity(model, values)
 
     def signal_density(data):
-        return _acceptance(efficiency, veto, data) * jnp.asarray(
-            model.intensity(data, values)
-        )
+        return _acceptance(efficiency, veto, data) * intensity(data)
 
-    return _accept_reject_component(
+    toy = _accept_reject_component(
         model,
         size,
         signal_density,
@@ -276,6 +347,7 @@ def generate_signal_toy(
         envelope_safety=envelope_safety,
         max_restarts=max_restarts,
     )
+    return toy
 
 
 def generate_toy(
@@ -317,10 +389,10 @@ def generate_toy(
     samples: list[PhaseSpaceSample] = []
 
     if n_signal > 0:
+        intensity = _frozen_model_intensity(model, values)
+
         def signal_density(data):
-            return _acceptance(efficiency, veto, data) * jnp.asarray(
-                model.intensity(data, values)
-            )
+            return _acceptance(efficiency, veto, data) * intensity(data)
 
         samples.append(
             _accept_reject_component(
@@ -439,10 +511,10 @@ def generate_cp_toy(
     minus_samples: list[PhaseSpaceSample] = []
 
     if n_signal_plus > 0:
+        plus_intensity = _frozen_model_intensity(plus_model, values)
+
         def plus_signal_density(data):
-            return _acceptance(plus_efficiency, plus_veto, data) * jnp.asarray(
-                plus_model.intensity(data, values)
-            )
+            return _acceptance(plus_efficiency, plus_veto, data) * plus_intensity(data)
 
         plus_samples.append(
             _accept_reject_component(
@@ -458,10 +530,10 @@ def generate_cp_toy(
         )
 
     if n_signal_minus > 0:
+        minus_intensity = _frozen_model_intensity(minus_model, values)
+
         def minus_signal_density(data):
-            return _acceptance(minus_efficiency, minus_veto, data) * jnp.asarray(
-                minus_model.intensity(data, values)
-            )
+            return _acceptance(minus_efficiency, minus_veto, data) * minus_intensity(data)
 
         minus_samples.append(
             _accept_reject_component(
