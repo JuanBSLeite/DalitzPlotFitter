@@ -151,8 +151,16 @@ def test_qmi_prepared_intervals_match_direct_linear_evaluation():
     direct = qmi(mass, context)
     cached = qmi.evaluate_prepared(mass, prepared, context)
 
-    assert prepared.dtype == jnp.int16
+    index, fraction = prepared
+    assert index.dtype == jnp.int16
+    assert fraction.dtype == mass.dtype
     assert jnp.allclose(cached, direct, rtol=1e-12, atol=1e-12)
+    assert jnp.allclose(
+        qmi.evaluate_prepared(None, prepared, context),
+        direct,
+        rtol=1e-12,
+        atol=1e-12,
+    )
 
 
 def test_qmi_prepared_intervals_match_direct_cubic_evaluation():
@@ -169,3 +177,9 @@ def test_qmi_prepared_intervals_match_direct_cubic_evaluation():
     cached = qmi.evaluate_prepared(mass, prepared, context)
 
     assert jnp.allclose(cached, direct, rtol=1e-12, atol=1e-12)
+    assert jnp.allclose(
+        qmi.evaluate_prepared(None, prepared, context),
+        direct,
+        rtol=1e-12,
+        atol=1e-12,
+    )
