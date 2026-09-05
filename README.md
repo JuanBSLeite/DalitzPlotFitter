@@ -175,6 +175,25 @@ The default remains 100,000 points per chunk. Smaller chunks reduce temporary
 normalization memory approximately linearly, at the cost of more chunk
 executions. They do not change the integration sample or normalization formula.
 
+For QMI and other fits with floating dynamical parameters, speed is treated
+separately. The dynamic cache keeps the fixed waves evaluated on the
+normalization sample and recomputes only the floating-dynamics block. Scalar
+QMI amplitudes use a dedicated spin-0 path: redundant `p`, `p*`, `q` and
+`cos(theta)` arrays are not retained for the floating S-wave, the fixed QMI
+knot interval is precomputed with a compact integer index, and the likelihood
+does not rebuild a full `N_normalization x N_components` matrix on every
+evaluation. This path is automatic and does not require enabling a lower-memory
+mode.
+
+The benchmark
+
+```text
+benchmarks/benchmark_qmi_memory_speed.py
+```
+
+reports both retained cache memory and repeated JIT objective time for a
+20-knot B+ -> pi+ pi+ pi- QMI model.
+
 ## Simultaneous CP fits
 
 `CPFitSession` removes the manual construction of the two prepared caches, joint CP likelihood and minimizer:
