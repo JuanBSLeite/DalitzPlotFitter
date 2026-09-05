@@ -259,7 +259,13 @@ class DalitzInverseTransformSampler:
             conditional_quantiles=conditional_quantiles,
         )
 
-    def generate(self, size: int, *, seed: int | None = None) -> PhaseSpaceSample:
+    def generate(
+        self,
+        size: int,
+        *,
+        seed: int | None = None,
+        include_momenta: bool = True,
+    ) -> PhaseSpaceSample:
         if size <= 0:
             raise ValueError("size must be positive")
         rng = np.random.default_rng(seed)
@@ -299,22 +305,24 @@ class DalitzInverseTransformSampler:
         s13 = low + v * (high - low)
         m1, m2, m3 = self.masses
         s23 = self.mother_mass**2 + m1**2 + m2**2 + m3**2 - s12 - s13
-        p1, p2, p3 = _momenta_from_invariants(
-            s12,
-            s13,
-            s23,
-            mother_mass=self.mother_mass,
-            masses=self.masses,
-            rng=rng,
-        )
+        p1 = p2 = p3 = None
+        if include_momenta:
+            p1, p2, p3 = _momenta_from_invariants(
+                s12,
+                s13,
+                s23,
+                mother_mass=self.mother_mass,
+                masses=self.masses,
+                rng=rng,
+            )
         return PhaseSpaceSample(
             s12=jnp.asarray(s12),
             s13=jnp.asarray(s13),
             s23=jnp.asarray(s23),
             weights=jnp.ones((size,), dtype=jnp.asarray(s12).dtype),
-            p1=jnp.asarray(p1),
-            p2=jnp.asarray(p2),
-            p3=jnp.asarray(p3),
+            p1=None if p1 is None else jnp.asarray(p1),
+            p2=None if p2 is None else jnp.asarray(p2),
+            p3=None if p3 is None else jnp.asarray(p3),
         )
 
 
