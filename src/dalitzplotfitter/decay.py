@@ -890,6 +890,26 @@ class DecayModel:
             include_momenta=include_momenta,
         )
 
+    def generate_stratified_phase_space(
+        self,
+        size: int,
+        *,
+        cell_probabilities,
+        grid_shape: tuple[int, int],
+        seed: int | None = None,
+    ):
+        """Generate invariant-only phase-space proposals from weighted Dalitz cells."""
+
+        return PhaseSpaceMC(
+            self.channel.parent_mass,
+            self.channel.daughter_masses,
+        ).generate_stratified_invariants(
+            size,
+            cell_probabilities=cell_probabilities,
+            grid_shape=grid_shape,
+            seed=seed,
+        )
+
     def _component_scale(self, component: AmplitudeComponent, values=None):
         normalize = (
             self.normalize_components
