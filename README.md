@@ -89,9 +89,11 @@ The accept-reject reference path is also optimized for large toys: proposal
 candidates are generated directly in Dalitz invariants, model normalization
 scales are frozen once at the toy truth, and four-momenta are reconstructed
 only after selection. Thus rejected candidates do not pay the cost of
-four-vector construction. The production rejection sampler uses a monitored global envelope; any
-envelope violation forces a full safe restart. This conservative choice avoids
-self-hiding narrow-peak failures from pilot-estimated local envelopes.
+four-vector construction. Invariant-only densities automatically use monitored
+local envelopes on an occupancy-aware Dalitz cell grid; cells are proposed
+proportionally to their envelope and any envelope violation forces a full safe
+restart. Momentum-dependent custom densities retain the global-envelope
+fallback.
 
 For repeated toys, prepare the inverse CDFs once:
 
