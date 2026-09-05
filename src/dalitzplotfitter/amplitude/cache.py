@@ -88,6 +88,28 @@ def _minimal_component_input(
     return dict(data)
 
 
+def _compact_prepared_component_data(
+    components: Sequence[AmplitudeComponent],
+    prepared: Mapping[str, Array],
+) -> Mapping[str, Array]:
+    """Retain the union of component-specific prepared arrays when possible."""
+
+    components = tuple(components)
+    if not components:
+        return {}
+    compacted = []
+    for component in components:
+        compact = getattr(component.function, "compact_prepared_data", None)
+        if compact is None:
+            return prepared
+        compacted.append(compact(prepared))
+
+    result = {}
+    for mapping in compacted:
+        result.update(mapping)
+    return result
+
+
 def _scaled_matrix_from_raw(raw_matrix: Array, scales: Array) -> Array:
     return scales[:, None] * raw_matrix * scales[None, :]
 
@@ -547,6 +569,14 @@ class PreparedAmplitudeCache:
         retained_norm = _prepare_component_data(
             dynamic_components,
             _minimal_component_input(dynamic_components, normalization_data),
+        )
+        retained_data = _compact_prepared_component_data(
+            dynamic_components,
+            retained_data,
+        )
+        retained_norm = _compact_prepared_component_data(
+            dynamic_components,
+            retained_norm,
         )
 
         return cls(
