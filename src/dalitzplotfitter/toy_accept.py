@@ -361,10 +361,14 @@ def _accept_reject_component(
             envelope_values = jnp.asarray(local_envelopes, dtype=score.dtype)[
                 proposal_cells
             ]
-            exceeded = bool(
-                jax.device_get(jnp.any(score > envelope_values))
-            )
-            if exceeded:
+            valid_device = jnp.all(jnp.isfinite(score)) & jnp.all(score >= 0.0)
+            exceeded_device = jnp.any(score > envelope_values)
+            valid, exceeded = jax.device_get((valid_device, exceeded_device))
+            if not bool(valid):
+                raise ValueError(
+                    "toy generation weights must be finite and non-negative"
+                )
+            if bool(exceeded):
                 restarts += 1
                 if restarts > max_restarts:
                     raise RuntimeError(
