@@ -16,7 +16,7 @@ from dalitzplotfitter.observables import (
     interference_fractions as matrix_interference_fractions,
 )
 
-from .components import AmplitudeComponent
+from .components import AmplitudeComponent, coefficient_value
 
 DEFAULT_NORMALIZATION_CHUNK_SIZE = 100_000
 
@@ -534,7 +534,7 @@ class PreparedAmplitudeCache:
 
     def coefficient_vector(self, fit_values: Mapping[str, object]) -> Array:
         return jnp.asarray(
-            [component.coefficient.value(fit_values) for component in self.components]
+            [coefficient_value(component.coefficient, fit_values) for component in self.components]
         )
 
     def _dynamic_parameter_mapping(
