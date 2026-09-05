@@ -225,7 +225,7 @@ Narrow-resonance handling is automatic in both methods. Resonances with nominal 
 
 For conventional Gauss-Legendre normalization, narrow bands in `m13` or `m23` are integrated with a locally refined piecewise grid. If a narrow band lies on the diagonal `m12` direction of the conventional `(m13,m23)` plane, the code follows the Laura++ strategy and switches the internal integration coordinates to Square Dalitz for that normalization.
 
-For explicit Square-Dalitz normalization, the selected `normalization_pair` is preserved and Square-Dalitz cells crossed by narrow-resonance bands are refined locally.
+For explicit Square-Dalitz normalization, the selected `normalization_pair` is preserved and adaptation is applied only along the mass coordinate `m'`. The `theta'` axis keeps the standard fixed resolution. Only narrow resonances aligned with `normalization_pair` refine `m'`; crossed narrow bands are sampled with the standard `theta'` grid.
 
 ```python
 model = DecayModel(
@@ -251,7 +251,7 @@ model = DecayModel(
 )
 ```
 
-When a narrow resonance is detected, the package prints which adaptive strategy is being used. The deterministic strategy can also be inspected without constructing the grid through
+When a narrow resonance is detected, the package prints which adaptive strategy is being used and, for Square Dalitz, the resulting `m' x theta'` point count. The deterministic strategy can also be inspected without constructing the grid through
 
 ```python
 print(model.normalization_scheme)
