@@ -40,12 +40,14 @@ class Rescattering2:
     hard-coded in Laura++. The first interval starts at the charged-kaon
     threshold, 2*m_K, and the second ends at 2.0 GeV.
 
-    This implementation intentionally follows the Laura++ C++ literally,
-    including two unusual details: C0 and F0 are initialised by evaluating the
-    region-I functions at transition_mass**2, and resAmp uses strict
-    inequalities at 1.47 and 2.0 GeV. Consequently the amplitude is exactly
-    zero at those two masses. Laura++ also extrapolates region I below 2*m_K;
-    the threshold only defines the Chebyshev scaling interval.
+    The Laura++ source appears to contain a typo in initialise(): C0 and F0
+    are formed from phi00(sqr_tmax[1]*sqr_tmax[1], 1) and
+    g00(sqr_tmax[1]*sqr_tmax[1], 1), even though sqr_tmax stores masses and
+    resAmp passes mass (not mass squared) to phi00/g00. Here we use the
+    dimensionally and internally consistent transition mass itself, 1.47 GeV.
+    This also makes the two Chebyshev regions continuous at the transition.
+    As in Laura++, region I is still extrapolated below 2*m_K; the threshold
+    only defines the Chebyshev scaling interval.
     """
 
     B1: object = 23.6
@@ -103,11 +105,10 @@ class Rescattering2:
         return _chebyshev_series(x_low, self._low_phase_coefficients())
 
     def _high_phase_coefficients(self):
-        # Literal Laura++ initialise():
-        # C0_ = phi00(sqr_tmax[1]*sqr_tmax[1], 1)
-        #       + C1 - C2 + C3 - C4 + C5
+        # Laura++ uses sqr_tmax[1]*sqr_tmax[1] here, but sqr_tmax stores
+        # masses. Use the transition mass itself for a consistent definition.
         c0 = (
-            self._low_phase(float(self.transition_mass) ** 2)
+            self._low_phase(float(self.transition_mass))
             + self.C1
             - self.C2
             + self.C3
@@ -126,11 +127,9 @@ class Rescattering2:
         return _chebyshev_series(x_low, self._low_magnitude_coefficients())
 
     def _high_magnitude_coefficients(self):
-        # Literal Laura++ initialise():
-        # F0_ = g00(sqr_tmax[1]*sqr_tmax[1], 1)
-        #       + F1 - F2 + F3 - F4
+        # Same correction as for C0 above.
         f0 = (
-            self._low_magnitude(float(self.transition_mass) ** 2)
+            self._low_magnitude(float(self.transition_mass))
             + self.F1
             - self.F2
             + self.F3
@@ -147,7 +146,7 @@ class Rescattering2:
         )
         low = self._low_phase(m)
         high = _chebyshev_series(x_high, self._high_phase_coefficients())
-        return jnp.where(m < self.transition_mass, low, high)
+        return jnp.where(m <= self.transition_mass, low, high)
 
     def magnitude(self, mass):
         """Return the signed Laura++ function g_00(m)."""
@@ -158,7 +157,7 @@ class Rescattering2:
         )
         low = self._low_magnitude(m)
         high = _chebyshev_series(x_high, self._high_magnitude_coefficients())
-        return jnp.where(m < self.transition_mass, low, high)
+        return jnp.where(m <= self.transition_mass, low, high)
 
     def __call__(self, mass, context: ResonanceContext):
         if int(context.spin) != 0:
@@ -166,9 +165,7 @@ class Rescattering2:
 
         m = jnp.asarray(mass)
         value = self.magnitude(m) * jnp.exp(1j * self.phase(m))
-        inside = (m < self.transition_mass) | (
-            (m > self.transition_mass) & (m < self.maximum_mass)
-        )
+        inside = m < self.maximum_mass
         return jnp.where(inside, value, 0.0j)
 
 
