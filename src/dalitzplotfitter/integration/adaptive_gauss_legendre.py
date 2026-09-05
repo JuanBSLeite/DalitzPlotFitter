@@ -133,6 +133,16 @@ class AdaptiveDalitzGaussLegendreGrid:
         for mass, width in narrow:
             begin = max(float(low), mass - self.window_n_widths * width)
             end = min(float(high), mass + self.window_n_widths * width)
+
+            # Laura++ extends a narrow-resonance region to the corresponding
+            # phase-space edge when it begins/ends within 50 coarse bins.  This
+            # avoids a tiny coarse sliver next to a kinematic boundary.
+            edge_margin = 50.0 * self.bin_width
+            if begin < float(low) + edge_margin:
+                begin = float(low)
+            if end > float(high) - edge_margin:
+                end = float(high)
+
             if end <= begin:
                 continue
             target = width / self.binning_factor
