@@ -132,6 +132,7 @@ def test_external_toy_mc_sample_replaces_grid_for_all_normalization():
         "adaptive": False,
         "sample_size": 4,
         "weighted": True,
+        "chunk_size": 100_000,
     }
 
     data = PhaseSpaceSample(
@@ -506,6 +507,30 @@ def test_amplitude_model_is_built_once_and_reused():
     second = model.amplitude_model
     assert first is second
     assert first.components[0] is second.components[0]
+
+
+def test_normalization_chunk_size_is_configurable():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    model = DecayModel(
+        channel,
+        [NonResonant(RealImag(1.0, 0.0), name="NR")],
+        normalization_method="square-dalitz",
+        normalization_resolution=20,
+        normalization_chunk_size=37,
+    )
+
+    kernel = model._compact_prepare_kernel(
+        normalize_components=True,
+        has_efficiency=False,
+    )
+    assert kernel.normalization_kernel.chunk_size == 37
+
+    with pytest.raises(ValueError, match="normalization_chunk_size must be positive"):
+        DecayModel(
+            channel,
+            [NonResonant(RealImag(1.0, 0.0), name="NR")],
+            normalization_chunk_size=0,
+        )
 
 
 def test_compact_prepare_kernel_is_reused_by_model():
