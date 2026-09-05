@@ -91,13 +91,11 @@ def test_internal_normalization_grid_is_lazy_and_reused():
     assert bool(jnp.any(first.weights != first.weights[0]))
 
 
-def test_decay_model_rejects_removed_normalization_methods():
+def test_decay_model_rejects_unknown_normalization_methods():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     components = [NonResonant(RealImag(1.0, 0.0))]
-    with pytest.raises(ValueError, match="gauss-legendre.*square-dalitz"):
+    with pytest.raises(ValueError, match="gauss-legendre.*square-dalitz.*adaptive"):
         DecayModel(channel, components, normalization_method="equal_area")
-    with pytest.raises(ValueError, match="gauss-legendre.*square-dalitz"):
-        DecayModel(channel, components, normalization_method="adaptive")
 
 
 def test_component_normalization_is_unit_diagonal_by_default():
@@ -444,3 +442,92 @@ def test_compact_prepare_kernel_is_reused_by_model():
     assert first_cache.is_compact
     assert second_cache.is_compact
     assert len(model._compact_prepare_kernels) == 2
+
+
+def test_adaptive_normalization_detects_symmetrized_narrow_bands():
+    channel = DecayChannel("B+", ("pi+", "pi+", "pi-"))
+    model = DecayModel(
+        channel,
+        [
+            Resonance(
+                "omega782",
+                pair=(0, 2),
+                coefficient=RealImag(0.09, -0.01),
+                mass=0.78265,
+                width=0.00849,
+                spin=1,
+            )
+        ],
+        normalization_method="adaptive",
+        normalization_bin_width=0.05,
+        normalization_binning_factor=5.0,
+    )
+
+    scheme = model.adaptive_normalization_scheme
+    assert scheme["mode"] == "adaptive-gauss-legendre"
+    assert scheme["m13_narrow_resonances"] == ((0.78265, 0.00849),)
+    assert scheme["m23_narrow_resonances"] == ((0.78265, 0.00849),)
+    assert any(segment.narrow for segment in scheme["m13_segments"])
+    assert any(segment.narrow for segment in scheme["m23_segments"])
+
+
+def test_adaptive_normalization_switches_to_square_dp_for_diagonal_narrow_band():
+    channel = DecayChannel("D+", ("pi-", "pi+", "K+"))
+    model = DecayModel(
+        channel,
+        [
+            Resonance(
+                "narrow_test",
+                pair=(0, 1),
+                coefficient=RealImag(1.0, 0.0),
+                mass=0.77,
+                width=0.010,
+                spin=0,
+            )
+        ],
+        normalization_method="adaptive",
+        normalization_resolution=120,
+    )
+
+    scheme = model.adaptive_normalization_scheme
+    assert scheme["mode"] == "square-dalitz"
+    assert scheme["pair"] == (0, 1)
+    assert scheme["resolution"] == 120
+    assert scheme["m12_narrow_resonances"] == ((0.77, 0.01),)
+
+
+def test_adaptive_normalization_uses_nominal_values_for_floating_dynamics():
+    channel = DecayChannel("D+", ("pi-", "K+", "pi+"))
+    mass = Parameter.dynamics(
+        "narrow.mass",
+        0.90,
+        owner="narrow",
+        backend_name="mass",
+        bounds=(0.85, 0.95),
+    )
+    width = Parameter.dynamics(
+        "narrow.width",
+        0.010,
+        owner="narrow",
+        backend_name="width",
+        bounds=(0.005, 0.030),
+    )
+    model = DecayModel(
+        channel,
+        [
+            Resonance(
+                "narrow",
+                pair=(0, 2),
+                coefficient=RealImag(1.0, 0.0),
+                mass=mass,
+                width=width,
+                spin=0,
+            )
+        ],
+        normalization_method="adaptive",
+        normalization_bin_width=0.05,
+        normalization_binning_factor=5.0,
+    )
+
+    scheme = model.adaptive_normalization_scheme
+    assert scheme["m13_narrow_resonances"] == ((0.9, 0.01),)
