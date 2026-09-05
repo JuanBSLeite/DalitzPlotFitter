@@ -91,18 +91,12 @@ def test_internal_normalization_grid_is_lazy_and_reused():
     assert bool(jnp.any(first.weights != first.weights[0]))
 
 
-def test_decay_model_rejects_unknown_normalization_methods():
+def test_decay_model_exposes_only_two_normalization_methods():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     components = [NonResonant(RealImag(1.0, 0.0))]
-    with pytest.raises(ValueError, match="gauss-legendre.*square-dalitz.*auto"):
-        DecayModel(channel, components, normalization_method="equal_area")
-
-
-def test_decay_model_rejects_adaptive_as_public_method_name():
-    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
-    components = [NonResonant(RealImag(1.0, 0.0))]
-    with pytest.raises(ValueError, match="gauss-legendre.*square-dalitz.*auto"):
-        DecayModel(channel, components, normalization_method="adaptive")
+    for method in ("equal_area", "adaptive", "auto"):
+        with pytest.raises(ValueError, match="gauss-legendre.*square-dalitz"):
+            DecayModel(channel, components, normalization_method=method)
 
 
 def test_component_normalization_is_unit_diagonal_by_default():
@@ -451,7 +445,7 @@ def test_compact_prepare_kernel_is_reused_by_model():
     assert len(model._compact_prepare_kernels) == 2
 
 
-def test_auto_normalization_detects_symmetrized_narrow_bands():
+def test_gauss_legendre_automatically_adapts_to_symmetrized_narrow_bands():
     channel = DecayChannel("B+", ("pi+", "pi+", "pi-"))
     model = DecayModel(
         channel,
@@ -465,20 +459,23 @@ def test_auto_normalization_detects_symmetrized_narrow_bands():
                 spin=1,
             )
         ],
-        normalization_method="auto",
+        normalization_method="gauss-legendre",
         normalization_bin_width=0.05,
         normalization_binning_factor=5.0,
     )
 
-    scheme = model.auto_normalization_scheme
-    assert scheme["mode"] == "adaptive-gauss-legendre"
-    assert scheme["m13_narrow_resonances"] == ((0.78265, 0.00849),)
-    assert scheme["m23_narrow_resonances"] == ((0.78265, 0.00849),)
+    scheme = model.normalization_scheme
+    assert scheme["method"] == "gauss-legendre"
+    assert scheme["adaptive"] is True
+    assert scheme["internal_coordinates"] == "m13-m23"
+    narrow = scheme["narrow_resonances"]
+    assert narrow["m13"] == ((0.78265, 0.00849),)
+    assert narrow["m23"] == ((0.78265, 0.00849),)
     assert any(segment.narrow for segment in scheme["m13_segments"])
     assert any(segment.narrow for segment in scheme["m23_segments"])
 
 
-def test_auto_normalization_switches_to_square_dp_for_diagonal_narrow_band():
+def test_gauss_legendre_diagonal_narrow_band_uses_square_coordinates_internally():
     channel = DecayChannel("D+", ("pi-", "pi+", "K+"))
     model = DecayModel(
         channel,
@@ -492,18 +489,52 @@ def test_auto_normalization_switches_to_square_dp_for_diagonal_narrow_band():
                 spin=0,
             )
         ],
-        normalization_method="auto",
-        normalization_resolution=120,
+        normalization_method="gauss-legendre",
+        normalization_resolution=32,
+        normalization_binning_factor=4.0,
     )
 
-    scheme = model.auto_normalization_scheme
-    assert scheme["mode"] == "square-dalitz"
+    scheme = model.normalization_scheme
+    assert scheme["method"] == "gauss-legendre"
+    assert scheme["adaptive"] is True
+    assert scheme["internal_coordinates"] == "square-dalitz"
     assert scheme["pair"] == (0, 1)
-    assert scheme["resolution"] == 120
-    assert scheme["m12_narrow_resonances"] == ((0.77, 0.01),)
+    assert scheme["narrow_resonances"]["m12"] == ((0.77, 0.01),)
 
 
-def test_auto_normalization_uses_nominal_values_for_floating_dynamics():
+def test_square_dalitz_automatically_adapts_and_prints(capsys):
+    channel = DecayChannel("D+", ("pi-", "K+", "pi+"))
+    model = DecayModel(
+        channel,
+        [
+            Resonance(
+                "narrow",
+                pair=(0, 2),
+                coefficient=RealImag(1.0, 0.0),
+                mass=0.90,
+                width=0.010,
+                spin=0,
+            )
+        ],
+        normalization_method="square-dalitz",
+        normalization_pair=(0, 2),
+        normalization_resolution=16,
+        normalization_binning_factor=2.0,
+    )
+
+    scheme = model.normalization_scheme
+    assert scheme["method"] == "square-dalitz"
+    assert scheme["adaptive"] is True
+    assert scheme["narrow_resonances"]["m13"] == ((0.9, 0.01),)
+
+    sample = model.normalization_sample
+    output = capsys.readouterr().out
+    assert "narrow resonance band(s) detected" in output
+    assert "adaptive Square-Dalitz normalization" in output
+    assert sample.size > 16**2
+
+
+def test_automatic_adaptation_uses_nominal_values_for_floating_dynamics():
     channel = DecayChannel("D+", ("pi-", "K+", "pi+"))
     mass = Parameter.dynamics(
         "narrow.mass",
@@ -531,10 +562,10 @@ def test_auto_normalization_uses_nominal_values_for_floating_dynamics():
                 spin=0,
             )
         ],
-        normalization_method="auto",
+        normalization_method="gauss-legendre",
         normalization_bin_width=0.05,
         normalization_binning_factor=5.0,
     )
 
-    scheme = model.auto_normalization_scheme
-    assert scheme["m13_narrow_resonances"] == ((0.9, 0.01),)
+    scheme = model.normalization_scheme
+    assert scheme["narrow_resonances"]["m13"] == ((0.9, 0.01),)
