@@ -214,26 +214,32 @@ See `docs/root_io.md` for details.
 
 ## Normalization
 
-Amplitude and PDF normalization use deterministic quadrature. The supported normalization choices are `gauss-legendre`, `square-dalitz`, and `auto`.
+Amplitude and PDF normalization use deterministic quadrature. There are only two public normalization methods:
 
-The `auto` choice selects a Laura++-style integration strategy from the declared resonance content. Resonances with nominal width at or below 20 MeV are refined locally in a mass window `m0 ± 5*Gamma`; the default fine target spacing is `Gamma/100`, while the rest of the conventional Dalitz plane keeps the 5 MeV target spacing. Identical-particle symmetrisation is included when locating narrow bands, and overlapping bands automatically use the finest requested spacing. If a narrow band lies on the diagonal `m12` axis of the conventional `(m13,m23)` plane, the integration switches to a full Square-Dalitz grid, matching the Laura++ prescription.
+```text
+gauss-legendre
+square-dalitz
+```
+
+Narrow-resonance handling is automatic in both methods. Resonances with nominal width at or below 20 MeV are treated as narrow. Their integration region is refined around `m0 ± 5*Gamma`, with default target spacing `Gamma/100`; broad regions retain the usual coarse integration scale. Identical-particle symmetrisation is included when locating narrow bands, and overlapping narrow regions use the finest requested spacing.
+
+For conventional Gauss-Legendre normalization, narrow bands in `m13` or `m23` are integrated with a locally refined piecewise grid. If a narrow band lies on the diagonal `m12` direction of the conventional `(m13,m23)` plane, the code follows the Laura++ strategy and switches the internal integration coordinates to Square Dalitz for that normalization.
+
+For explicit Square-Dalitz normalization, the selected `normalization_pair` is preserved and Square-Dalitz cells crossed by narrow-resonance bands are refined locally.
 
 ```python
 model = DecayModel(
     channel,
     components,
-    normalization_method="auto",
-    normalization_bin_width=0.005,       # 5 MeV outside narrow bands
+    normalization_method="gauss-legendre",
+    normalization_bin_width=0.005,       # 5 MeV broad-region target
     normalization_narrow_width=0.020,    # Gamma <= 20 MeV is narrow
     normalization_narrow_window=5.0,     # m0 ± 5 Gamma
-    normalization_binning_factor=100.0,  # fine spacing Gamma/100
-    normalization_resolution=1000,       # SDP fallback resolution
+    normalization_binning_factor=100.0,  # fine target Gamma/100
 )
 ```
 
-With `normalization_method="auto"`, the integration scheme is fixed from the declared/initial resonance masses and widths, as in Laura++. The selected strategy can be inspected through `model.auto_normalization_scheme`.
-
-The original fixed grids remain available explicitly:
+or
 
 ```python
 model = DecayModel(
@@ -245,7 +251,15 @@ model = DecayModel(
 )
 ```
 
-Square-Dalitz histogram values are scalar efficiency/background values; they do not receive an extra Jacobian. The coordinate-transformation Jacobian belongs to the integration measure and is already carried by `SquareDalitzGrid` normalization weights.
+When a narrow resonance is detected, the package prints which adaptive strategy is being used. The deterministic strategy can also be inspected without constructing the grid through
+
+```python
+print(model.normalization_scheme)
+```
+
+The integration scheme is frozen from the declared/initial resonance masses and widths, following the Laura++ convention.
+
+Square-Dalitz histogram values are scalar efficiency/background values; they do not receive an extra Jacobian. The coordinate-transformation Jacobian belongs to the integration measure and is already carried by the Square-Dalitz normalization weights.
 
 ## Component normalization convention
 
