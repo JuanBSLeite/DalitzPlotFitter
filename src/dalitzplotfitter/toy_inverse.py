@@ -385,7 +385,8 @@ def generate_cp_toy_inverse(
 
     def finish(samples, model, offset):
         if not samples:
-            return _empty_sample(model, _derived_seed(seed, 500 + offset))
+            empty = _empty_sample(model, _derived_seed(seed, 500 + offset))
+            return empty if include_momenta else empty.without_momenta()
         result = _merge_samples(samples)
         return _shuffle(result, seed=seed, offset=200 + offset) if shuffle else result
 
