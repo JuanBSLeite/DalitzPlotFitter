@@ -169,6 +169,7 @@ class PhaseSpaceMC:
         *,
         seed: int | None = None,
         key: Array | None = None,
+        include_momenta: bool = True,
     ) -> PhaseSpaceSample:
         """Return weighted phase-space events in ``(E, px, py, pz)`` order.
 
@@ -196,7 +197,7 @@ class PhaseSpaceMC:
             size=size,
         )
 
-        return PhaseSpaceSample(
+        sample = PhaseSpaceSample(
             s12=invariant_mass_squared(p1 + p2),
             s13=invariant_mass_squared(p1 + p3),
             s23=invariant_mass_squared(p2 + p3),
@@ -205,3 +206,4 @@ class PhaseSpaceMC:
             p2=p2,
             p3=p3,
         )
+        return sample if include_momenta else sample.without_momenta()
