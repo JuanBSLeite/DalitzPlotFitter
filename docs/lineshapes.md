@@ -80,6 +80,38 @@ F = (I - i K rho)^(-1) P.
 
 The scattering constants are fixed by default while the process-dependent `betas` and `f_prod` may be complex fit parameters. `scattering_amplitude()` and `s_matrix()` expose the coupled-channel `T` and `S` matrices for unitarity diagnostics.
 
+## Laura++ alternative rescattering model
+
+`Rescattering2` ports `LauRescattering2Res` and can be used as an ordinary
+spin-0 one-dimensional lineshape. It parameterizes
+
+```text
+A(m) = g_00(m) exp(i phi_00(m))
+```
+
+with Chebyshev expansions in two mass regions: from the charged-kaon threshold
+`2 m_K` to 1.47 GeV, and from 1.47 to 2.00 GeV. The default `B`, `C`,
+`D`, and `F` coefficients are the Laura++ defaults. The two expansions are
+constructed to be continuous at 1.47 GeV.
+
+```python
+from dalitzplotfitter import RealImag, Rescattering2, Resonance
+
+rescattering = Resonance(
+    "rescattering",
+    pair=(0, 1),
+    coefficient=RealImag(1.0, 0.0),
+    mass=1.47,
+    width=0.0,
+    spin=0,
+    lineshape=Rescattering2(),
+)
+```
+
+Because it uses the normal `ResonanceAmplitude` path, it participates in the
+same deterministic normalization, CP-fit coefficient handling, caching, and
+minimizer interface as the other one-dimensional lineshapes.
+
 ## QMI / QMIPWA S-wave
 
 `QMI` implements a quasi-model-independent scalar amplitude specified at fixed two-body mass knots. The interpolation coordinate is

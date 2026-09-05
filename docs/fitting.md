@@ -82,6 +82,25 @@ Raw components can be requested explicitly with
 DecayModel(..., normalize_components=False)
 ```
 
+To preserve the global convention while leaving one component unscaled, set
+`normalize_component=False` on its `Resonance`, `NonResonant`, or
+`DalitzAmplitude` declaration:
+
+```python
+qmi_component = Resonance(
+    "S_wave_QMI",
+    pair=(0, 2),
+    coefficient=qmi_coefficient,
+    lineshape=qmi,
+    normalize_component=False,
+)
+```
+
+The raw component is still included in the full Hermitian normalization matrix,
+including its interference rows and columns, and therefore in the total PDF
+normalization. `normalize_component=None` (the default) inherits the model-level
+`normalize_components` setting; an explicit boolean overrides it.
+
 ## Cached normalization matrix
 
 For linear complex coefficients,

@@ -1,6 +1,8 @@
 import jax.numpy as jnp
 import pytest
 
+from dalitzplotfitter.integration.adaptive_square_dalitz import AdaptiveSquareDalitzGrid
+
 from dalitzplotfitter import (
     DalitzGaussLegendreGrid,
     DecayChannel,
@@ -11,6 +13,7 @@ from dalitzplotfitter import (
     enable_x64,
 )
 from dalitzplotfitter.integration import (
+    AdaptiveDalitzGaussLegendreGrid,
     GridIntegrator,
     matrix_normalization,
     normalization_matrix,
@@ -105,4 +108,89 @@ def test_decay_model_selects_and_reuses_gauss_legendre_normalization():
         jnp.ones((1,)),
         rtol=2.0e-13,
         atol=2.0e-13,
+    )
+
+
+def test_adaptive_grid_uses_laura_narrow_resonance_defaults():
+    grid = AdaptiveDalitzGaussLegendreGrid(
+        MOTHER_MASS,
+        MASSES,
+        m13_narrow_resonances=((0.78265, 0.00849),),
+    )
+
+    narrow_segments = [segment for segment in grid.m13_segments if segment.narrow]
+    assert len(narrow_segments) == 1
+    segment = narrow_segments[0]
+    assert jnp.isclose(segment.low, 0.78265 - 5.0 * 0.00849)
+    assert jnp.isclose(segment.high, 0.78265 + 5.0 * 0.00849)
+    assert jnp.isclose(segment.target_width, 0.00849 / 100.0)
+    assert 1000 <= segment.order <= 1001
+
+
+def test_adaptive_grid_integrates_constant_with_global_weight_convention():
+    reference = DalitzGaussLegendreGrid(
+        MOTHER_MASS,
+        MASSES,
+        order_m13=260,
+        order_m23=260,
+    ).sample()
+    adaptive = AdaptiveDalitzGaussLegendreGrid(
+        MOTHER_MASS,
+        MASSES,
+        m13_narrow_resonances=((0.78, 0.012),),
+        bin_width=0.08,
+        narrow_width=0.020,
+        window_n_widths=3.0,
+        binning_factor=8.0,
+    ).sample()
+
+    reference_area = jnp.mean(reference.weights)
+    adaptive_area = jnp.mean(adaptive.weights)
+    assert jnp.allclose(adaptive_area, reference_area, rtol=8e-4, atol=1e-6)
+    assert bool(jnp.all(adaptive.weights > 0.0))
+
+
+def test_adaptive_grid_overlap_uses_finest_requested_binning():
+    grid = AdaptiveDalitzGaussLegendreGrid(
+        MOTHER_MASS,
+        MASSES,
+        m13_narrow_resonances=(
+            (0.800, 0.012),
+            (0.825, 0.006),
+        ),
+        bin_width=0.05,
+        window_n_widths=5.0,
+        binning_factor=20.0,
+    )
+
+    fine = min(segment.target_width for segment in grid.m13_segments if segment.narrow)
+    assert jnp.isclose(fine, 0.006 / 20.0)
+
+
+def test_adaptive_square_dalitz_integrates_constant_and_refines_narrow_band():
+    reference = SquareDalitzGrid(
+        MOTHER_MASS,
+        MASSES,
+        resolution=180,
+        pair=(0, 2),
+    ).sample()
+    adaptive = AdaptiveSquareDalitzGrid(
+        MOTHER_MASS,
+        MASSES,
+        narrow_resonances=(((0, 2), 0.78, 0.012),),
+        resolution=24,
+        pair=(0, 2),
+        window_n_widths=3.0,
+        binning_factor=4.0,
+        cell_order=6,
+        max_depth=6,
+    ).sample()
+
+    assert adaptive.size > 24**2
+    assert bool(jnp.all(adaptive.weights > 0.0))
+    assert jnp.allclose(
+        jnp.mean(adaptive.weights),
+        jnp.mean(reference.weights),
+        rtol=2e-3,
+        atol=2e-6,
     )

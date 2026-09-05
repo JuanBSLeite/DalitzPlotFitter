@@ -11,6 +11,30 @@ import numpy as np
 from ..context import ResonanceContext
 
 
+def _linear_spline(x, xp, fp):
+    """Piecewise-linear interpolation with endpoint clamping.
+
+    This is implemented directly rather than through jax.numpy.interp.
+    QMI evaluations happen on very large normalization grids and the extra
+    interpolation primitive can make JAX tracing/compilation disproportionately
+    slow. The explicit form uses the same search/index pattern as the cubic spline.
+    """
+
+    x = jnp.asarray(x)
+    xp = jnp.asarray(xp, dtype=x.dtype)
+    fp = jnp.asarray(fp, dtype=x.dtype)
+
+    x_clamped = jnp.clip(x, xp[0], xp[-1])
+    index = jnp.clip(
+        jnp.searchsorted(xp, x_clamped, side="right") - 1,
+        0,
+        xp.shape[0] - 2,
+    )
+    x0, x1 = xp[index], xp[index + 1]
+    y0, y1 = fp[index], fp[index + 1]
+    fraction = (x_clamped - x0) / (x1 - x0)
+    return y0 + fraction * (y1 - y0)
+
 def _natural_cubic_spline(x, xp, fp, inverse=None):
     x = jnp.asarray(x)
     xp = jnp.asarray(xp, dtype=x.dtype)
@@ -105,7 +129,7 @@ class QMI:
 
     def _interpolate(self, s, knot_s, values):
         if self.interpolation == "linear":
-            return jnp.interp(s, knot_s, values)
+            return _linear_spline(s, knot_s, values)
         return _natural_cubic_spline(
             s,
             knot_s,

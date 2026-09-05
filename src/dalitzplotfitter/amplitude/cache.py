@@ -16,21 +16,45 @@ from dalitzplotfitter.observables import (
     interference_fractions as matrix_interference_fractions,
 )
 
-from .components import AmplitudeComponent
+from .components import AmplitudeComponent, coefficient_value
 
 DEFAULT_NORMALIZATION_CHUNK_SIZE = 100_000
 
 
-def _component_scales(matrix: Array) -> Array:
+def _component_normalization_mask(
+    components: Sequence[AmplitudeComponent],
+    normalize_components: bool,
+) -> tuple[bool, ...]:
+    return tuple(
+        _normalize_component(component, normalize_components)
+        for component in components
+    )
+
+
+def _normalize_component(
+    component: AmplitudeComponent,
+    normalize_components: bool,
+) -> bool:
+    if component.normalize_component is None:
+        return bool(normalize_components)
+    return bool(component.normalize_component)
+
+
+def _component_scales(matrix: Array, normalization_mask: Array) -> Array:
     diagonal = jnp.real(jnp.diag(matrix))
     if bool(jnp.any(diagonal <= 0.0)):
         raise ValueError("Component normalization requires positive diagonal integrals")
-    return 1.0 / jnp.sqrt(diagonal)
+    normalized_scales = 1.0 / jnp.sqrt(diagonal)
+    return jnp.where(normalization_mask, normalized_scales, 1.0)
 
 
-def _component_scales_unchecked(matrix: Array) -> tuple[Array, Array]:
+def _component_scales_unchecked(
+    matrix: Array,
+    normalization_mask: Array,
+) -> tuple[Array, Array]:
     diagonal = jnp.real(jnp.diag(matrix))
-    return 1.0 / jnp.sqrt(diagonal), diagonal
+    normalized_scales = 1.0 / jnp.sqrt(diagonal)
+    return jnp.where(normalization_mask, normalized_scales, 1.0), diagonal
 
 
 def _prepare_component_data(
@@ -154,6 +178,12 @@ def _compact_normalization_kernel(
     if chunk_size < 1:
         raise ValueError("normalization chunk_size must be positive")
 
+    normalization_flags = _component_normalization_mask(
+        components,
+        normalize_components,
+    )
+    normalization_mask = jnp.asarray(normalization_flags)
+    has_component_normalization = any(normalization_flags)
     chunk_kernel = _compact_normalization_chunk_kernel(
         components,
         has_efficiency=has_efficiency,
@@ -203,8 +233,11 @@ def _compact_normalization_kernel(
             jnp.sum(jnp.stack(efficient_parts, axis=0), axis=0) / n_points
         )
 
-        if normalize_components:
-            scales, diagonal = _component_scales_unchecked(raw_matrix)
+        if has_component_normalization:
+            scales, diagonal = _component_scales_unchecked(
+                raw_matrix,
+                normalization_mask,
+            )
             fixed_matrix = _scaled_matrix_from_raw(efficient_matrix, scales)
         else:
             scales = jnp.ones(
@@ -235,7 +268,7 @@ def _compact_data_kernel(
             [jnp.asarray(c.function(prepared_data, None)) for c in components],
             axis=1,
         )
-        return raw_data * scales if normalize_components else raw_data
+        return raw_data * scales
 
     return jax.jit(kernel)
 
@@ -439,8 +472,14 @@ class PreparedAmplitudeCache:
         )
 
         raw_component_matrix = normalization_matrix(raw_norm, weights, None)
-        if normalize_components:
-            scales = _component_scales(raw_component_matrix)
+        normalization_flags = _component_normalization_mask(
+            components,
+            normalize_components,
+        )
+        normalization_mask = jnp.asarray(normalization_flags)
+        has_component_normalization = any(normalization_flags)
+        if has_component_normalization:
+            scales = _component_scales(raw_component_matrix, normalization_mask)
             data_components = raw_data * scales
             norm_components = raw_norm * scales
         else:
@@ -456,7 +495,7 @@ class PreparedAmplitudeCache:
                 weights,
                 efficiency_normalization,
             )
-        elif normalize_components:
+        elif has_component_normalization:
             fixed_matrix = _scaled_matrix_from_raw(raw_component_matrix, scales)
         else:
             fixed_matrix = raw_component_matrix
@@ -495,7 +534,7 @@ class PreparedAmplitudeCache:
 
     def coefficient_vector(self, fit_values: Mapping[str, object]) -> Array:
         return jnp.asarray(
-            [component.coefficient.value(fit_values) for component in self.components]
+            [coefficient_value(component.coefficient, fit_values) for component in self.components]
         )
 
     def _dynamic_parameter_mapping(
@@ -541,7 +580,7 @@ class PreparedAmplitudeCache:
             pars = self._dynamic_parameter_mapping(component.name, fit_values)
             data_values = jnp.asarray(component.function(self.data, pars))
             norm_values = jnp.asarray(component.function(self.normalization_data, pars))
-            if self.normalize_components:
+            if _normalize_component(component, self.normalize_components):
                 scale = self._single_component_scale(norm_values)
                 data_values = data_values * scale
                 norm_values = norm_values * scale

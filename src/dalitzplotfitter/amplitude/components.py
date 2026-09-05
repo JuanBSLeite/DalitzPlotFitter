@@ -9,6 +9,12 @@ import jax.numpy as jnp
 from jax import Array
 
 
+def coefficient_value(coefficient, values=None):
+    """Resolve a coefficient object or return a fixed scalar coefficient."""
+    resolver = getattr(coefficient, "value", None)
+    return resolver(values) if resolver is not None else coefficient
+
+
 @dataclass(frozen=True)
 class AmplitudeComponent:
     """Named Laura++ dynamical component ``F_i(x)`` with a RealImag coefficient."""
@@ -16,6 +22,13 @@ class AmplitudeComponent:
     name: str
     function: object
     coefficient: object
+    normalize_component: bool | None = None
+
+    def __post_init__(self) -> None:
+        if self.normalize_component is not None and not isinstance(
+            self.normalize_component, bool
+        ):
+            raise ValueError("normalize_component must be a boolean or None")
 
     def value(
         self,
@@ -25,7 +38,7 @@ class AmplitudeComponent:
         coefficient_values: Mapping[str, object] | None = None,
     ) -> Array:
         dynamics = jnp.asarray(self.function(data, parameters))
-        coefficient = jnp.asarray(self.coefficient.value(coefficient_values))
+        coefficient = jnp.asarray(coefficient_value(self.coefficient, coefficient_values))
         return coefficient * dynamics
 
 
