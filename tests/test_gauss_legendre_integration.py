@@ -1,8 +1,9 @@
 import jax.numpy as jnp
 import pytest
 
+from dalitzplotfitter.integration.adaptive_square_dalitz import AdaptiveSquareDalitzGrid
+
 from dalitzplotfitter import (
-    AdaptiveDalitzGaussLegendreGrid,
     DalitzGaussLegendreGrid,
     DecayChannel,
     DecayModel,
@@ -12,6 +13,7 @@ from dalitzplotfitter import (
     enable_x64,
 )
 from dalitzplotfitter.integration import (
+    AdaptiveDalitzGaussLegendreGrid,
     GridIntegrator,
     matrix_normalization,
     normalization_matrix,
@@ -163,3 +165,32 @@ def test_adaptive_grid_overlap_uses_finest_requested_binning():
 
     fine = min(segment.target_width for segment in grid.m13_segments if segment.narrow)
     assert jnp.isclose(fine, 0.006 / 20.0)
+
+
+def test_adaptive_square_dalitz_integrates_constant_and_refines_narrow_band():
+    reference = SquareDalitzGrid(
+        MOTHER_MASS,
+        MASSES,
+        resolution=180,
+        pair=(0, 2),
+    ).sample()
+    adaptive = AdaptiveSquareDalitzGrid(
+        MOTHER_MASS,
+        MASSES,
+        narrow_resonances=(((0, 2), 0.78, 0.012),),
+        resolution=24,
+        pair=(0, 2),
+        window_n_widths=3.0,
+        binning_factor=4.0,
+        cell_order=6,
+        max_depth=6,
+    ).sample()
+
+    assert adaptive.size > 24**2
+    assert bool(jnp.all(adaptive.weights > 0.0))
+    assert jnp.allclose(
+        jnp.mean(adaptive.weights),
+        jnp.mean(reference.weights),
+        rtol=2e-3,
+        atol=2e-6,
+    )
