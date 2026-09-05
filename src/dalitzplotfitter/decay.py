@@ -15,6 +15,7 @@ from dalitzplotfitter.amplitude import (
     ConstantAmplitude,
     PreparedAmplitudeCache,
 )
+from dalitzplotfitter.amplitude.components import coefficient_value
 from dalitzplotfitter.dynamics import (
     CovariantAngular,
     RelativisticBreitWigner,
@@ -471,7 +472,7 @@ class DecayModel:
         total = None
         for component in self.amplitude_model.components:
             dynamics = jnp.asarray(component.function(data, values))
-            coefficient = jnp.asarray(component.coefficient.value(values))
+            coefficient = jnp.asarray(coefficient_value(component.coefficient, values))
             component_values = coefficient * self._component_scale(component, values) * dynamics
             total = component_values if total is None else total + component_values
         return jnp.asarray(total)
