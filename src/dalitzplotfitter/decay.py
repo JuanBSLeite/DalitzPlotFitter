@@ -336,6 +336,11 @@ class DecayModel:
         an unweighted toy uses unit weights. Within one model, any common
         overall weight factor cancels in normalized PDFs and fit/interference
         fractions.
+    normalization_chunk_size:
+        Maximum number of normalization points evaluated by one compiled
+        coefficient-only normalization chunk. Smaller values reduce temporary
+        device memory approximately linearly at the cost of more chunk
+        executions. Default: 100000.
 
     Notes
     -----
