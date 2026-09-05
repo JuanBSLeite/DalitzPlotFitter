@@ -332,8 +332,9 @@ class DecayModel:
         Optional external Monte Carlo sample used for every normalization
         integral. The package convention is mean(sample.weights * f). A
         weighted toy should therefore contain integration/importance weights;
-        an unweighted toy uses unit weights. Any common overall weight factor
-        cancels in normalized PDFs and fit/interference fractions.
+        an unweighted toy uses unit weights. Within one model, any common
+        overall weight factor cancels in normalized PDFs and fit/interference
+        fractions.
 
     Notes
     -----
