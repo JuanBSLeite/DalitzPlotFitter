@@ -624,7 +624,17 @@ def generate_toy(
     return toy
 
 
-def _integral(model, intensity, efficiency, veto) -> float:
+def _integral(model, parameters_or_intensity, efficiency, veto) -> float:
+    """Integrate accepted signal density for both toy-generation backends."""
+
+    if callable(parameters_or_intensity):
+        intensity = parameters_or_intensity
+    else:
+        parameters = parameters_or_intensity
+
+        def intensity(data):
+            return model.intensity(data, parameters)
+
     sample = model.normalization_sample
     data = sample.as_dict()
     value = jnp.mean(
