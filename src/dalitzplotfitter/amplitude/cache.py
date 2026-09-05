@@ -68,6 +68,25 @@ def _prepare_component_data(
             prepared = prepare(prepared)
     return prepared
 
+def _minimal_component_input(
+    components: Sequence[AmplitudeComponent],
+    data: Mapping[str, Array],
+) -> Mapping[str, Array]:
+    """Drop four-momenta when all selected components support invariants."""
+
+    components = tuple(components)
+    invariant_keys = ("s12", "s13", "s23")
+    if (
+        components
+        and all(
+            bool(getattr(component.function, "supports_invariant_input", False))
+            for component in components
+        )
+        and all(key in data for key in invariant_keys)
+    ):
+        return {key: data[key] for key in invariant_keys}
+    return dict(data)
+
 
 def _scaled_matrix_from_raw(raw_matrix: Array, scales: Array) -> Array:
     return scales[:, None] * raw_matrix * scales[None, :]
@@ -500,10 +519,34 @@ class PreparedAmplitudeCache:
         else:
             fixed_matrix = raw_component_matrix
 
+        floating_owners = frozenset(
+            parameter.owner
+            for parameter in parameters
+            if (
+                parameter.kind is ParameterKind.DYNAMICS
+                and not parameter.fixed
+                and parameter.owner is not None
+            )
+        )
+        dynamic_components = tuple(
+            component
+            for component in components
+            if component.name in floating_owners
+        )
+
+        retained_data = _prepare_component_data(
+            dynamic_components,
+            _minimal_component_input(dynamic_components, data),
+        )
+        retained_norm = _prepare_component_data(
+            dynamic_components,
+            _minimal_component_input(dynamic_components, normalization_data),
+        )
+
         return cls(
             components=components,
-            data=prepared_data,
-            normalization_data=prepared_norm,
+            data=retained_data,
+            normalization_data=retained_norm,
             normalization_weights=weights,
             parameters=parameters,
             data_components=data_components,
