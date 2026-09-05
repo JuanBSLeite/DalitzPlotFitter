@@ -95,7 +95,9 @@ toy = generate_toy(
 )
 ```
 
-The accept-reject implementation follows the Laura++ safety principle: if a proposal exceeds the current envelope, already accepted events from that component are discarded and generation restarts with a larger envelope. Probabilities are never clipped.
+The accept-reject implementation follows the Laura++ safety principle: if a proposal exceeds its current envelope, already accepted events from that component are discarded and generation restarts with an enlarged envelope. Probabilities are never clipped.
+
+For invariant-only densities the proposal square is automatically divided into equal Dalitz cells. A pilot sample estimates one envelope per cell; cells are then drawn with probability proportional to their local envelope and proposals inside a selected cell are uniform. Because all cells have equal area, accepting with `score / local_envelope` reproduces the same exact target density while avoiding the very poor efficiency of a single global maximum. The cell grid is occupancy-aware and grows up to 32x32 for large pilots. Momentum-dependent custom densities retain the monitored global-envelope fallback.
 
 The accept-reject proposal retains the exact weighted `PhaseSpaceMC` measure, but its invariant-only path is optimized for rejection sampling. Candidate pools are generated directly in `s12/s13/s23` without constructing four-momenta. Component normalization scales and coefficients are frozen once at the requested toy truth, and the proposal density is JIT-compiled. Acceptance decisions stay on the JAX device apart from the compact boolean selection mask.
 
