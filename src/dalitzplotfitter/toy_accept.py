@@ -319,12 +319,20 @@ def _accept_reject_component(
 
     estimated_efficiency = min(max(estimated_efficiency, 1e-4), 1.0)
     if batch_size is None:
-        batch_size = int(
-            min(
-                500_000,
-                max(4_096, np.ceil(1.25 * size / estimated_efficiency)),
+        if compact_proposal:
+            # Reuse the pilot array shape for proposal-density evaluation.
+            # JAX specializes on array shape, so the previous adaptive batch
+            # (often 500k after a 100k pilot) compiled the full amplitude twice
+            # on the first toy. Local envelopes make smaller repeated batches
+            # efficient enough that avoiding this second compilation wins.
+            batch_size = int(n_pilot)
+        else:
+            batch_size = int(
+                min(
+                    500_000,
+                    max(4_096, np.ceil(1.25 * size / estimated_efficiency)),
+                )
             )
-        )
     elif batch_size <= 0:
         raise ValueError("batch_size must be positive")
     else:
