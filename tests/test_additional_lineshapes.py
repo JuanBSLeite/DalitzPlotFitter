@@ -5,6 +5,7 @@ from dalitzplotfitter import (
     GounarisSakurai,
     LASS,
     Pole,
+    QMI,
     ResonanceContext,
     enable_x64,
 )
@@ -135,3 +136,36 @@ def test_lass_cutoff_only_removes_nonresonant_term():
     assert abs(complex(nonresonant)) < 1e-12
     assert abs(complex(resonant)) > 0.0
     assert abs(complex(model(mass, context) - resonant)) < 1e-12
+
+
+def test_qmi_prepared_intervals_match_direct_linear_evaluation():
+    context = _scalar_context()
+    qmi = QMI(
+        knots=(0.30, 0.55, 0.90, 1.40),
+        magnitudes=(1.0, 1.8, 0.7, 1.2),
+        phases=(0.1, -0.4, 0.8, 1.1),
+        interpolation="linear",
+    )
+    mass = jnp.linspace(0.28, 1.45, 257)
+    prepared = qmi.prepare_mass(mass, context)
+    direct = qmi(mass, context)
+    cached = qmi.evaluate_prepared(mass, prepared, context)
+
+    assert prepared.dtype == jnp.int16
+    assert jnp.allclose(cached, direct, rtol=1e-12, atol=1e-12)
+
+
+def test_qmi_prepared_intervals_match_direct_cubic_evaluation():
+    context = _scalar_context()
+    qmi = QMI(
+        knots=(0.30, 0.55, 0.90, 1.40),
+        magnitudes=(1.0, 1.8, 0.7, 1.2),
+        phases=(0.1, -0.4, 0.8, 1.1),
+        interpolation="cubic",
+    )
+    mass = jnp.linspace(0.28, 1.45, 257)
+    prepared = qmi.prepare_mass(mass, context)
+    direct = qmi(mass, context)
+    cached = qmi.evaluate_prepared(mass, prepared, context)
+
+    assert jnp.allclose(cached, direct, rtol=1e-12, atol=1e-12)
