@@ -110,6 +110,76 @@ def _generate_three_body_invariants(
     return s12, s13, s23, weights
 
 
+@partial(
+    jax.jit,
+    static_argnames=("size", "u_bins", "v_bins"),
+)
+def _generate_three_body_invariant_cells(
+    key: Array,
+    mother_mass: Array,
+    masses: Array,
+    cell_probabilities: Array,
+    *,
+    size: int,
+    u_bins: int,
+    v_bins: int,
+) -> tuple[Array, Array, Array, Array, Array]:
+    """Generate invariant proposals from equal cells in the unit Dalitz square."""
+
+    if u_bins < 1 or v_bins < 1:
+        raise ValueError("stratified phase-space bins must be positive")
+    n_cells = u_bins * v_bins
+    probabilities = jnp.asarray(cell_probabilities)
+    if probabilities.shape != (n_cells,):
+        raise ValueError(
+            "cell_probabilities must contain one probability per stratified cell"
+        )
+
+    dtype = mother_mass.dtype
+    key_cell, key_u, key_v = jax.random.split(key, 3)
+    cell = jax.random.choice(
+        key_cell,
+        n_cells,
+        shape=(size,),
+        p=probabilities,
+        replace=True,
+    )
+    iu = cell // v_bins
+    iv = cell % v_bins
+
+    ru = jax.random.uniform(key_u, (size,), dtype=dtype)
+    rv = jax.random.uniform(key_v, (size,), dtype=dtype)
+    u = (iu.astype(dtype) + ru) / float(u_bins)
+    v = (iv.astype(dtype) + rv) / float(v_bins)
+
+    m1, m2, m3 = masses
+    s_min = (m1 + m2) ** 2
+    s_max = (mother_mass - m3) ** 2
+    delta_s = s_max - s_min
+    eps = jnp.finfo(dtype).eps
+    u = jnp.clip(u, eps, 1.0 - eps)
+    s12 = s_min + delta_s * u
+
+    root_s12 = jnp.sqrt(s12)
+    e1 = (s12 + m1**2 - m2**2) / (2.0 * root_s12)
+    e3 = (mother_mass**2 - s12 - m3**2) / (2.0 * root_s12)
+    q = jnp.sqrt(jnp.maximum(_kallen(s12, m1**2, m2**2), 0.0)) / (
+        2.0 * root_s12
+    )
+    p = jnp.sqrt(
+        jnp.maximum(_kallen(mother_mass**2, s12, m3**2), 0.0)
+    ) / (2.0 * root_s12)
+    common = m1**2 + m3**2 + 2.0 * e1 * e3
+    spread = 2.0 * q * p
+    low = common - spread
+    width = 2.0 * spread
+    s13 = low + v * width
+    constant = mother_mass**2 + m1**2 + m2**2 + m3**2
+    s23 = constant - s12 - s13
+    weights = delta_s * width / (128.0 * jnp.pi**3 * mother_mass**2)
+    return s12, s13, s23, weights, cell.astype(jnp.int32)
+
+
 @partial(jax.jit, static_argnames=("size",))
 def _momenta_from_invariants(
     key: Array,
@@ -339,6 +409,57 @@ class PhaseSpaceMC:
             p1=p1,
             p2=p2,
             p3=p3,
+        )
+
+    def generate_stratified_invariants(
+        self,
+        size: int,
+        *,
+        cell_probabilities: Array,
+        grid_shape: tuple[int, int],
+        seed: int | None = None,
+        key: Array | None = None,
+    ) -> tuple[PhaseSpaceSample, Array]:
+        """Generate invariant-only proposals from weighted equal Dalitz cells."""
+
+        if size <= 0:
+            raise ValueError("size must be positive")
+        if len(grid_shape) != 2:
+            raise ValueError("grid_shape must contain (u_bins, v_bins)")
+        u_bins, v_bins = (int(grid_shape[0]), int(grid_shape[1]))
+        if u_bins < 1 or v_bins < 1:
+            raise ValueError("grid_shape entries must be positive")
+        probabilities = jnp.asarray(cell_probabilities)
+        if probabilities.shape != (u_bins * v_bins,):
+            raise ValueError(
+                "cell_probabilities must match the requested stratified grid"
+            )
+        if seed is not None and key is not None:
+            raise ValueError("Pass either seed or key, not both")
+        if key is None:
+            if seed is None:
+                seed = secrets.randbits(32)
+            key = jax.random.key(int(seed))
+
+        mother_mass = jnp.asarray(self.mother_mass)
+        masses = jnp.asarray(self.masses, dtype=mother_mass.dtype)
+        s12, s13, s23, weights, cells = _generate_three_body_invariant_cells(
+            key,
+            mother_mass,
+            masses,
+            probabilities,
+            size=size,
+            u_bins=u_bins,
+            v_bins=v_bins,
+        )
+        return (
+            PhaseSpaceSample(
+                s12=s12,
+                s13=s13,
+                s23=s23,
+                weights=weights,
+            ),
+            cells,
         )
 
     def attach_momenta(
