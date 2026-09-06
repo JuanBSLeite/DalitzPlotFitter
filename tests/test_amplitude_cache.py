@@ -106,10 +106,14 @@ def test_only_component_with_floating_dynamics_is_reevaluated():
     assert cache.fixed_component_indices == (1,)
     assert cache.dynamic_component_indices == (0,)
     assert cache.data_components.shape == (8, 1)
-    assert cache.normalization_components.shape == (32, 1)
-    assert (f1.calls, f2.calls) == (2, 2)
+    assert isinstance(cache.normalization_components, tuple)
+    assert len(cache.normalization_components) == 1
+    assert cache.normalization_components[0].shape == (32,)
+    # Floating dynamics are no longer evaluated during cache construction.
+    # Only the fixed component is cached on data and normalization samples.
+    assert (f1.calls, f2.calls) == (0, 2)
     cache.evaluate({"a.scale": 1.2, "b.x": 0.6, "b.y": 0.4})
-    assert f1.calls == 4
+    assert f1.calls == 2
     assert f2.calls == 2
 
 
@@ -358,6 +362,8 @@ def test_multiple_dynamic_rows_match_full_matrix_recomputation():
     expected = normalization_matrix(norm_components, weights, efficiency)
     assert cache.fixed_component_indices == (2,)
     assert cache.dynamic_component_indices == (0, 1)
-    assert cache.normalization_components.shape == (48, 1)
+    assert isinstance(cache.normalization_components, tuple)
+    assert len(cache.normalization_components) == 1
+    assert cache.normalization_components[0].shape == (48,)
     assert jnp.allclose(matrix, expected, rtol=1e-12, atol=1e-12)
     assert jnp.allclose(optimized, expected, rtol=1e-12, atol=1e-12)
