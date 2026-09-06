@@ -546,7 +546,7 @@ class PreparedAmplitudeCache:
             components,
             normalize_components,
         )
-        real_dtype = jnp.asarray(weights).dtype
+        real_dtype = jnp.result_type(jnp.asarray(weights).dtype, jnp.float32)
         complex_dtype = jnp.result_type(real_dtype, jnp.complex64)
         scales = jnp.ones((len(components),), dtype=real_dtype)
 
