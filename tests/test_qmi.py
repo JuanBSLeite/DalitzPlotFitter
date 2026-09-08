@@ -4,6 +4,7 @@ import jax.numpy as jnp
 from dalitzplotfitter.dynamics.lineshape.qmi import (
     _cubic_qmi_prepared,
     _hermite_qmi_prepared,
+    _linear_cartesian_qmi_prepared,
 )
 
 from dalitzplotfitter import (
@@ -549,3 +550,167 @@ def test_qmi_hermite_has_continuous_first_derivative_at_internal_knots():
         - jnp.real(model(jnp.asarray(knot), _context()))
     ) / eps
     assert abs(float(left - right)) < 2e-4
+
+
+def test_prepared_linear_cartesian_qmi_matches_reference_value_and_gradient():
+    knots = (0.30, 0.48, 0.67, 0.91, 1.20)
+    knot_s = jnp.asarray(knots) ** 2
+    masses = jnp.linspace(0.31, 1.19, 173)
+    s = masses**2
+    real = jnp.asarray((1.0, -0.4, 1.7, 0.2, 1.1))
+    imaginary = jnp.asarray((0.2, 0.8, -0.6, 1.2, -0.1))
+
+    index = jnp.clip(
+        jnp.searchsorted(knot_s, s, side="right") - 1,
+        0,
+        len(knots) - 2,
+    )
+    x0 = knot_s[index]
+    x1 = knot_s[index + 1]
+    fraction = (s - x0) / (x1 - x0)
+    order = jnp.argsort(index).astype(jnp.int32)
+    counts = jnp.bincount(index.astype(jnp.int32), length=len(knots) - 1)
+    ends = jnp.cumsum(counts).astype(jnp.int32)
+    starts = jnp.concatenate((jnp.zeros((1,), dtype=jnp.int32), ends[:-1]))
+    fixed = 0.7 + 0.3j + 0.1 * jnp.sin(s)
+
+    def prepared_objective(real_values, imaginary_values):
+        amplitude = _linear_cartesian_qmi_prepared(
+            real_values,
+            imaginary_values,
+            index,
+            fraction,
+            order,
+            starts,
+            ends,
+        )
+        total = fixed + amplitude
+        return -jnp.sum(jnp.log(jnp.abs(total) ** 2)) + 0.03 * jnp.sum(
+            jnp.abs(amplitude) ** 2
+        )
+
+    def reference_objective(real_values, imaginary_values):
+        real_interp = real_values[index] + fraction * (
+            real_values[index + 1] - real_values[index]
+        )
+        imaginary_interp = imaginary_values[index] + fraction * (
+            imaginary_values[index + 1] - imaginary_values[index]
+        )
+        amplitude = real_interp + 1j * imaginary_interp
+        total = fixed + amplitude
+        return -jnp.sum(jnp.log(jnp.abs(total) ** 2)) + 0.03 * jnp.sum(
+            jnp.abs(amplitude) ** 2
+        )
+
+    prepared_value = prepared_objective(real, imaginary)
+    reference_value = reference_objective(real, imaginary)
+    prepared_gradient = jax.grad(prepared_objective, argnums=(0, 1))(real, imaginary)
+    reference_gradient = jax.grad(reference_objective, argnums=(0, 1))(real, imaginary)
+
+    assert jnp.allclose(prepared_value, reference_value, rtol=1e-13, atol=1e-13)
+    assert jnp.allclose(
+        prepared_gradient[0],
+        reference_gradient[0],
+        rtol=2e-11,
+        atol=2e-11,
+    )
+    assert jnp.allclose(
+        prepared_gradient[1],
+        reference_gradient[1],
+        rtol=2e-11,
+        atol=2e-11,
+    )
+
+
+def test_linear_cartesian_qmi_inserting_interpolated_knot_preserves_amplitude():
+    knots = (0.30, 0.60, 0.90, 1.20)
+    real = jnp.asarray((1.0, -0.5, 0.3, 2.0))
+    imaginary = jnp.asarray((0.2, 1.5, -0.7, 0.0))
+    inserted_mass = 1.05
+
+    old_knot_s = jnp.asarray(knots) ** 2
+    inserted_s = inserted_mass**2
+    fraction = (inserted_s - old_knot_s[2]) / (old_knot_s[3] - old_knot_s[2])
+    inserted_real = real[2] + fraction * (real[3] - real[2])
+    inserted_imaginary = imaginary[2] + fraction * (
+        imaginary[3] - imaginary[2]
+    )
+
+    refined_knots = (0.30, 0.60, 0.90, inserted_mass, 1.20)
+    refined_real = (real[0], real[1], real[2], inserted_real, real[3])
+    refined_imaginary = (
+        imaginary[0],
+        imaginary[1],
+        imaginary[2],
+        inserted_imaginary,
+        imaginary[3],
+    )
+
+    original = QMI(
+        knots=knots,
+        real_parts=tuple(real),
+        imaginary_parts=tuple(imaginary),
+        interpolation="linear",
+    )
+    refined = QMI(
+        knots=refined_knots,
+        real_parts=refined_real,
+        imaginary_parts=refined_imaginary,
+        interpolation="linear",
+    )
+    masses = jnp.linspace(0.25, 1.25, 1001)
+
+    assert jnp.allclose(
+        original(masses, _context()),
+        refined(masses, _context()),
+        rtol=0.0,
+        atol=2e-13,
+    )
+
+
+def test_prepared_linear_cartesian_qmi_inserting_interpolated_knot_preserves_amplitude():
+    knots = (0.30, 0.60, 0.90, 1.20)
+    real = jnp.asarray((1.0, -0.5, 0.3, 2.0))
+    imaginary = jnp.asarray((0.2, 1.5, -0.7, 0.0))
+    inserted_mass = 1.05
+
+    old_knot_s = jnp.asarray(knots) ** 2
+    inserted_s = inserted_mass**2
+    fraction = (inserted_s - old_knot_s[2]) / (old_knot_s[3] - old_knot_s[2])
+    inserted_real = real[2] + fraction * (real[3] - real[2])
+    inserted_imaginary = imaginary[2] + fraction * (
+        imaginary[3] - imaginary[2]
+    )
+
+    original = QMI(
+        knots=knots,
+        real_parts=tuple(real),
+        imaginary_parts=tuple(imaginary),
+        interpolation="linear",
+    )
+    refined = QMI(
+        knots=(0.30, 0.60, 0.90, inserted_mass, 1.20),
+        real_parts=(real[0], real[1], real[2], inserted_real, real[3]),
+        imaginary_parts=(
+            imaginary[0],
+            imaginary[1],
+            imaginary[2],
+            inserted_imaginary,
+            imaginary[3],
+        ),
+        interpolation="linear",
+    )
+    masses = jnp.linspace(0.30, 1.20, 1001)
+    context = _context()
+
+    original_prepared = original.prepare_mass(masses, context)
+    refined_prepared = refined.prepare_mass(masses, context)
+    original_values = original.evaluate_prepared(None, original_prepared, context)
+    refined_values = refined.evaluate_prepared(None, refined_prepared, context)
+
+    assert jnp.allclose(
+        original_values,
+        refined_values,
+        rtol=0.0,
+        atol=2e-13,
+    )
