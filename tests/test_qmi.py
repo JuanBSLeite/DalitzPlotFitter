@@ -2,17 +2,16 @@ import jax
 import jax.numpy as jnp
 
 from dalitzplotfitter import (
+    QMI,
     DecayChannel,
     DecayModel,
     Parameter,
     ParameterKind,
-    QMI,
     RealImag,
     Resonance,
     ResonanceContext,
     enable_x64,
 )
-
 
 enable_x64()
 
@@ -56,6 +55,65 @@ def test_qmi_interpolates_magnitude_and_phase_linearly_in_s():
     magnitude, phase = model.interpolated_magnitude_phase(mass)
     assert abs(float(magnitude) - 2.0) < 1e-12
     assert abs(float(phase) - 0.6) < 1e-12
+
+
+def test_qmi_interpolates_real_and_imaginary_parts_linearly_in_s():
+    model = QMI(
+        knots=(0.4, 0.8),
+        real_parts=(1.0, 3.0),
+        imaginary_parts=(-2.0, 2.0),
+        interpolation="linear",
+    )
+    mass = jnp.sqrt(0.5 * (0.4**2 + 0.8**2))
+    value = model(mass, _context())
+    real, imaginary = model.interpolated_cartesian(mass)
+    magnitude, phase = model.interpolated_magnitude_phase(mass)
+
+    assert abs(complex(value) - (2.0 + 0.0j)) < 1e-12
+    assert abs(float(real) - 2.0) < 1e-12
+    assert abs(float(imaginary)) < 1e-12
+    assert abs(float(magnitude) - 2.0) < 1e-12
+    assert abs(float(phase)) < 1e-12
+
+
+def test_qmi_cartesian_returns_exact_complex_values_at_knots():
+    knots = (0.30, 0.60, 0.90, 1.20)
+    real_parts = (1.0, -0.5, 0.3, 2.0)
+    imaginary_parts = (0.2, 1.5, -0.7, 0.0)
+    expected = jnp.asarray(real_parts) + 1j * jnp.asarray(imaginary_parts)
+
+    for interpolation in ("linear", "cubic"):
+        model = QMI(
+            knots=knots,
+            real_parts=real_parts,
+            imaginary_parts=imaginary_parts,
+            interpolation=interpolation,
+        )
+        values = model(jnp.asarray(knots), _context())
+        assert bool(jnp.allclose(values, expected, rtol=0.0, atol=1e-11))
+
+
+def test_qmi_requires_exactly_one_complete_parameterization():
+    invalid = (
+        {},
+        {"magnitudes": (1.0, 1.0)},
+        {"real_parts": (1.0, 1.0)},
+        {
+            "magnitudes": (1.0, 1.0),
+            "phases": (0.0, 0.0),
+            "real_parts": (1.0, 1.0),
+            "imaginary_parts": (0.0, 0.0),
+        },
+    )
+    for values in invalid:
+        try:
+            QMI(knots=(0.4, 0.8), **values)
+        except ValueError as exc:
+            assert "polar or Cartesian" in str(exc) or "same length" in str(exc)
+        else:
+            raise AssertionError(
+                "QMI accepted an incomplete or ambiguous parameter set"
+            )
 
 
 def test_qmi_cubic_is_smooth_and_differs_from_linear_between_knots():
@@ -161,6 +219,40 @@ def test_qmi_knot_parameters_are_collected_and_resolved_by_decay_model():
     data = decay.normalization_sample.as_dict()
     nominal = decay.intensity(data, {"qmi_a0": 1.0, "qmi_d0": 0.0})
     shifted = decay.intensity(data, {"qmi_a0": 2.0, "qmi_d0": 0.3})
+    assert bool(jnp.any(jnp.abs(nominal - shifted) > 1e-10))
+
+
+def test_cartesian_qmi_parameters_are_collected_and_resolved_by_decay_model():
+    owner = "pipi_S_cartesian_qmi"
+    x0 = Parameter.dynamics("qmi_x0", 1.0, owner=owner)
+    y0 = Parameter.dynamics("qmi_y0", 0.0, owner=owner)
+    qmi = QMI(
+        knots=(0.30, 0.60, 0.90),
+        real_parts=(x0, 1.5, 1.2),
+        imaginary_parts=(y0, 0.4, 0.8),
+        interpolation="linear",
+    )
+    decay = DecayModel(
+        DecayChannel("D_s+", ("pi-", "pi+", "pi+")),
+        [
+            Resonance(
+                owner,
+                pair=(0, 1),
+                coefficient=RealImag(1.0, 0.0),
+                mass=1.0,
+                width=0.0,
+                spin=0,
+                lineshape=qmi,
+            )
+        ],
+        normalization_resolution=30,
+    )
+    names = {parameter.name for parameter in decay.parameters}
+    assert {"qmi_x0", "qmi_y0"}.issubset(names)
+
+    data = decay.normalization_sample.as_dict()
+    nominal = decay.intensity(data, {"qmi_x0": 1.0, "qmi_y0": 0.0})
+    shifted = decay.intensity(data, {"qmi_x0": 2.0, "qmi_y0": 0.3})
     assert bool(jnp.any(jnp.abs(nominal - shifted) > 1e-10))
 
 

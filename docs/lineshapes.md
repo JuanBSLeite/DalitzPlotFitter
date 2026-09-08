@@ -127,7 +127,8 @@ A_S(s_k) = a_k exp(i delta_k)
 A_S(s)   = a(s) exp(i delta(s)).
 ```
 
-Magnitude and phase are interpolated separately. Two interpolation modes are available:
+By default, magnitude and phase are interpolated separately. Two interpolation
+modes are available:
 
 ```python
 QMI(..., interpolation="linear")  # default; reproduces the published LHCb convention
@@ -151,6 +152,31 @@ qmi = QMI(
 
 Published QMI values should be validated in analysis-specific studies before
 being used in a production model.
+
+For fits where the polar coordinates become poorly conditioned, the same class
+accepts Cartesian knot values:
+
+```python
+qmi = QMI(
+    knots=(0.30, 0.50, 0.70, 0.90, 1.10),
+    real_parts=(x0, x1, x2, x3, x4),
+    imaginary_parts=(y0, y1, y2, y3, y4),
+    interpolation="linear",
+)
+```
+
+In this form, the real and imaginary parts are interpolated directly and
+independently in `s=m**2`, and the amplitude is
+
+```text
+A_S(s) = x(s) + i y(s).
+```
+
+This avoids phase-branch ambiguities and the magnitude-zero singularity during
+minimization. `interpolated_magnitude_phase(mass)` remains available and derives
+the polar coordinates from the interpolated complex value. A QMI declaration
+must provide exactly one complete parameter set: either `magnitudes` and
+`phases`, or `real_parts` and `imaginary_parts`.
 
 ## QMI2D Dalitz amplitude
 

@@ -35,9 +35,8 @@ def _linear_qmi_prepared(
 
     index32 = jnp.asarray(index, dtype=jnp.int32)
     fraction = jnp.asarray(fraction, dtype=magnitudes.dtype)
-    magnitude = (
-        magnitudes[index32]
-        + fraction * (magnitudes[index32 + 1] - magnitudes[index32])
+    magnitude = magnitudes[index32] + fraction * (
+        magnitudes[index32 + 1] - magnitudes[index32]
     )
     phase = phases[index32] + fraction * (phases[index32 + 1] - phases[index32])
     return magnitude * jnp.exp(1j * phase)
@@ -54,9 +53,8 @@ def _linear_qmi_prepared_fwd(
 ):
     index32 = jnp.asarray(index, dtype=jnp.int32)
     fraction = jnp.asarray(fraction, dtype=magnitudes.dtype)
-    magnitude = (
-        magnitudes[index32]
-        + fraction * (magnitudes[index32 + 1] - magnitudes[index32])
+    magnitude = magnitudes[index32] + fraction * (
+        magnitudes[index32 + 1] - magnitudes[index32]
     )
     phase = phases[index32] + fraction * (phases[index32 + 1] - phases[index32])
     exp_phase = jnp.exp(1j * phase)
@@ -145,6 +143,117 @@ _linear_qmi_prepared.defvjp(
 )
 
 
+@jax.custom_vjp
+def _linear_cartesian_qmi_prepared(
+    real_parts,
+    imaginary_parts,
+    index,
+    fraction,
+    order,
+    starts,
+    ends,
+):
+    """Evaluate a prepared Cartesian QMI with a reduction-based VJP."""
+
+    index32 = jnp.asarray(index, dtype=jnp.int32)
+    fraction = jnp.asarray(fraction, dtype=real_parts.dtype)
+    real = real_parts[index32] + fraction * (
+        real_parts[index32 + 1] - real_parts[index32]
+    )
+    imaginary = imaginary_parts[index32] + fraction * (
+        imaginary_parts[index32 + 1] - imaginary_parts[index32]
+    )
+    return real + 1j * imaginary
+
+
+def _linear_cartesian_qmi_prepared_fwd(
+    real_parts,
+    imaginary_parts,
+    index,
+    fraction,
+    order,
+    starts,
+    ends,
+):
+    index32 = jnp.asarray(index, dtype=jnp.int32)
+    fraction = jnp.asarray(fraction, dtype=real_parts.dtype)
+    real = real_parts[index32] + fraction * (
+        real_parts[index32 + 1] - real_parts[index32]
+    )
+    imaginary = imaginary_parts[index32] + fraction * (
+        imaginary_parts[index32 + 1] - imaginary_parts[index32]
+    )
+    value = real + 1j * imaginary
+    residual = (fraction, order, starts, ends)
+    return value, residual
+
+
+def _linear_cartesian_qmi_prepared_bwd(residual, cotangent):
+    fraction, order, starts, ends = residual
+
+    # JAX's real-parameter/complex-output VJP convention is
+    # dL/dx = Re(g * dy/dx).
+    d_real = jnp.real(cotangent)
+    d_imaginary = jnp.real(1j * cotangent)
+
+    order = jnp.asarray(order, dtype=jnp.int32)
+    sorted_fraction = fraction[order]
+    sorted_d_real = d_real[order]
+    sorted_d_imaginary = d_imaginary[order]
+
+    left_real = _grouped_interval_sums(
+        (1.0 - sorted_fraction) * sorted_d_real,
+        starts,
+        ends,
+    )
+    right_real = _grouped_interval_sums(
+        sorted_fraction * sorted_d_real,
+        starts,
+        ends,
+    )
+    left_imaginary = _grouped_interval_sums(
+        (1.0 - sorted_fraction) * sorted_d_imaginary,
+        starts,
+        ends,
+    )
+    right_imaginary = _grouped_interval_sums(
+        sorted_fraction * sorted_d_imaginary,
+        starts,
+        ends,
+    )
+
+    real_gradient = jnp.concatenate(
+        (
+            left_real[:1],
+            left_real[1:] + right_real[:-1],
+            right_real[-1:],
+        )
+    )
+    imaginary_gradient = jnp.concatenate(
+        (
+            left_imaginary[:1],
+            left_imaginary[1:] + right_imaginary[:-1],
+            right_imaginary[-1:],
+        )
+    )
+
+    return (
+        real_gradient,
+        imaginary_gradient,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+
+
+_linear_cartesian_qmi_prepared.defvjp(
+    _linear_cartesian_qmi_prepared_fwd,
+    _linear_cartesian_qmi_prepared_bwd,
+)
+
+
 def _interval_index_and_fraction(x, xp, prepared_index=None):
     """Return the interpolation interval and local fraction.
 
@@ -169,6 +278,7 @@ def _interval_index_and_fraction(x, xp, prepared_index=None):
     fraction = (x_clamped - x0) / (x1 - x0)
     return index, fraction
 
+
 def _linear_spline(x, xp, fp):
     """Piecewise-linear interpolation with endpoint clamping.
 
@@ -186,6 +296,7 @@ def _linear_spline(x, xp, fp):
     y0, y1 = fp[index], fp[index + 1]
     return y0 + fraction * (y1 - y0)
 
+
 def _natural_cubic_spline(x, xp, fp, inverse=None):
     x = jnp.asarray(x)
     xp = jnp.asarray(xp, dtype=x.dtype)
@@ -194,10 +305,7 @@ def _natural_cubic_spline(x, xp, fp, inverse=None):
     h = xp[1:] - xp[:-1]
     interior = n - 2
     if interior > 0:
-        rhs = 6.0 * (
-            (fp[2:] - fp[1:-1]) / h[1:]
-            - (fp[1:-1] - fp[:-2]) / h[:-1]
-        )
+        rhs = 6.0 * ((fp[2:] - fp[1:-1]) / h[1:] - (fp[1:-1] - fp[:-2]) / h[:-1])
         if inverse is None:
             diag = 2.0 * (h[:-1] + h[1:])
             matrix = jnp.diag(diag)
@@ -228,29 +336,45 @@ def _natural_cubic_spline(x, xp, fp, inverse=None):
     width = x1 - x0
     a = (x1 - x_clamped) / width
     b = (x_clamped - x0) / width
-    return (
-        a * y0
-        + b * y1
-        + ((a**3 - a) * m0 + (b**3 - b) * m1) * width**2 / 6.0
-    )
+    return a * y0 + b * y1 + ((a**3 - a) * m0 + (b**3 - b) * m1) * width**2 / 6.0
 
 
 @dataclass(frozen=True)
 class QMI:
     knots: tuple[float, ...]
-    magnitudes: tuple[object, ...]
-    phases: tuple[object, ...]
+    magnitudes: tuple[object, ...] | None = None
+    phases: tuple[object, ...] | None = None
     interpolation: str = "linear"
+    real_parts: tuple[object, ...] | None = None
+    imaginary_parts: tuple[object, ...] | None = None
 
     def __post_init__(self) -> None:
         if len(self.knots) < 2:
             raise ValueError("QMI requires at least two knots")
-        if len(self.magnitudes) != len(self.knots):
-            raise ValueError("QMI magnitudes must have the same length as knots")
-        if len(self.phases) != len(self.knots):
-            raise ValueError("QMI phases must have the same length as knots")
+        polar = self.magnitudes is not None or self.phases is not None
+        cartesian = self.real_parts is not None or self.imaginary_parts is not None
+        if polar == cartesian:
+            raise ValueError(
+                "QMI requires exactly one complete polar or Cartesian parameter set"
+            )
+        if polar:
+            if self.magnitudes is None or len(self.magnitudes) != len(self.knots):
+                raise ValueError("QMI magnitudes must have the same length as knots")
+            if self.phases is None or len(self.phases) != len(self.knots):
+                raise ValueError("QMI phases must have the same length as knots")
+        else:
+            if self.real_parts is None or len(self.real_parts) != len(self.knots):
+                raise ValueError("QMI real parts must have the same length as knots")
+            if self.imaginary_parts is None or len(self.imaginary_parts) != len(
+                self.knots
+            ):
+                raise ValueError(
+                    "QMI imaginary parts must have the same length as knots"
+                )
         knots = tuple(float(value) for value in self.knots)
-        if any(right <= left for left, right in zip(knots[:-1], knots[1:])):
+        if any(
+            right <= left for left, right in zip(knots[:-1], knots[1:], strict=True)
+        ):
             raise ValueError("QMI knots must be strictly increasing")
         if knots[0] <= 0.0:
             raise ValueError("QMI knot masses must be positive")
@@ -262,6 +386,10 @@ class QMI:
     @property
     def size(self) -> int:
         return len(self.knots)
+
+    @property
+    def parameterization(self) -> str:
+        return "cartesian" if self.real_parts is not None else "polar"
 
     @cached_property
     def _cubic_inverse(self):
@@ -280,9 +408,7 @@ class QMI:
 
     def _interpolate(self, s, knot_s, values, prepared_index=None):
         if self.interpolation == "linear":
-            index, fraction = _interval_index_and_fraction(
-                s, knot_s, prepared_index
-            )
+            index, fraction = _interval_index_and_fraction(s, knot_s, prepared_index)
             return values[index] + fraction * (values[index + 1] - values[index])
         if prepared_index is None:
             return _natural_cubic_spline(
@@ -292,9 +418,7 @@ class QMI:
                 inverse=self._cubic_inverse,
             )
 
-        index, fraction = _interval_index_and_fraction(
-            s, knot_s, prepared_index
-        )
+        index, fraction = _interval_index_and_fraction(s, knot_s, prepared_index)
         n = knot_s.shape[0]
         h = knot_s[1:] - knot_s[:-1]
         interior = n - 2
@@ -319,15 +443,18 @@ class QMI:
         return (
             a * values[index]
             + b * values[index + 1]
-            + (
-                (a**3 - a) * second[index]
-                + (b**3 - b) * second[index + 1]
-            )
+            + ((a**3 - a) * second[index] + (b**3 - b) * second[index + 1])
             * width**2
             / 6.0
         )
 
-    def _interpolated_magnitude_phase(self, mass, prepared_index=None):
+    def _interpolated_pair(
+        self,
+        mass,
+        first_values,
+        second_values,
+        prepared_index=None,
+    ):
         prepared_fraction = None
         prepared_order = None
         prepared_starts = None
@@ -341,7 +468,9 @@ class QMI:
 
         if mass is None:
             if prepared_fraction is None:
-                raise ValueError("prepared QMI evaluation requires interpolation fractions")
+                raise ValueError(
+                    "prepared QMI evaluation requires interpolation fractions"
+                )
             dtype_source = jnp.asarray(prepared_fraction)
             knot_s = jnp.asarray(self.knots, dtype=dtype_source.dtype) ** 2
             s = None
@@ -350,8 +479,8 @@ class QMI:
             knot_s = jnp.asarray(self.knots, dtype=mass.dtype) ** 2
             s = mass**2
 
-        magnitudes = jnp.asarray(self.magnitudes, dtype=knot_s.dtype)
-        phases = jnp.asarray(self.phases, dtype=knot_s.dtype)
+        magnitudes = jnp.asarray(first_values, dtype=knot_s.dtype)
+        phases = jnp.asarray(second_values, dtype=knot_s.dtype)
 
         if self.interpolation == "linear":
             if prepared_fraction is None:
@@ -361,9 +490,8 @@ class QMI:
             else:
                 index = jnp.asarray(prepared_index, dtype=jnp.int32)
                 fraction = jnp.asarray(prepared_fraction, dtype=knot_s.dtype)
-            magnitude = (
-                magnitudes[index]
-                + fraction * (magnitudes[index + 1] - magnitudes[index])
+            magnitude = magnitudes[index] + fraction * (
+                magnitudes[index + 1] - magnitudes[index]
             )
             phase = phases[index] + fraction * (phases[index + 1] - phases[index])
             return magnitude, phase
@@ -401,10 +529,7 @@ class QMI:
                 return (
                     a * values[index]
                     + b * values[index + 1]
-                    + (
-                        (a**3 - a) * second[index]
-                        + (b**3 - b) * second[index + 1]
-                    )
+                    + ((a**3 - a) * second[index] + (b**3 - b) * second[index + 1])
                     * width**2
                     / 6.0
                 )
@@ -416,8 +541,44 @@ class QMI:
             self._interpolate(s, knot_s, phases, prepared_index),
         )
 
+    def _interpolated_magnitude_phase(self, mass, prepared_index=None):
+        if self.parameterization == "polar":
+            return self._interpolated_pair(
+                mass,
+                self.magnitudes,
+                self.phases,
+                prepared_index,
+            )
+        real, imaginary = self._interpolated_pair(
+            mass,
+            self.real_parts,
+            self.imaginary_parts,
+            prepared_index,
+        )
+        value = real + 1j * imaginary
+        return jnp.abs(value), jnp.angle(value)
+
     def interpolated_magnitude_phase(self, mass):
         return self._interpolated_magnitude_phase(mass)
+
+    def _interpolated_cartesian(self, mass, prepared_index=None):
+        if self.parameterization == "cartesian":
+            return self._interpolated_pair(
+                mass,
+                self.real_parts,
+                self.imaginary_parts,
+                prepared_index,
+            )
+        magnitude, phase = self._interpolated_pair(
+            mass,
+            self.magnitudes,
+            self.phases,
+            prepared_index,
+        )
+        return magnitude * jnp.cos(phase), magnitude * jnp.sin(phase)
+
+    def interpolated_cartesian(self, mass):
+        return self._interpolated_cartesian(mass)
 
     @property
     def prepared_mass_is_self_contained(self) -> bool:
@@ -442,9 +603,7 @@ class QMI:
         order = jnp.argsort(index).astype(jnp.int32)
         counts = jnp.bincount(index.astype(jnp.int32), length=self.size - 1)
         ends = jnp.cumsum(counts).astype(jnp.int32)
-        starts = jnp.concatenate(
-            (jnp.zeros((1,), dtype=jnp.int32), ends[:-1])
-        )
+        starts = jnp.concatenate((jnp.zeros((1,), dtype=jnp.int32), ends[:-1]))
         return compact_index, fraction, order, starts, ends
 
     def evaluate_prepared(self, mass, prepared_index, context: ResonanceContext):
@@ -455,6 +614,24 @@ class QMI:
             if len(prepared_index) >= 5:
                 index, fraction, order, starts, ends = prepared_index[:5]
                 dtype_source = jnp.asarray(fraction)
+                if self.parameterization == "cartesian":
+                    real_parts = jnp.asarray(
+                        self.real_parts,
+                        dtype=dtype_source.dtype,
+                    )
+                    imaginary_parts = jnp.asarray(
+                        self.imaginary_parts,
+                        dtype=dtype_source.dtype,
+                    )
+                    return _linear_cartesian_qmi_prepared(
+                        real_parts,
+                        imaginary_parts,
+                        index,
+                        fraction,
+                        order,
+                        starts,
+                        ends,
+                    )
                 magnitudes = jnp.asarray(self.magnitudes, dtype=dtype_source.dtype)
                 phases = jnp.asarray(self.phases, dtype=dtype_source.dtype)
                 return _linear_qmi_prepared(
@@ -467,14 +644,24 @@ class QMI:
                     ends,
                 )
 
+        if self.parameterization == "cartesian":
+            real, imaginary = self._interpolated_cartesian(
+                mass,
+                prepared_index=prepared_index,
+            )
+            return real + 1j * imaginary
         magnitude, phase = self._interpolated_magnitude_phase(
-            mass, prepared_index=prepared_index
+            mass,
+            prepared_index=prepared_index,
         )
         return magnitude * jnp.exp(1j * phase)
 
     def __call__(self, mass, context: ResonanceContext):
         if int(context.spin) != 0:
             raise ValueError("QMI is defined for a scalar S-wave")
+        if self.parameterization == "cartesian":
+            real, imaginary = self.interpolated_cartesian(mass)
+            return real + 1j * imaginary
         magnitude, phase = self.interpolated_magnitude_phase(mass)
         return magnitude * jnp.exp(1j * phase)
 

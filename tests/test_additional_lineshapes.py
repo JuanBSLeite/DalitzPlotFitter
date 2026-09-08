@@ -2,15 +2,14 @@ import jax
 import jax.numpy as jnp
 
 from dalitzplotfitter import (
+    LASS,
+    QMI,
     Flatte,
     GounarisSakurai,
-    LASS,
     Pole,
-    QMI,
     ResonanceContext,
     enable_x64,
 )
-
 
 enable_x64()
 
@@ -238,4 +237,77 @@ def test_qmi_prepared_intervals_match_direct_cubic_evaluation():
         direct,
         rtol=1e-12,
         atol=1e-12,
+    )
+
+
+def test_cartesian_qmi_prepared_intervals_match_direct_evaluation():
+    context = _scalar_context()
+    mass = jnp.linspace(0.28, 1.45, 257)
+
+    for interpolation in ("linear", "cubic"):
+        qmi = QMI(
+            knots=(0.30, 0.55, 0.90, 1.40),
+            real_parts=(1.0, -0.4, 0.8, 1.1),
+            imaginary_parts=(0.1, 1.8, -0.7, 1.2),
+            interpolation=interpolation,
+        )
+        prepared = qmi.prepare_mass(mass, context)
+        direct = qmi(mass, context)
+        cached = qmi.evaluate_prepared(None, prepared, context)
+        assert jnp.allclose(cached, direct, rtol=1e-12, atol=1e-12)
+
+
+def test_cartesian_qmi_linear_custom_vjp_matches_generic_autodiff():
+    context = _scalar_context()
+    knots = (0.30, 0.55, 0.90, 1.40)
+    real_parts = jnp.asarray((1.0, -0.4, 0.8, 1.1), dtype=jnp.float64)
+    imaginary_parts = jnp.asarray((0.1, 1.8, -0.7, 1.2), dtype=jnp.float64)
+    mass = jnp.linspace(0.28, 1.45, 4097)
+    external = jnp.linspace(0.2, 1.7, mass.size) * (1.0 + 0.3j)
+
+    template = QMI(
+        knots=knots,
+        real_parts=tuple(real_parts),
+        imaginary_parts=tuple(imaginary_parts),
+        interpolation="linear",
+    )
+    prepared = template.prepare_mass(mass, context)
+
+    def direct_loss(real, imaginary):
+        value = QMI(
+            knots=knots,
+            real_parts=tuple(real),
+            imaginary_parts=tuple(imaginary),
+            interpolation="linear",
+        )(mass, context)
+        return jnp.sum(jnp.abs(value + external) ** 2)
+
+    def prepared_loss(real, imaginary):
+        value = QMI(
+            knots=knots,
+            real_parts=tuple(real),
+            imaginary_parts=tuple(imaginary),
+            interpolation="linear",
+        ).evaluate_prepared(None, prepared, context)
+        return jnp.sum(jnp.abs(value + external) ** 2)
+
+    direct_gradient = jax.grad(direct_loss, argnums=(0, 1))(
+        real_parts,
+        imaginary_parts,
+    )
+    prepared_gradient = jax.grad(prepared_loss, argnums=(0, 1))(
+        real_parts,
+        imaginary_parts,
+    )
+    assert jnp.allclose(
+        prepared_gradient[0],
+        direct_gradient[0],
+        rtol=1e-11,
+        atol=1e-10,
+    )
+    assert jnp.allclose(
+        prepared_gradient[1],
+        direct_gradient[1],
+        rtol=1e-11,
+        atol=1e-10,
     )
