@@ -803,3 +803,91 @@ def test_cartesian_qmi_dynamic_cache_matches_direct_model():
         rtol=2e-12,
         atol=2e-12,
     )
+
+
+def test_full_linear_qmi_model_is_invariant_under_exact_knot_refinement():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    context_knots = (0.30, 0.60, 0.90, 1.20, 1.60)
+    real = jnp.asarray((0.8, -0.3, 0.5, 0.2, -0.1))
+    imaginary = jnp.asarray((0.1, 0.6, -0.2, 0.4, 0.3))
+    inserted_mass = 1.05
+
+    old_s = jnp.asarray(context_knots) ** 2
+    inserted_s = inserted_mass**2
+    fraction = (inserted_s - old_s[2]) / (old_s[3] - old_s[2])
+    inserted_real = real[2] + fraction * (real[3] - real[2])
+    inserted_imaginary = imaginary[2] + fraction * (
+        imaginary[3] - imaginary[2]
+    )
+
+    def build(knots, real_values, imaginary_values):
+        qmi = QMI(
+            knots=knots,
+            real_parts=tuple(float(x) for x in real_values),
+            imaginary_parts=tuple(float(x) for x in imaginary_values),
+            interpolation="linear",
+        )
+        return DecayModel(
+            channel,
+            [
+                NonResonant(
+                    RealImag(0.35, -0.17),
+                    name="NR",
+                    normalize_component=False,
+                ),
+                Resonance(
+                    "S_QMI",
+                    pair=(0, 1),
+                    coefficient=RealImag(1.0, 0.0),
+                    mass=1.0,
+                    width=0.0,
+                    spin=0,
+                    lineshape=qmi,
+                    normalize_component=False,
+                ),
+            ],
+            normalize_components=False,
+            normalization_resolution=30,
+        )
+
+    original = build(context_knots, real, imaginary)
+    refined = build(
+        (0.30, 0.60, 0.90, inserted_mass, 1.20, 1.60),
+        (
+            real[0],
+            real[1],
+            real[2],
+            inserted_real,
+            real[3],
+            real[4],
+        ),
+        (
+            imaginary[0],
+            imaginary[1],
+            imaginary[2],
+            inserted_imaginary,
+            imaginary[3],
+            imaginary[4],
+        ),
+    )
+
+    data = original.generate_phase_space(256, seed=519)
+    normalization = original.generate_phase_space(1024, seed=520)
+
+    original_cache = original.prepare_cache(data, normalization)
+    refined_cache = refined.prepare_cache(data, normalization)
+    original_intensity, original_norm = original_cache.evaluate({})
+    refined_intensity, refined_norm = refined_cache.evaluate({})
+
+    assert jnp.allclose(
+        original_intensity,
+        refined_intensity,
+        rtol=0.0,
+        atol=5e-13,
+    )
+    assert jnp.allclose(
+        original_norm,
+        refined_norm,
+        rtol=0.0,
+        atol=5e-13,
+    )
