@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 
+from dalitzplotfitter.kinematics import PhaseSpaceMC
 from dalitzplotfitter.dynamics.lineshape.qmi import (
     _cubic_qmi_prepared,
     _hermite_qmi_prepared,
