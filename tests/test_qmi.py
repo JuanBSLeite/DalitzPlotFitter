@@ -891,3 +891,117 @@ def test_full_linear_qmi_model_is_invariant_under_exact_knot_refinement():
         rtol=0.0,
         atol=5e-13,
     )
+
+
+def test_component_normalization_is_equivalent_to_absorbing_scale_into_fixed_coefficient():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    normalization_sample = PhaseSpaceMC(
+        channel.parent_mass,
+        channel.daughter_masses,
+    ).generate(1024, seed=731)
+    data = PhaseSpaceMC(
+        channel.parent_mass,
+        channel.daughter_masses,
+    ).generate(256, seed=732)
+
+    real_parts = tuple(
+        Parameter.dynamics(
+            f"S_QMI.real[{i}]",
+            value,
+            owner="S_QMI",
+        )
+        for i, value in enumerate((0.5, -0.2, 0.3, 0.1))
+    )
+    imaginary_parts = tuple(
+        Parameter.dynamics(
+            f"S_QMI.imag[{i}]",
+            value,
+            owner="S_QMI",
+        )
+        for i, value in enumerate((0.1, 0.4, -0.3, 0.2))
+    )
+    qmi = QMI(
+        knots=(0.30, 0.60, 1.00, 1.50),
+        real_parts=real_parts,
+        imaginary_parts=imaginary_parts,
+        interpolation="linear",
+    )
+
+    normalized = DecayModel(
+        channel,
+        [
+            NonResonant(RealImag(0.40, -0.25), name="NR"),
+            Resonance(
+                "S_QMI",
+                pair=(0, 1),
+                coefficient=RealImag(1.0, 0.0),
+                mass=1.0,
+                width=0.1,
+                spin=0,
+                lineshape=qmi,
+                normalize_component=False,
+            ),
+        ],
+        normalize_components=True,
+        normalization_sample=normalization_sample,
+    )
+
+    nr_component = next(
+        component
+        for component in normalized.amplitude_model.components
+        if component.name == "NR"
+    )
+    nr_scale = float(normalized._component_scale(nr_component, {}))
+
+    raw = DecayModel(
+        channel,
+        [
+            NonResonant(
+                RealImag(0.40 * nr_scale, -0.25 * nr_scale),
+                name="NR",
+                normalize_component=False,
+            ),
+            Resonance(
+                "S_QMI",
+                pair=(0, 1),
+                coefficient=RealImag(1.0, 0.0),
+                mass=1.0,
+                width=0.1,
+                spin=0,
+                lineshape=qmi,
+                normalize_component=False,
+            ),
+        ],
+        normalize_components=False,
+        normalization_sample=normalization_sample,
+    )
+
+    values = {
+        "S_QMI.real[0]": 0.45,
+        "S_QMI.real[1]": -0.16,
+        "S_QMI.real[2]": 0.28,
+        "S_QMI.real[3]": 0.08,
+        "S_QMI.imag[0]": 0.14,
+        "S_QMI.imag[1]": 0.36,
+        "S_QMI.imag[2]": -0.25,
+        "S_QMI.imag[3]": 0.18,
+    }
+
+    normalized_cache = normalized.prepare_cache(data, normalization_sample)
+    raw_cache = raw.prepare_cache(data, normalization_sample)
+
+    normalized_intensity, normalized_norm = normalized_cache.evaluate(values)
+    raw_intensity, raw_norm = raw_cache.evaluate(values)
+
+    assert jnp.allclose(
+        normalized_intensity,
+        raw_intensity,
+        rtol=2e-12,
+        atol=2e-12,
+    )
+    assert jnp.allclose(
+        normalized_norm,
+        raw_norm,
+        rtol=2e-12,
+        atol=2e-12,
+    )
