@@ -11,6 +11,7 @@ from dalitzplotfitter import (
     QMI,
     DecayChannel,
     DecayModel,
+    NonResonant,
     Parameter,
     ParameterKind,
     RealImag,
@@ -713,4 +714,92 @@ def test_prepared_linear_cartesian_qmi_inserting_interpolated_knot_preserves_amp
         refined_values,
         rtol=0.0,
         atol=2e-13,
+    )
+
+
+def test_cartesian_qmi_dynamic_cache_matches_direct_model():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    owner = "S_QMI"
+    knots = (0.30, 0.55, 0.85, 1.20, 1.60)
+
+    real_parts = tuple(
+        Parameter.dynamics(
+            f"{owner}.real[{i}]",
+            value,
+            owner=owner,
+        )
+        for i, value in enumerate((0.8, -0.3, 0.5, 0.2, -0.1))
+    )
+    imaginary_parts = tuple(
+        Parameter.dynamics(
+            f"{owner}.imag[{i}]",
+            value,
+            owner=owner,
+        )
+        for i, value in enumerate((0.1, 0.6, -0.2, 0.4, 0.3))
+    )
+    qmi = QMI(
+        knots=knots,
+        real_parts=real_parts,
+        imaginary_parts=imaginary_parts,
+        interpolation="linear",
+    )
+    model = DecayModel(
+        channel,
+        [
+            NonResonant(
+                RealImag(0.35, -0.17),
+                name="NR",
+                normalize_component=False,
+            ),
+            Resonance(
+                owner,
+                pair=(0, 1),
+                coefficient=RealImag(1.0, 0.0),
+                mass=1.0,
+                width=0.0,
+                spin=0,
+                lineshape=qmi,
+                normalize_component=False,
+            ),
+        ],
+        normalize_components=False,
+        normalization_resolution=30,
+    )
+
+    data = model.generate_phase_space(128, seed=417)
+    normalization = model.generate_phase_space(512, seed=418)
+    cache = model.prepare_cache(data, normalization)
+
+    values = {
+        f"{owner}.real[0]": 0.72,
+        f"{owner}.real[1]": -0.24,
+        f"{owner}.real[2]": 0.43,
+        f"{owner}.real[3]": 0.11,
+        f"{owner}.real[4]": -0.08,
+        f"{owner}.imag[0]": 0.16,
+        f"{owner}.imag[1]": 0.51,
+        f"{owner}.imag[2]": -0.13,
+        f"{owner}.imag[3]": 0.34,
+        f"{owner}.imag[4]": 0.27,
+    }
+
+    cached_intensity, cached_normalization = cache.evaluate(values)
+    direct_intensity = model.intensity(data.as_dict(), values)
+    direct_normalization = jnp.mean(
+        normalization.weights
+        * model.intensity(normalization.as_dict(), values)
+    )
+
+    assert jnp.allclose(
+        cached_intensity,
+        direct_intensity,
+        rtol=2e-12,
+        atol=2e-12,
+    )
+    assert jnp.allclose(
+        cached_normalization,
+        direct_normalization,
+        rtol=2e-12,
+        atol=2e-12,
     )
