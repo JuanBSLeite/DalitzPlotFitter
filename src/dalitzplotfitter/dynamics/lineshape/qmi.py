@@ -254,6 +254,212 @@ _linear_cartesian_qmi_prepared.defvjp(
 )
 
 
+def _assemble_interval_endpoint_sums(left, right):
+    """Assemble per-interval left/right sums into per-knot gradients."""
+
+    return jnp.concatenate(
+        (
+            left[:1],
+            left[1:] + right[:-1],
+            right[-1:],
+        )
+    )
+
+
+def _cubic_qmi_prepared_impl(
+    values,
+    index,
+    fraction,
+    knot_s,
+    inverse,
+):
+    """Evaluate a prepared natural cubic spline with fixed knot geometry."""
+
+    values = jnp.asarray(values)
+    index32 = jnp.asarray(index, dtype=jnp.int32)
+    fraction = jnp.asarray(fraction, dtype=values.dtype)
+    knot_s = jnp.asarray(knot_s, dtype=values.dtype)
+    inverse = jnp.asarray(inverse, dtype=values.dtype)
+
+    h = knot_s[1:] - knot_s[:-1]
+    rhs = 6.0 * (
+        (values[2:] - values[1:-1]) / h[1:]
+        - (values[1:-1] - values[:-2]) / h[:-1]
+    )
+    second_inner = inverse @ rhs
+    second = jnp.concatenate(
+        (
+            jnp.zeros((1,), dtype=values.dtype),
+            second_inner,
+            jnp.zeros((1,), dtype=values.dtype),
+        )
+    )
+
+    width = knot_s[index32 + 1] - knot_s[index32]
+    a = 1.0 - fraction
+    b = fraction
+    left_second_weight = (a**3 - a) * width**2 / 6.0
+    right_second_weight = (b**3 - b) * width**2 / 6.0
+    return (
+        a * values[index32]
+        + b * values[index32 + 1]
+        + left_second_weight * second[index32]
+        + right_second_weight * second[index32 + 1]
+    )
+
+
+@jax.custom_vjp
+def _cubic_qmi_prepared(
+    values,
+    index,
+    fraction,
+    order,
+    starts,
+    ends,
+    knot_s,
+    inverse,
+):
+    """Prepared natural cubic spline with a reduction-based reverse pass.
+
+    The forward expression is exactly the ordinary natural cubic spline.  In
+    reverse mode, event contributions are first reduced by their fixed
+    interpolation interval, just like the optimized linear QMI path.  The
+    global spline coupling is then propagated only in knot space through the
+    small natural-spline system, avoiding event-sized scatter-add operations.
+    """
+
+    return _cubic_qmi_prepared_impl(
+        values,
+        index,
+        fraction,
+        knot_s,
+        inverse,
+    )
+
+
+def _cubic_qmi_prepared_fwd(
+    values,
+    index,
+    fraction,
+    order,
+    starts,
+    ends,
+    knot_s,
+    inverse,
+):
+    value = _cubic_qmi_prepared_impl(
+        values,
+        index,
+        fraction,
+        knot_s,
+        inverse,
+    )
+    residual = (
+        index,
+        fraction,
+        order,
+        starts,
+        ends,
+        knot_s,
+        inverse,
+    )
+    return value, residual
+
+
+def _cubic_qmi_prepared_bwd(residual, cotangent):
+    (
+        index,
+        fraction,
+        order,
+        starts,
+        ends,
+        knot_s,
+        inverse,
+    ) = residual
+
+    index = jnp.asarray(index, dtype=jnp.int32)
+    fraction = jnp.asarray(fraction)
+    order = jnp.asarray(order, dtype=jnp.int32)
+    knot_s = jnp.asarray(knot_s, dtype=fraction.dtype)
+    inverse = jnp.asarray(inverse, dtype=fraction.dtype)
+    cotangent = jnp.asarray(cotangent, dtype=fraction.dtype)
+
+    width = knot_s[index + 1] - knot_s[index]
+    a = 1.0 - fraction
+    b = fraction
+    left_second_weight = (a**3 - a) * width**2 / 6.0
+    right_second_weight = (b**3 - b) * width**2 / 6.0
+
+    sorted_cotangent = cotangent[order]
+    sorted_a = a[order]
+    sorted_b = b[order]
+    sorted_left_second_weight = left_second_weight[order]
+    sorted_right_second_weight = right_second_weight[order]
+
+    direct_left = _grouped_interval_sums(
+        sorted_a * sorted_cotangent,
+        starts,
+        ends,
+    )
+    direct_right = _grouped_interval_sums(
+        sorted_b * sorted_cotangent,
+        starts,
+        ends,
+    )
+    direct_gradient = _assemble_interval_endpoint_sums(
+        direct_left,
+        direct_right,
+    )
+
+    second_left = _grouped_interval_sums(
+        sorted_left_second_weight * sorted_cotangent,
+        starts,
+        ends,
+    )
+    second_right = _grouped_interval_sums(
+        sorted_right_second_weight * sorted_cotangent,
+        starts,
+        ends,
+    )
+    second_gradient = _assemble_interval_endpoint_sums(
+        second_left,
+        second_right,
+    )
+
+    # Natural boundary conditions fix the endpoint second derivatives to zero,
+    # so only the interior second-derivative cotangents propagate through the
+    # fixed spline system: M_inner = inverse @ rhs(values).
+    rhs_gradient = inverse.T @ second_gradient[1:-1]
+
+    h = knot_s[1:] - knot_s[:-1]
+    rhs_left = 6.0 * rhs_gradient / h[:-1]
+    rhs_center = -6.0 * rhs_gradient * (1.0 / h[:-1] + 1.0 / h[1:])
+    rhs_right = 6.0 * rhs_gradient / h[1:]
+    spline_gradient = (
+        jnp.pad(rhs_left, (0, 2))
+        + jnp.pad(rhs_center, (1, 1))
+        + jnp.pad(rhs_right, (2, 0))
+    )
+
+    values_gradient = direct_gradient + spline_gradient
+    return (
+        values_gradient,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+
+
+_cubic_qmi_prepared.defvjp(
+    _cubic_qmi_prepared_fwd,
+    _cubic_qmi_prepared_bwd,
+)
+
+
 def _interval_index_and_fraction(x, xp, prepared_index=None):
     """Return the interpolation interval and local fraction.
 
@@ -609,6 +815,37 @@ class QMI:
     def evaluate_prepared(self, mass, prepared_index, context: ResonanceContext):
         if int(context.spin) != 0:
             raise ValueError("QMI is defined for a scalar S-wave")
+
+        if (
+            self.interpolation == "cubic"
+            and isinstance(prepared_index, tuple)
+            and len(prepared_index) >= 5
+        ):
+            index, fraction, order, starts, ends = prepared_index[:5]
+            dtype_source = jnp.asarray(fraction)
+            knot_s = jnp.asarray(self.knots, dtype=dtype_source.dtype) ** 2
+            inverse = jnp.asarray(self._cubic_inverse, dtype=dtype_source.dtype)
+
+            def cubic(values):
+                return _cubic_qmi_prepared(
+                    jnp.asarray(values, dtype=dtype_source.dtype),
+                    index,
+                    fraction,
+                    order,
+                    starts,
+                    ends,
+                    knot_s,
+                    inverse,
+                )
+
+            if self.parameterization == "cartesian":
+                real = cubic(self.real_parts)
+                imaginary = cubic(self.imaginary_parts)
+                return real + 1j * imaginary
+
+            magnitude = cubic(self.magnitudes)
+            phase = cubic(self.phases)
+            return magnitude * jnp.exp(1j * phase)
 
         if self.interpolation == "linear" and isinstance(prepared_index, tuple):
             if len(prepared_index) >= 5:
