@@ -431,27 +431,20 @@ def _hermite_qmi_prepared_fwd(
     knot_s,
 ):
     value = _hermite_qmi_prepared_impl(values, index, fraction, knot_s)
-    residual = (fraction, order, starts, ends, knot_s)
+    residual = (index, fraction, order, starts, ends, knot_s)
     return value, residual
 
 
 def _hermite_qmi_prepared_bwd(residual, cotangent):
-    fraction, order, starts, ends, knot_s = residual
+    index, fraction, order, starts, ends, knot_s = residual
 
+    index = jnp.asarray(index, dtype=jnp.int32)
     fraction = jnp.asarray(fraction)
     order = jnp.asarray(order, dtype=jnp.int32)
     knot_s = jnp.asarray(knot_s, dtype=fraction.dtype)
     cotangent = jnp.asarray(cotangent, dtype=fraction.dtype)
 
     interval_width = knot_s[1:] - knot_s[:-1]
-    event_width = interval_width[jnp.asarray(
-        jnp.argsort(order)[order],
-        dtype=jnp.int32,
-    )]
-    # The expression above reconstructs interval order poorly for repeated
-    # intervals; use the fixed sorted event interval widths directly below.
-    del event_width
-
     h00, h10, h01, h11 = _hermite_basis(fraction)
     sorted_h00 = h00[order]
     sorted_h10 = h10[order]
@@ -459,13 +452,7 @@ def _hermite_qmi_prepared_bwd(residual, cotangent):
     sorted_h11 = h11[order]
     sorted_cotangent = cotangent[order]
 
-    # Since events are sorted by interval, repeat each fixed interval width
-    # according to the same [starts, ends) boundaries without a scatter.
-    counts = jnp.asarray(ends, dtype=jnp.int32) - jnp.asarray(
-        starts,
-        dtype=jnp.int32,
-    )
-    sorted_width = jnp.repeat(interval_width, counts, total_repeat_length=order.shape[0])
+    sorted_width = interval_width[index][order]
 
     direct_left = _grouped_interval_sums(
         sorted_h00 * sorted_cotangent,
