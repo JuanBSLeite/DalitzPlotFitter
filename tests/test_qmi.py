@@ -302,7 +302,6 @@ def test_prepared_cubic_qmi_matches_reference_value_and_gradient():
         phases=(0.0,) * len(knots),
         interpolation="cubic",
     )
-    inverse = reference_model._cubic_inverse
 
     index = jnp.clip(
         jnp.searchsorted(knot_s, s, side="right") - 1,
@@ -325,8 +324,6 @@ def test_prepared_cubic_qmi_matches_reference_value_and_gradient():
             order,
             starts,
             ends,
-            knot_s,
-            inverse,
         )
         return jnp.sum((1.0 + s) * interpolated**2)
 
@@ -368,7 +365,6 @@ def test_prepared_cubic_cartesian_qmi_gradient_is_finite():
         imaginary_parts=tuple(imaginary),
         interpolation="cubic",
     )
-    inverse = model._cubic_inverse
     index = jnp.clip(
         jnp.searchsorted(knot_s, s, side="right") - 1,
         0,
@@ -390,8 +386,6 @@ def test_prepared_cubic_cartesian_qmi_gradient_is_finite():
             order,
             starts,
             ends,
-            knot_s,
-            inverse,
         )
         imaginary_interp = _cubic_qmi_prepared(
             imaginary_values,
@@ -400,8 +394,6 @@ def test_prepared_cubic_cartesian_qmi_gradient_is_finite():
             order,
             starts,
             ends,
-            knot_s,
-            inverse,
         )
         amplitude = real_interp + 1j * imaginary_interp
         return jnp.sum((1.0 + s) * jnp.abs(amplitude) ** 2)
@@ -409,3 +401,42 @@ def test_prepared_cubic_cartesian_qmi_gradient_is_finite():
     gradients = jax.grad(objective, argnums=(0, 1))(real, imaginary)
     assert bool(jnp.all(jnp.isfinite(gradients[0])))
     assert bool(jnp.all(jnp.isfinite(gradients[1])))
+
+
+def test_qmi_local_cubic_uses_only_the_two_adjacent_knots():
+    knots = (0.30, 0.60, 0.90, 1.20)
+    mass = jnp.asarray(0.50)
+
+    first = QMI(
+        knots=knots,
+        real_parts=(1.0, 2.0, 100.0, -50.0),
+        imaginary_parts=(0.2, -0.4, 80.0, 90.0),
+        interpolation="cubic",
+    )
+    second = QMI(
+        knots=knots,
+        real_parts=(1.0, 2.0, -999.0, 777.0),
+        imaginary_parts=(0.2, -0.4, -333.0, 444.0),
+        interpolation="cubic",
+    )
+
+    assert jnp.allclose(
+        first(mass, _context()),
+        second(mass, _context()),
+        rtol=0.0,
+        atol=1e-13,
+    )
+
+
+def test_qmi_local_cubic_supports_two_knots():
+    model = QMI(
+        knots=(0.4, 0.8),
+        real_parts=(1.0, 3.0),
+        imaginary_parts=(-2.0, 2.0),
+        interpolation="cubic",
+    )
+    mass = jnp.sqrt(0.25 * 0.4**2 + 0.75 * 0.8**2)
+    fraction = 0.75
+    weight = 3.0 * fraction**2 - 2.0 * fraction**3
+    expected = (1.0 + weight * 2.0) + 1j * (-2.0 + weight * 4.0)
+    assert abs(complex(model(mass, _context())) - expected) < 1e-12
