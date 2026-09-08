@@ -1,7 +1,10 @@
 import jax
 import jax.numpy as jnp
 
-from dalitzplotfitter.dynamics.lineshape.qmi import _cubic_qmi_prepared
+from dalitzplotfitter.dynamics.lineshape.qmi import (
+    _cubic_qmi_prepared,
+    _hermite_qmi_prepared,
+)
 
 from dalitzplotfitter import (
     QMI,
@@ -35,7 +38,7 @@ def test_qmi_returns_exact_complex_values_at_knots_for_both_interpolations():
     magnitudes = (1.0, 2.0, 1.4, 3.0)
     phases = (0.0, 0.5, 0.8, 1.0)
     expected = jnp.asarray(magnitudes) * jnp.exp(1j * jnp.asarray(phases))
-    for interpolation in ("linear", "cubic"):
+    for interpolation in ("linear", "cubic", "hermite"):
         model = QMI(
             knots=knots,
             magnitudes=magnitudes,
@@ -84,7 +87,7 @@ def test_qmi_cartesian_returns_exact_complex_values_at_knots():
     imaginary_parts = (0.2, 1.5, -0.7, 0.0)
     expected = jnp.asarray(real_parts) + 1j * jnp.asarray(imaginary_parts)
 
-    for interpolation in ("linear", "cubic"):
+    for interpolation in ("linear", "cubic", "hermite"):
         model = QMI(
             knots=knots,
             real_parts=real_parts,
@@ -132,7 +135,7 @@ def test_qmi_cubic_is_smooth_and_differs_from_linear_between_knots():
 
 
 def test_qmi_clamps_to_endpoint_values_outside_knot_range_for_both_modes():
-    for interpolation in ("linear", "cubic"):
+    for interpolation in ("linear", "cubic", "hermite"):
         model = QMI(
             knots=(0.4, 0.6, 0.8),
             magnitudes=(1.0, 2.0, 3.0),
@@ -156,7 +159,7 @@ def test_qmi_rejects_invalid_interpolation():
             interpolation="quadratic",
         )
     except ValueError as exc:
-        assert "linear" in str(exc) and "cubic" in str(exc)
+        assert all(name in str(exc) for name in ("linear", "cubic", "hermite"))
     else:
         raise AssertionError("QMI accepted an unsupported interpolation mode")
 
@@ -440,3 +443,109 @@ def test_qmi_local_cubic_supports_two_knots():
     weight = 3.0 * fraction**2 - 2.0 * fraction**3
     expected = (1.0 + weight * 2.0) + 1j * (-2.0 + weight * 4.0)
     assert abs(complex(model(mass, _context())) - expected) < 1e-12
+
+
+def test_qmi_hermite_is_local_to_neighboring_knots():
+    knots = (0.30, 0.50, 0.70, 0.90, 1.10, 1.30)
+    mass = jnp.asarray(0.80)
+
+    first = QMI(
+        knots=knots,
+        real_parts=(1000.0, 1.0, 2.0, 3.0, 4.0, -1000.0),
+        imaginary_parts=(-500.0, 0.2, -0.3, 0.4, -0.1, 700.0),
+        interpolation="hermite",
+    )
+    second = QMI(
+        knots=knots,
+        real_parts=(-999.0, 1.0, 2.0, 3.0, 4.0, 888.0),
+        imaginary_parts=(333.0, 0.2, -0.3, 0.4, -0.1, -444.0),
+        interpolation="hermite",
+    )
+
+    # The interval [0.70, 0.90] uses knots 0.50, 0.70, 0.90, and 1.10.
+    # Changing more distant knots must have exactly no effect.
+    assert jnp.allclose(
+        first(mass, _context()),
+        second(mass, _context()),
+        rtol=0.0,
+        atol=1e-13,
+    )
+
+
+def test_prepared_hermite_qmi_matches_reference_value_and_gradient():
+    knots = (0.30, 0.48, 0.67, 0.91, 1.20)
+    knot_s = jnp.asarray(knots) ** 2
+    values = jnp.asarray((1.0, -0.4, 1.7, 0.2, 1.1))
+    masses = jnp.linspace(0.31, 1.19, 173)
+    s = masses**2
+
+    index = jnp.clip(
+        jnp.searchsorted(knot_s, s, side="right") - 1,
+        0,
+        len(knots) - 2,
+    )
+    x0 = knot_s[index]
+    x1 = knot_s[index + 1]
+    fraction = (s - x0) / (x1 - x0)
+    order = jnp.argsort(index).astype(jnp.int32)
+    counts = jnp.bincount(index.astype(jnp.int32), length=len(knots) - 1)
+    ends = jnp.cumsum(counts).astype(jnp.int32)
+    starts = jnp.concatenate((jnp.zeros((1,), dtype=jnp.int32), ends[:-1]))
+
+    def prepared_objective(fp):
+        interpolated = _hermite_qmi_prepared(
+            fp,
+            index,
+            fraction,
+            order,
+            starts,
+            ends,
+            knot_s,
+        )
+        return jnp.sum((1.0 + s) * interpolated**2)
+
+    def reference_objective(fp):
+        local = QMI(
+            knots=knots,
+            magnitudes=tuple(fp),
+            phases=(0.0,) * len(knots),
+            interpolation="hermite",
+        )
+        magnitude, _ = local.interpolated_magnitude_phase(masses)
+        return jnp.sum((1.0 + s) * magnitude**2)
+
+    prepared_value = prepared_objective(values)
+    reference_value = reference_objective(values)
+    prepared_gradient = jax.grad(prepared_objective)(values)
+    reference_gradient = jax.grad(reference_objective)(values)
+
+    assert jnp.allclose(prepared_value, reference_value, rtol=1e-12, atol=1e-12)
+    assert jnp.allclose(
+        prepared_gradient,
+        reference_gradient,
+        rtol=2e-11,
+        atol=2e-11,
+    )
+
+
+def test_qmi_hermite_has_continuous_first_derivative_at_internal_knots():
+    knots = (0.30, 0.50, 0.75, 1.05)
+    values = (1.0, -0.4, 1.8, 0.2)
+    model = QMI(
+        knots=knots,
+        real_parts=values,
+        imaginary_parts=(0.0,) * len(knots),
+        interpolation="hermite",
+    )
+
+    knot = knots[1]
+    eps = 1e-7
+    left = (
+        jnp.real(model(jnp.asarray(knot), _context()))
+        - jnp.real(model(jnp.asarray(knot - eps), _context()))
+    ) / eps
+    right = (
+        jnp.real(model(jnp.asarray(knot + eps), _context()))
+        - jnp.real(model(jnp.asarray(knot), _context()))
+    ) / eps
+    assert abs(float(left - right)) < 2e-4

@@ -352,6 +352,194 @@ _cubic_qmi_prepared.defvjp(
     _cubic_qmi_prepared_bwd,
 )
 
+
+def _hermite_slopes(values, knot_s):
+    """Return local finite-difference slopes for cubic Hermite interpolation."""
+
+    values = jnp.asarray(values)
+    knot_s = jnp.asarray(knot_s, dtype=values.dtype)
+
+    first = (values[1] - values[0]) / (knot_s[1] - knot_s[0])
+    last = (values[-1] - values[-2]) / (knot_s[-1] - knot_s[-2])
+    if values.shape[0] == 2:
+        return jnp.stack((first, last))
+
+    interior = (values[2:] - values[:-2]) / (knot_s[2:] - knot_s[:-2])
+    return jnp.concatenate((first[None], interior, last[None]))
+
+
+def _hermite_basis(fraction):
+    """Cubic Hermite basis functions on t in [0, 1]."""
+
+    t = fraction
+    t2 = t * t
+    t3 = t2 * t
+    h00 = 2.0 * t3 - 3.0 * t2 + 1.0
+    h10 = t3 - 2.0 * t2 + t
+    h01 = -2.0 * t3 + 3.0 * t2
+    h11 = t3 - t2
+    return h00, h10, h01, h11
+
+
+def _hermite_qmi_prepared_impl(values, index, fraction, knot_s):
+    """Evaluate local cubic Hermite interpolation on prepared QMI intervals."""
+
+    values = jnp.asarray(values)
+    index32 = jnp.asarray(index, dtype=jnp.int32)
+    fraction = jnp.asarray(fraction, dtype=values.dtype)
+    knot_s = jnp.asarray(knot_s, dtype=values.dtype)
+
+    slopes = _hermite_slopes(values, knot_s)
+    width = knot_s[index32 + 1] - knot_s[index32]
+    h00, h10, h01, h11 = _hermite_basis(fraction)
+    return (
+        h00 * values[index32]
+        + h10 * width * slopes[index32]
+        + h01 * values[index32 + 1]
+        + h11 * width * slopes[index32 + 1]
+    )
+
+
+@jax.custom_vjp
+def _hermite_qmi_prepared(
+    values,
+    index,
+    fraction,
+    order,
+    starts,
+    ends,
+    knot_s,
+):
+    """Prepared cubic Hermite QMI interpolation with reduction-based VJP.
+
+    The value in interval i depends only on y_i, y_(i+1) and their local
+    finite-difference slopes.  Interior slopes use knots i-1 and i+1, so an
+    interval depends on at most four neighboring knots and never on the full
+    QMI grid.
+    """
+
+    return _hermite_qmi_prepared_impl(values, index, fraction, knot_s)
+
+
+def _hermite_qmi_prepared_fwd(
+    values,
+    index,
+    fraction,
+    order,
+    starts,
+    ends,
+    knot_s,
+):
+    value = _hermite_qmi_prepared_impl(values, index, fraction, knot_s)
+    residual = (fraction, order, starts, ends, knot_s)
+    return value, residual
+
+
+def _hermite_qmi_prepared_bwd(residual, cotangent):
+    fraction, order, starts, ends, knot_s = residual
+
+    fraction = jnp.asarray(fraction)
+    order = jnp.asarray(order, dtype=jnp.int32)
+    knot_s = jnp.asarray(knot_s, dtype=fraction.dtype)
+    cotangent = jnp.asarray(cotangent, dtype=fraction.dtype)
+
+    interval_width = knot_s[1:] - knot_s[:-1]
+    event_width = interval_width[jnp.asarray(
+        jnp.argsort(order)[order],
+        dtype=jnp.int32,
+    )]
+    # The expression above reconstructs interval order poorly for repeated
+    # intervals; use the fixed sorted event interval widths directly below.
+    del event_width
+
+    h00, h10, h01, h11 = _hermite_basis(fraction)
+    sorted_h00 = h00[order]
+    sorted_h10 = h10[order]
+    sorted_h01 = h01[order]
+    sorted_h11 = h11[order]
+    sorted_cotangent = cotangent[order]
+
+    # Since events are sorted by interval, repeat each fixed interval width
+    # according to the same [starts, ends) boundaries without a scatter.
+    counts = jnp.asarray(ends, dtype=jnp.int32) - jnp.asarray(
+        starts,
+        dtype=jnp.int32,
+    )
+    sorted_width = jnp.repeat(interval_width, counts, total_repeat_length=order.shape[0])
+
+    direct_left = _grouped_interval_sums(
+        sorted_h00 * sorted_cotangent,
+        starts,
+        ends,
+    )
+    direct_right = _grouped_interval_sums(
+        sorted_h01 * sorted_cotangent,
+        starts,
+        ends,
+    )
+    direct_gradient = _assemble_interval_endpoint_sums(
+        direct_left,
+        direct_right,
+    )
+
+    slope_left = _grouped_interval_sums(
+        sorted_h10 * sorted_width * sorted_cotangent,
+        starts,
+        ends,
+    )
+    slope_right = _grouped_interval_sums(
+        sorted_h11 * sorted_width * sorted_cotangent,
+        starts,
+        ends,
+    )
+    slope_gradient = _assemble_interval_endpoint_sums(
+        slope_left,
+        slope_right,
+    )
+
+    n_knots = knot_s.shape[0]
+    first_scaled = slope_gradient[0] / (knot_s[1] - knot_s[0])
+    last_scaled = slope_gradient[-1] / (knot_s[-1] - knot_s[-2])
+    endpoint_gradient = (
+        jnp.pad(
+            jnp.stack((-first_scaled, first_scaled)),
+            (0, n_knots - 2),
+        )
+        + jnp.pad(
+            jnp.stack((-last_scaled, last_scaled)),
+            (n_knots - 2, 0),
+        )
+    )
+
+    if n_knots > 2:
+        interior_scaled = slope_gradient[1:-1] / (
+            knot_s[2:] - knot_s[:-2]
+        )
+        slope_value_gradient = (
+            endpoint_gradient
+            + jnp.pad(-interior_scaled, (0, 2))
+            + jnp.pad(interior_scaled, (2, 0))
+        )
+    else:
+        slope_value_gradient = endpoint_gradient
+
+    values_gradient = direct_gradient + slope_value_gradient
+    return (
+        values_gradient,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+
+
+_hermite_qmi_prepared.defvjp(
+    _hermite_qmi_prepared_fwd,
+    _hermite_qmi_prepared_bwd,
+)
+
 def _interval_index_and_fraction(x, xp, prepared_index=None):
     """Return the interpolation interval and local fraction.
 
@@ -412,6 +600,25 @@ def _local_cubic_spline(x, xp, fp):
     return y0 + weight * (y1 - y0)
 
 
+def _local_hermite_spline(x, xp, fp):
+    """Piecewise cubic Hermite interpolation with local finite-difference slopes."""
+
+    x = jnp.asarray(x)
+    xp = jnp.asarray(xp, dtype=x.dtype)
+    fp = jnp.asarray(fp, dtype=x.dtype)
+
+    index, fraction = _interval_index_and_fraction(x, xp)
+    slopes = _hermite_slopes(fp, xp)
+    width = xp[index + 1] - xp[index]
+    h00, h10, h01, h11 = _hermite_basis(fraction)
+    return (
+        h00 * fp[index]
+        + h10 * width * slopes[index]
+        + h01 * fp[index + 1]
+        + h11 * width * slopes[index + 1]
+    )
+
+
 @dataclass(frozen=True)
 class QMI:
     knots: tuple[float, ...]
@@ -451,8 +658,10 @@ class QMI:
             raise ValueError("QMI knots must be strictly increasing")
         if knots[0] <= 0.0:
             raise ValueError("QMI knot masses must be positive")
-        if self.interpolation not in {"linear", "cubic"}:
-            raise ValueError("QMI interpolation must be 'linear' or 'cubic'")
+        if self.interpolation not in {"linear", "cubic", "hermite"}:
+            raise ValueError(
+                "QMI interpolation must be 'linear', 'cubic', or 'hermite'"
+            )
 
     @property
     def size(self) -> int:
@@ -470,9 +679,20 @@ class QMI:
         )
         if self.interpolation == "linear":
             weight = fraction
-        else:
+            return values[index] + weight * (values[index + 1] - values[index])
+        if self.interpolation == "cubic":
             weight = _cubic_blend(fraction)
-        return values[index] + weight * (values[index + 1] - values[index])
+            return values[index] + weight * (values[index + 1] - values[index])
+
+        slopes = _hermite_slopes(values, knot_s)
+        width = knot_s[index + 1] - knot_s[index]
+        h00, h10, h01, h11 = _hermite_basis(fraction)
+        return (
+            h00 * values[index]
+            + h10 * width * slopes[index]
+            + h01 * values[index + 1]
+            + h11 * width * slopes[index + 1]
+        )
 
     def _interpolated_pair(
         self,
@@ -521,6 +741,23 @@ class QMI:
             )
             phase = phases[index] + fraction * (phases[index + 1] - phases[index])
             return magnitude, phase
+
+        if self.interpolation == "hermite" and prepared_fraction is not None:
+            index = jnp.asarray(prepared_index, dtype=jnp.int32)
+            fraction = jnp.asarray(prepared_fraction, dtype=knot_s.dtype)
+            width = knot_s[index + 1] - knot_s[index]
+            h00, h10, h01, h11 = _hermite_basis(fraction)
+
+            def hermite(values):
+                slopes = _hermite_slopes(values, knot_s)
+                return (
+                    h00 * values[index]
+                    + h10 * width * slopes[index]
+                    + h01 * values[index + 1]
+                    + h11 * width * slopes[index + 1]
+                )
+
+            return hermite(magnitudes), hermite(phases)
 
         if prepared_fraction is not None:
             index = jnp.asarray(prepared_index, dtype=jnp.int32)
@@ -607,6 +844,35 @@ class QMI:
     def evaluate_prepared(self, mass, prepared_index, context: ResonanceContext):
         if int(context.spin) != 0:
             raise ValueError("QMI is defined for a scalar S-wave")
+
+        if (
+            self.interpolation == "hermite"
+            and isinstance(prepared_index, tuple)
+            and len(prepared_index) >= 5
+        ):
+            index, fraction, order, starts, ends = prepared_index[:5]
+            dtype_source = jnp.asarray(fraction)
+            knot_s = jnp.asarray(self.knots, dtype=dtype_source.dtype) ** 2
+
+            def hermite(values):
+                return _hermite_qmi_prepared(
+                    jnp.asarray(values, dtype=dtype_source.dtype),
+                    index,
+                    fraction,
+                    order,
+                    starts,
+                    ends,
+                    knot_s,
+                )
+
+            if self.parameterization == "cartesian":
+                real = hermite(self.real_parts)
+                imaginary = hermite(self.imaginary_parts)
+                return real + 1j * imaginary
+
+            magnitude = hermite(self.magnitudes)
+            phase = hermite(self.phases)
+            return magnitude * jnp.exp(1j * phase)
 
         if (
             self.interpolation == "cubic"
