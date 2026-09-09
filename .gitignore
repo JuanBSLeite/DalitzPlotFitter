@@ -13,3 +13,6 @@ dist/
 build/
 *.so
 .DS_Store
+
+# Local Genfit run diagnostics
+genfit/logs/
