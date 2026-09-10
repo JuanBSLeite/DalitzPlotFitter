@@ -138,7 +138,7 @@ session.plot_projection(result, "s13", log_scale=True)
 
 Data are shown as black circular points with statistical error bars, while the fitted signal/background components and total fit are drawn as lines. For `s12`, `s13`, and `s23`, the vertical-axis label is generated automatically from the actual uniform bin width, for example `Candidates / 0.25 GeV^2`. `log_scale=True` changes the projection y axis to logarithmic scale.
 
-Fit and PDF normalization always remain deterministic and use the configured Gauss--Legendre or Square-Dalitz quadrature. The quadrature nodes are **not** histogrammed directly for display, because a deterministic integration grid can alias strongly when projected onto arbitrary one-dimensional histogram bins. Instead, `plot_projection()` generates a weighted phase-space Monte Carlo sample only for rendering the fitted curves. This does not modify the NLL, fitted parameters, normalization integrals, or fit fractions.
+Fit and PDF normalization reuse the configured Gauss--Legendre or Square-Dalitz quadrature, or a fixed external Monte Carlo normalization sample. See [Monte Carlo normalization](mc_integration.md). The quadrature nodes are **not** histogrammed directly for display, because a deterministic integration grid can alias strongly when projected onto arbitrary one-dimensional histogram bins. Instead, `plot_projection()` generates a weighted phase-space Monte Carlo sample only for rendering the fitted curves. This does not modify the NLL, fitted parameters, normalization integrals, or fit fractions.
 
 The default rendering sample contains 250000 phase-space points and is deterministic for a fixed seed. It can be adjusted if needed:
 
@@ -267,3 +267,17 @@ Useful future additions are:
 5. component-level amplitude projection overlays and standardized pull/residual panels.
 
 These should continue to sit on top of the validated numerical core rather than duplicate it.
+
+### Projection support and CP yields
+
+Projection curves require evaluable `BackgroundSpec` / `CPBackgroundSpec` shapes.
+A precomputed category supplies values only at the fit events, so an active
+category without a projection shape raises an explicit error; it is never silently
+omitted from the total curve. Zero-yield components are skipped.
+
+CP projection yields use the charge probabilities from the fit normalization.
+The rendering MC distributes those yields among bins, and its sample sizes do
+not change the integrated charge asymmetry. Both charge panels share bin edges;
+one empty charge dataset is supported. If both datasets are empty, provide an
+explicit `range`. Positive-yield components still require positive, finite
+integrals on the projection sample.

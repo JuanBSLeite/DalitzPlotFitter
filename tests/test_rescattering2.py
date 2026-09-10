@@ -25,10 +25,10 @@ def test_rescattering2_matches_laura_reference_points():
     context = _context()
 
     expected = {
-        1.00: complex(0.9357475882415249, -0.5707229339802834),
-        1.20: complex(0.26514538857379993, -0.40857066151291804),
-        1.60: complex(-0.33298867065299664, -0.15915264954290975),
-        1.80: complex(-0.08611672917136089, -0.04931777113756788),
+        1.00: complex(-0.4072711909399807, -0.3666977380596356),
+        1.20: complex(-0.19650139341624523, -0.03512873838827652),
+        1.60: complex(-0.014107320439921921, -0.03513810923005649),
+        1.80: complex(0.032860715369232144, -0.027130409606991458),
     }
 
     for mass, reference in expected.items():
@@ -61,12 +61,31 @@ def test_rescattering2_zero_at_upper_edge():
     assert abs(at_upper) == 0.0
 
 
-def test_rescattering2_extrapolates_region_one_below_kk_threshold():
+def test_rescattering2_is_zero_below_kk_threshold():
     model = Rescattering2()
     context = _context()
 
     value = complex(model(jnp.asarray(0.90), context))
-    assert abs(value) > 0.0
+    assert abs(value) == 0.0
+
+
+def test_rescattering2_raw_magnitude_extrapolates_below_kk_threshold():
+    # g_00(m) itself (the raw Chebyshev magnitude) is still defined below
+    # threshold; only resAmp's explicit mag=0 cut (applied in __call__)
+    # removes it from the physical amplitude.
+    model = Rescattering2()
+    assert abs(float(model.magnitude(jnp.asarray(0.90)))) > 0.0
+
+
+def test_rescattering2_suppression_factor_reduces_high_mass_amplitude():
+    model = Rescattering2()
+    context = _context()
+
+    with_lambda = complex(model(jnp.asarray(1.6), context))
+    unsuppressed = Rescattering2(lambda_scale=1.0e6)
+    without_suppression = complex(unsuppressed(jnp.asarray(1.6), context))
+
+    assert abs(with_lambda) < abs(without_suppression)
 
 
 def test_rescattering2_zero_above_upper_domain():

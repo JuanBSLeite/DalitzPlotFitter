@@ -14,11 +14,12 @@ so HESSE one-parameter uncertainties correspond to `Delta NLL = 0.5`.
 
 `Minimizer` uses a default tolerance of `1e-4`. Fit validity must not be judged from `valid` or EDM alone: always compare the fitted NLL with known reference points in closure tests and inspect pulls/covariance quality.
 
-## Deterministic normalization only
+## Normalization samples
 
-All amplitude-component and PDF normalization integrals use either mass-plane
-Gauss--Legendre quadrature or Square-Dalitz quadrature. There is no Monte Carlo,
-equal-area, or adaptive normalization path in the supported API.
+By default, amplitude-component and PDF normalization integrals use mass-plane
+Gauss--Legendre or Square-Dalitz quadrature. An external `normalization_sample`
+selects `toy-mc` and is reused unchanged during the fit. See
+[Monte Carlo normalization](mc_integration.md) for proposal weights and selection.
 
 The default model configuration is
 
@@ -43,7 +44,7 @@ data = model.generate_phase_space(...)
 cache = model.prepare_cache(data)
 ```
 
-where `generate_phase_space()` is used only to generate event/proposal samples. `prepare_cache()` uses the deterministic model-owned grid unless an explicit grid sample is supplied.
+where `generate_phase_space()` is used only to generate event/proposal samples. `prepare_cache()` uses the model-owned normalization sample unless an explicit integration sample is supplied.
 
 For the default method, convergence should be checked by changing
 `normalization_order_m13` and `normalization_order_m23`. For

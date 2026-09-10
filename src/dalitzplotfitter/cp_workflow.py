@@ -64,8 +64,14 @@ def _acceptance(efficiency, veto, data: dict[str, object]) -> jnp.ndarray:
 
 
 def _joint_scaled_weights(plus_sample, plus_density, minus_sample, minus_density, scale: float):
-    plus_raw = np.asarray(plus_sample.weights, dtype=float) * np.asarray(plus_density, dtype=float)
-    minus_raw = np.asarray(minus_sample.weights, dtype=float) * np.asarray(minus_density, dtype=float)
+    if scale == 0:
+        return np.zeros(plus_sample.size), np.zeros(minus_sample.size)
+    if not np.isfinite(scale) or scale < 0:
+        raise ValueError("projection yield must be finite and non-negative")
+    if plus_sample.size == 0 or minus_sample.size == 0:
+        raise ValueError("projection samples must be non-empty")
+    plus_raw = np.asarray(plus_sample.weights, dtype=float) * np.asarray(plus_density, dtype=float) / plus_sample.size
+    minus_raw = np.asarray(minus_sample.weights, dtype=float) * np.asarray(minus_density, dtype=float) / minus_sample.size
     total = float(np.sum(plus_raw) + np.sum(minus_raw))
     if not np.isfinite(total) or total <= 0.0:
         raise ValueError("joint projection density has non-positive or non-finite integral")
@@ -262,16 +268,25 @@ class CPFitSession:
         return out
 
     def _projection_components_pair(self, values, plus_sample, minus_sample):
-        plus_acc = _acceptance(self.plus_efficiency, self.plus_veto, plus_sample.as_dict())
-        minus_acc = _acceptance(self.minus_efficiency, self.minus_veto, minus_sample.as_dict())
-        _, integral_plus = self.plus_cache.evaluate(values)
-        _, integral_minus = self.minus_cache.evaluate(values)
-        joint_signal_norm = integral_plus + integral_minus
-        plus_density = plus_acc * self.plus_model.intensity(plus_sample.as_dict(), values) / joint_signal_norm
-        minus_density = minus_acc * self.minus_model.intensity(minus_sample.as_dict(), values) / joint_signal_norm
+        from dalitzplotfitter.workflow import _scaled_projection_weights
+
         total_events = self.plus_data.size + self.minus_data.size
         signal_scale = float(_resolve(self.signal_yield, values)) if self.extended else (total_events * float(_resolve(self.signal_fraction, values)) if self.background_categories else float(total_events))
-        plus_w, minus_w = _joint_scaled_weights(plus_sample, plus_density, minus_sample, minus_density, signal_scale)
+        plus_w, minus_w = np.zeros(plus_sample.size), np.zeros(minus_sample.size)
+        if signal_scale:
+            _, integral_plus = self.plus_cache.evaluate(values)
+            _, integral_minus = self.minus_cache.evaluate(values)
+            norm = float(integral_plus + integral_minus)
+            if not np.isfinite(norm) or norm <= 0:
+                raise ValueError("signal projection requires positive finite joint integral")
+            for sample, model, efficiency, veto, integral, target in (
+                (plus_sample, self.plus_model, self.plus_efficiency, self.plus_veto, integral_plus, plus_w),
+                (minus_sample, self.minus_model, self.minus_efficiency, self.minus_veto, integral_minus, minus_w),
+            ):
+                scale = signal_scale * float(integral) / norm
+                if scale:
+                    density = _acceptance(efficiency, veto, sample.as_dict()) * model.intensity(sample.as_dict(), values)
+                    target[:] = _scaled_projection_weights(sample, density, scale)
         plus_components = [("signal", plus_sample, plus_w)]
         minus_components = [("signal", minus_sample, minus_w)]
         if not self.background_categories:
@@ -283,16 +298,19 @@ class CPFitSession:
             bw = np.asarray(self.base_objective.background_weights(values), dtype=float)
             bg_scales = [bg_total * float(w) for w in bw]
         for source, category, scale in zip(self.backgrounds, self.background_categories, bg_scales):
-            if not isinstance(source, CPBackgroundSpec):
+            if scale == 0:
                 continue
-            pr = jnp.asarray(source.plus_shape(plus_sample.as_dict()))
-            mr = jnp.asarray(source.resolved_minus_shape(minus_sample.as_dict()))
+            if not isinstance(source, CPBackgroundSpec):
+                raise ValueError("plotting a precomputed CP background requires a CPBackgroundSpec with evaluable shapes")
+            pr = jnp.asarray(source.plus_shape(plus_sample.as_dict())) if float(category.plus_probability) else jnp.zeros(plus_sample.size)
+            mr = jnp.asarray(source.resolved_minus_shape(minus_sample.as_dict())) if float(category.minus_probability) else jnp.zeros(minus_sample.size)
             if source.apply_veto:
                 if self.plus_veto is not None:
                     pr *= jnp.asarray(self.plus_veto(plus_sample.as_dict()))
                 if self.minus_veto is not None:
                     mr *= jnp.asarray(self.minus_veto(minus_sample.as_dict()))
-            pw, mw = _joint_scaled_weights(plus_sample, pr / category.normalization, minus_sample, mr / category.normalization, scale)
+            pw = _scaled_projection_weights(plus_sample, pr, scale * float(category.plus_probability))
+            mw = _scaled_projection_weights(minus_sample, mr, scale * float(category.minus_probability))
             plus_components.append((category.name, plus_sample, pw))
             minus_components.append((category.name, minus_sample, mw))
         return plus_components, minus_components
@@ -317,6 +335,11 @@ class CPFitSession:
         """
         import matplotlib.pyplot as plt
         values = self.result_values(result)
+        combined = np.concatenate([np.asarray(getattr(d, variable)) for d in (self.plus_data, self.minus_data)])
+        if range is None and combined.size == 0:
+            raise ValueError("provide range when both charge datasets are empty")
+        hist_range = range if range is not None else (float(np.min(combined)), float(np.max(combined)))
+        edges = np.histogram_bin_edges(combined, bins=bins, range=hist_range)
         if axes is None:
             _, axes = plt.subplots(1,2,figsize=(12,4.8),constrained_layout=True)
         plus_sample = self.plus_model.generate_phase_space(projection_size, seed=projection_seed)
@@ -324,8 +347,6 @@ class CPFitSession:
         plus_components, minus_components = self._projection_components_pair(values, plus_sample, minus_sample)
         for ax, charge, data, components in zip(axes, ("plus","minus"), (self.plus_data,self.minus_data), (plus_components,minus_components)):
             dv = np.asarray(getattr(data, variable))
-            hist_range = range or (float(np.min(dv)), float(np.max(dv)))
-            edges = np.linspace(hist_range[0], hist_range[1], bins+1)
             unit = r"GeV$^2$" if variable in ("s12","s13","s23") else ""
             plot_binned_data(dv, bins=edges, ax=ax, label=f"B{'+' if charge=='plus' else '-'} data", unit=unit, log_scale=log_scale)
             total = np.zeros(bins)

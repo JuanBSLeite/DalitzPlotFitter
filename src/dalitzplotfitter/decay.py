@@ -332,10 +332,12 @@ class DecayModel:
     normalization_sample:
         Optional external Monte Carlo sample used for every normalization
         integral. The package convention is mean(sample.weights * f). A
-        weighted toy should therefore contain integration/importance weights;
-        an unweighted toy uses unit weights. Within one model, any common
-        overall weight factor cancels in normalized PDFs and fit/interference
-        fractions.
+        sample must contain integration/importance weights for its proposal.
+        Unit weights are appropriate only for a proposal uniform in the target
+        measure (up to its volume convention), not arbitrary signal toys.
+        Use sample.with_importance_weights(q) for a known proposal density q.
+        A common weight scale changes the density measure; use consistent
+        conventions across components and charge samples.
     normalization_chunk_size:
         Maximum number of normalization points evaluated by one compiled
         coefficient-only normalization chunk. Smaller values reduce temporary
@@ -394,16 +396,7 @@ class DecayModel:
         if normalization_sample is not None:
             if not isinstance(normalization_sample, PhaseSpaceSample):
                 raise TypeError("normalization_sample must be a PhaseSpaceSample")
-            if normalization_sample.size < 1:
-                raise ValueError("normalization_sample must contain at least one event")
-            expected_shape = (normalization_sample.size,)
-            for name in ("s12", "s13", "s23", "weights"):
-                shape = tuple(jnp.asarray(getattr(normalization_sample, name)).shape)
-                if shape != expected_shape:
-                    raise ValueError(
-                        f"normalization_sample.{name} must have shape "
-                        f"{expected_shape}, got {shape}"
-                    )
+            normalization_sample.validate_integration()
             normalization_method = "toy-mc"
         elif normalization_method == "toy-mc":
             raise ValueError(
@@ -897,8 +890,12 @@ class DecayModel:
         cell_probabilities,
         grid_shape: tuple[int, int],
         seed: int | None = None,
+        integration_weights: bool = True,
     ):
-        """Generate invariant-only phase-space proposals from weighted Dalitz cells."""
+        """Generate stratified phase space; integration weights are the default.
+
+        Set integration_weights=False only for accept-reject proposals.
+        """
 
         return PhaseSpaceMC(
             self.channel.parent_mass,
@@ -908,6 +905,7 @@ class DecayModel:
             cell_probabilities=cell_probabilities,
             grid_shape=grid_shape,
             seed=seed,
+            integration_weights=integration_weights,
         )
 
     def _component_scale(self, component: AmplitudeComponent, values=None):
@@ -938,6 +936,8 @@ class DecayModel:
 
     def pdf(self, normalization_sample: PhaseSpaceSample | None = None, *, efficiency=None) -> SignalPDF:
         sample = self.normalization_sample if normalization_sample is None else normalization_sample
+        if normalization_sample is not None:
+            sample.validate_integration()
         def intensity(data, parameters):
             return self.intensity(data, parameters)
         kwargs = {}
@@ -954,6 +954,8 @@ class DecayModel:
         normalize_components: bool | None = None,
     ) -> PreparedAmplitudeCache:
         sample = self.normalization_sample if normalization_sample is None else normalization_sample
+        if normalization_sample is not None:
+            sample.validate_integration()
         normalize = self.normalize_components if normalize_components is None else bool(normalize_components)
         has_floating_dynamics = any(
             parameter.kind is ParameterKind.DYNAMICS and not parameter.fixed

@@ -419,8 +419,13 @@ class PhaseSpaceMC:
         grid_shape: tuple[int, int],
         seed: int | None = None,
         key: Array | None = None,
+        integration_weights: bool = True,
     ) -> tuple[PhaseSpaceSample, Array]:
-        """Generate invariant-only proposals from weighted equal Dalitz cells."""
+        """Generate stratified events with importance-corrected weights by default.
+
+        integration_weights=False retains the proposal weights required by
+        the accept-reject envelope algorithm; never integrate those directly.
+        """
 
         if size <= 0:
             raise ValueError("size must be positive")
@@ -434,6 +439,14 @@ class PhaseSpaceMC:
             raise ValueError(
                 "cell_probabilities must match the requested stratified grid"
             )
+        if not bool(jnp.all(jnp.isfinite(probabilities) & (probabilities >= 0))):
+            raise ValueError("cell probabilities must be finite and non-negative")
+        total = jnp.sum(probabilities)
+        if not bool(jnp.isfinite(total) & (total > 0)):
+            raise ValueError("cell probabilities must have positive finite sum")
+        probabilities = probabilities / total
+        if integration_weights and not bool(jnp.all(probabilities > 0)):
+            raise ValueError("integration requires positive probability for every cell")
         if seed is not None and key is not None:
             raise ValueError("Pass either seed or key, not both")
         if key is None:
@@ -452,6 +465,8 @@ class PhaseSpaceMC:
             u_bins=u_bins,
             v_bins=v_bins,
         )
+        if integration_weights:
+            weights = weights / (u_bins * v_bins * probabilities[cells])
         return (
             PhaseSpaceSample(
                 s12=s12,

@@ -19,7 +19,7 @@ from dalitzplotfitter import (
 enable_x64()
 
 
-@pytest.mark.parametrize("interpolation", ["linear", "cubic", "hermite"])
+@pytest.mark.parametrize("interpolation", ["linear", "cubic", "hermite", "natural"])
 @pytest.mark.parametrize("floating", [False, True])
 def test_distinct_qmi_grids_are_independent_of_component_order(interpolation, floating):
     components = []

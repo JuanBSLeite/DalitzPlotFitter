@@ -86,13 +86,19 @@ The scattering constants are fixed by default while the process-dependent `betas
 spin-0 one-dimensional lineshape. It parameterizes
 
 ```text
-A(m) = g_00(m) exp(i phi_00(m))
+A(m) = g_00(m) exp(i phi_00(m)) / (1 + m^2/Lambda^2)
 ```
 
 with Chebyshev expansions in two mass regions: from the charged-kaon threshold
-`2 m_K` to 1.47 GeV, and from 1.47 to 2.00 GeV. The default `B`, `C`,
-`D`, and `F` coefficients are the Laura++ defaults. The two expansions are
-constructed to be continuous at 1.47 GeV.
+`2 m_K` to 1.47 GeV, and from 1.47 to 2.00 GeV. `phi_00` is evaluated as a
+Chebyshev series in degrees and converted to radians once, after evaluation,
+matching `LauRescattering2Res::resAmp`. `g_00(m)`, and therefore `A(m)`, is
+exactly zero below the charged-kaon threshold `2 m_K`; region I is not
+extrapolated into the sub-threshold region for the amplitude actually
+returned by `__call__` (`Rescattering2.magnitude()` still exposes the raw,
+un-cut Chebyshev value for diagnostics). The default `B`, `C`, `D`, `F`
+coefficients and `Lambda = 1` GeV are the Laura++ defaults. The two Chebyshev
+expansions are constructed to be continuous at 1.47 GeV.
 
 ```python
 from dalitzplotfitter import RealImag, Rescattering2, Resonance
@@ -127,15 +133,19 @@ A_S(s_k) = a_k exp(i delta_k)
 A_S(s)   = a(s) exp(i delta(s)).
 ```
 
-By default, magnitude and phase are interpolated separately. Two interpolation
+By default, magnitude and phase are interpolated separately. Four interpolation
 modes are available:
 
 ```python
 QMI(..., interpolation="linear")  # default; reproduces the published LHCb convention
-QMI(..., interpolation="cubic")   # natural cubic spline in s=m^2
+QMI(..., interpolation="cubic")   # local smoothstep, two adjacent knots
+QMI(..., interpolation="hermite") # local Hermite, finite-difference slopes
+QMI(..., interpolation="natural") # global natural cubic spline in s=m^2
 ```
 
-The cubic mode is implemented directly in JAX with natural boundary conditions, so the knot magnitudes and phases remain differentiable fit parameters. Both modes pass exactly through all supplied knots; outside the knot range the nearest endpoint value is used.
+All modes are implemented in JAX and pass through the supplied knots; outside the knot range the nearest endpoint value is used. `natural` solves the global spline system: its second derivative vanishes at the two endpoints and its first and second derivatives are continuous at interior knots. Moving a node can affect every interval. With two knots it reduces to linear interpolation. Natural boundary conditions apply inside the knot range; constant continuation outside it need not have a matching first derivative.
+
+The natural option supports polar and Cartesian parameters, prepared evaluation, JIT and automatic gradients. It solves a knot-sized system without storing an event-by-knot basis matrix. It uses ordinary JAX autodiff, so it does not have the grouped custom VJP optimization of the local modes; large-fit performance should be measured separately. As with other cubic splines, overshoot is possible, including negative interpolated polar magnitudes. `linear` remains the default, and `cubic` retains its local behavior.
 
 The public `knots` argument is given as masses in GeV, matching the published tables; internally `QMI` squares the masses and interpolates in `s`. Entries of `magnitudes` and `phases` may be numerical constants or fit `Parameter` objects. Phases are expressed in radians and should be supplied as a continuous/unwrapped sequence; interpolation does not impose a `[-pi, pi)` branch cut.
 
@@ -146,7 +156,7 @@ qmi = QMI(
     knots=(0.30, 0.50, 0.70, 0.90, 1.10),
     magnitudes=(a0, a1, a2, a3, a4),
     phases=(d0, d1, d2, d3, d4),
-    interpolation="cubic",
+    interpolation="natural",
 )
 ```
 

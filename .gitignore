@@ -15,4 +15,4 @@ build/
 .DS_Store
 
 # Local Genfit run diagnostics
-genfit/logs/
+notebooks/genfit/logs/

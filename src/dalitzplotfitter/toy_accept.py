@@ -412,6 +412,7 @@ def _accept_reject_component(
             probabilities = local_envelopes / np.sum(local_envelopes)
             pool, proposal_cells = model.generate_stratified_phase_space(
                 batch_size,
+                integration_weights=False,
                 cell_probabilities=jnp.asarray(probabilities),
                 grid_shape=grid_shape,
                 seed=_derived_seed(seed, 10_000 + proposal_index),

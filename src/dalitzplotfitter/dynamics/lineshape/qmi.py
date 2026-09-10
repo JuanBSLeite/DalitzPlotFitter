@@ -357,6 +357,31 @@ _cubic_qmi_prepared.defvjp(
 )
 
 
+def _natural_cubic(values, index, fraction, knots):
+    """Global C2 spline in s, with zero endpoint second derivatives.
+
+    Solve only the knot-sized system, never an event-by-knot basis matrix.
+    All operations remain differentiable with respect to the knot values.
+    """
+    values = jnp.asarray(values)
+    knots = jnp.asarray(knots, dtype=values.dtype)
+    h = jnp.diff(knots)
+    second = jnp.zeros_like(values)
+    if values.size > 2:
+        diagonal = 2 * (h[:-1] + h[1:])
+        matrix = jnp.diag(diagonal)
+        matrix = matrix + jnp.diag(h[1:-1], 1) + jnp.diag(h[1:-1], -1)
+        rhs = 6 * jnp.diff(jnp.diff(values) / h)
+        interior = jnp.linalg.solve(matrix, rhs)
+        second = jnp.concatenate((second[:1], interior, second[-1:]))
+    index = jnp.asarray(index, dtype=jnp.int32)
+    b = jnp.asarray(fraction, dtype=values.dtype)
+    a = 1 - b
+    return (a * values[index] + b * values[index + 1]
+            + h[index]**2 / 6 * ((a**3 - a) * second[index]
+                                + (b**3 - b) * second[index + 1]))
+
+
 def _hermite_slopes(values, knot_s):
     """Return local finite-difference slopes for cubic Hermite interpolation."""
 
@@ -661,9 +686,9 @@ class QMI:
             raise ValueError("QMI knots must be strictly increasing")
         if knots[0] <= 0.0:
             raise ValueError("QMI knot masses must be positive")
-        if self.interpolation not in {"linear", "cubic", "hermite"}:
+        if self.interpolation not in {"linear", "cubic", "hermite", "natural"}:
             raise ValueError(
-                "QMI interpolation must be 'linear', 'cubic', or 'hermite'"
+                "QMI interpolation must be linear, cubic, hermite, or natural"
             )
 
     @property
@@ -680,6 +705,8 @@ class QMI:
             knot_s,
             prepared_index,
         )
+        if self.interpolation == "natural":
+            return _natural_cubic(values, index, fraction, knot_s)
         if self.interpolation == "linear":
             weight = fraction
             return values[index] + weight * (values[index + 1] - values[index])
@@ -730,6 +757,14 @@ class QMI:
 
         magnitudes = jnp.asarray(first_values, dtype=knot_s.dtype)
         phases = jnp.asarray(second_values, dtype=knot_s.dtype)
+
+        if self.interpolation == "natural":
+            if prepared_fraction is None:
+                index, fraction = _interval_index_and_fraction(s, knot_s, prepared_index)
+            else:
+                index, fraction = prepared_index, prepared_fraction
+            return (_natural_cubic(magnitudes, index, fraction, knot_s),
+                    _natural_cubic(phases, index, fraction, knot_s))
 
         if self.interpolation == "linear":
             if prepared_fraction is None:

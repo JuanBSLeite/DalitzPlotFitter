@@ -1,71 +1,40 @@
-# Revisão do fitter: integração, JAX e iminuit — 09/09/2026
+# Fitter review: integration, JAX and iminuit — 2026-09-09
 
-Revisão do código local, sem alterações no núcleo e sem usar a GPU do teste 03. Os testes foram executados em processo separado, em CPU, limitado a dois núcleos. O escopo cobre o caminho single-sample de FitSession, caches de amplitudes, integração determinística e Minimizer; não constitui uma auditoria completa de CP, backgrounds, SCF ou todos os lineshapes.
+Historical review of the single-sample FitSession path, amplitude caches, deterministic integration and Minimizer. Tests ran in separate CPU processes limited to two cores, without using the GPU running Genfit 03. The original review did not cover CP, backgrounds, SCF or every lineshape. Applied corrections are listed below.
 
-## Achados confirmados
+## Confirmed findings
 
-### 1. Alta prioridade: cache compartilhado reaproveita limites e valores padrão antigos
+### 1. High: shared backend reused stale free-parameter settings
 
-Em `src/dalitzplotfitter/fit/minimizer.py:121`, a assinatura considera nomes, flags fixed e valores fixos, mas não os valores, passos e limites dos parâmetros livres. O backend compartilhado inclui a tupla `free` do primeiro Minimizer. `_run` usa essa tupla para configurar o próximo Minuit.
+The backend signature in `fit/minimizer.py` included names, fixed flags and fixed values, but retained the first Minimizer's free-parameter tuple. Reusing the same objective with different starts, steps or bounds could configure Minuit with the old declarations.
 
-Reprodução: uma mesma função `(x-3)**2`, primeiro com `Parameter('x', 0, bounds=(-5,5))`, depois com `Parameter('x', 0.5, bounds=(0,1))`. Basta preparar o primeiro backend antes de ajustar o segundo. O segundo ajuste retornou `valid=True`, limites `(-5,5)` e `x=2.999811927892423`, violando os limites solicitados. O valor padrão reaproveitado foi 0, em vez de 0.5.
+Reproduction: `(x-3)**2`, first with `Parameter('x',0,bounds=(-5,5))`, then with `Parameter('x',0.5,bounds=(0,1))`. Preparing the first backend before fitting the second produced `valid=True`, bounds `(-5,5)` and x=2.999811927892423. The reused default was 0 instead of 0.5.
 
-O erro exige reaproveitar a mesma instância de função objetivo com declarações diferentes. Não explica por si só os mínimos secundários do teste 01, cujas declarações permanecem iguais, nem demonstra contaminação entre objetivos distintos no teste 03.
+This requires reuse of the same objective instance. It does not by itself explain secondary minima in Genfit 01 or contamination between distinct objectives in Genfit 03.
 
-Correção recomendada: compartilhar apenas callbacks compilados e nomes; reconstruir `free` com os parâmetros do Minimizer atual. Alternativa mais simples, porém menos eficiente: incluir todas as definições na assinatura. Adicionar regressões para alteração de limites, passos e valor padrão.
+### 2. Medium: FitSession prevented fixed-dynamics normalization reuse
 
-### 2. Média prioridade: FitSession impede o reaproveitamento de normalização entre toys de dinâmica fixa
+FitSession always passed an acceptance vector, including all-ones acceptance, while DecayModel required `efficiency_normalization is None` for template reuse. With a constant model, a resolution-10 Square-Dalitz grid and two ten-event sessions, `_fixed_normalization_templates` remained empty. Calling `model.prepare_cache(data)` directly created a template.
 
-Em `src/dalitzplotfitter/workflow.py:202`, `signal_cache` passa sempre `acceptance_normalization`, inclusive quando é um vetor de uns. Em `src/dalitzplotfitter/decay.py:968`, o reaproveitamento exige `efficiency_normalization is None`.
+This caused repeated work and allocations, without demonstrated numerical bias. Floating dynamics must still be reevaluated.
 
-Reprodução com modelo constante, grade Square Dalitz de resolução 10 e duas sessões de dez eventos: `_fixed_normalization_templates` permaneceu vazio nas duas sessões. Chamando `model.prepare_cache(data)` diretamente, o cache passou a conter um template.
+### 3. Execution limits: ncall is not a total fit budget
 
-Consequência: trabalho e alocações repetidos no teste 02, sem indicação de mudança do resultado numérico. Não aplicar automaticamente o mesmo reaproveitamento ao teste 03: sua dinâmica varia.
+SIMPLEX and HESSE originally received no ncall; strategy 2 called MIGRAD twice, each with the requested budget. For a quadratic, `fit(ncall=1,simplex=True,hesse=True)` used 37 evaluations at strategy 1 and 51 at strategy 2. Entire stages were unrestricted, beyond ordinary approximate-limit overshoot. See the [iminuit reference](https://scikit-hep.org/iminuit/reference.html#iminuit.Minuit.migrad).
 
-Correção recomendada: quando eficiência e veto forem ambos None, passar None para o cache. Testar o caminho público FitSession entre duas amostras, não apenas DecayModel.prepare_cache.
+## Integration and statistical limits
 
-### 3. Controle de execução: ncall não é um orçamento total do fit
+- `mean(weights*f)`, the grid Jacobian `4*m13*m23`, retained-point weight scaling and the conjugation in `c†Mc` were consistent.
+- Floating components and dynamic–fixed/dynamic–dynamic blocks are reevaluated; JAX gradients include those normalization dependencies.
+- Minuit convergence does not certify quadrature precision. Narrow-resonance refinement is fixed from nominal parameters. Moving poles or narrowing widths may leave the well-resolved region. Inspection alone did not establish bias in Genfit 03.
+- Asimov checks on the same integration support test algebraic consistency, not error relative to the continuous integral. Refine the grid and compare objectives, gradients and fitted parameters.
+- The reviewed dynamic path evaluated components on the full normalization sample and retained fixed values for cross terms. Session cleanup reduces retention between fits, not the peak memory within one fit. Differentiable chunked dynamic integration remains a separate structural improvement.
+- `-sum(log p)`, `errordef=0.5`, explicit parameter ordering and `jax.value_and_grad` were consistent. `valid=True` indicates local convergence; HESSE provides local errors, not a global-minimum certificate.
 
-Em `src/dalitzplotfitter/fit/minimizer.py:358`, SIMPLEX e HESSE são chamados sem ncall; strategy=2 chama MIGRAD duas vezes, cada uma com o orçamento informado. Além disso, MIGRAD do iminuit tem sua própria política de repetição.
+## Applied corrections and validation
 
-Em uma quadrática, `fit(ncall=1, simplex=True, hesse=True)` produziu 37 avaliações com strategy=1 e 51 com strategy=2. Não se trata apenas da pequena ultrapassagem de uma iteração: há etapas inteiras sem o orçamento informado. Isso importa em fits dinâmicos caros.
+Compiled callbacks remain shared, but free declarations now come from the current Minimizer. Regressions cover bounds, steps, defaults and explicit starts. FitSession passes None when efficiency and veto are absent. ncall is forwarded to SIMPLEX and HESSE and documented as an approximate per-stage limit; no global budget was introduced.
 
-Documentar explicitamente que ncall se aplica a cada chamada MIGRAD, ou implementar um orçamento global com contabilização por etapa. A API do iminuit descreve ncall como limite aproximado por chamada: https://scikit-hep.org/iminuit/reference.html#iminuit.Minuit.migrad .
+Initial validation: 26 tests in 28.68 s (`test_minimizer`, `test_integration`, `test_gauss_legendre_integration`, `test_dynamic_fit_consistency`, `test_model_normalization_reuse`), plus 20 tests in 10.99 s (`test_workflow`, `test_amplitude_cache`): **46 passed**. Separate reproductions established the findings.
 
-## Integração: estrutura coerente, com limitações importantes
-
-- A convenção `mean(weights * f)` é coerente entre grids e matriz. Gauss–Legendre incorpora o jacobiano `4*m13*m23` e multiplica pesos pela quantidade de pontos retidos; `c† M c` representa a normalização com os conjugados na orientação adequada.
-- O caminho dinâmico recalcula a normalização de cada componente livre e os blocos dinâmico–fixo e dinâmico–dinâmico. Os gradientes JAX incluem essas dependências. Os testes exercitam comparação com diferenças finitas, matriz direta e fechamento Asimov.
-- **Precisão da grade não é garantida pela convergência do Minuit.** `DecayModel._adaptive_narrow_resonances` fixa o refinamento a partir dos parâmetros nominais. Isso é explícito no código, não uma falha oculta. Uma ressonância que se desloca ou se torna muito estreita pode sair da região bem resolvida. Os limites amplos do notebook 03 permitem larguras muito menores que a nominal; isso requer avaliação de precisão se o fit visitar essas regiões, sem que se possa afirmar viés nos resultados atuais apenas pela inspeção.
-- O teste Asimov usa o mesmo suporte de integração para verdade e fit. Ele verifica consistência algébrica, mas não mede o erro da quadratura em relação à integral contínua. Para isso, comparar NLL, gradientes e parâmetros em grades progressivamente refinadas, idealmente também em outra parametrização de integração.
-- **Memória por fit:** em `amplitude/cache.py:721`, a componente dinâmica é avaliada sobre toda a amostra de normalização; os valores fixos também ficam retidos para os termos cruzados. A opção `normalization_chunk_size` é documentada para o caminho de dinâmica fixa. Limpar sessões entre toys reduz retenção entre fits, mas não resolve o pico dessa avaliação e sua diferenciação. Uma melhoria estrutural é integrar blocos dinâmicos por chunks, com acumulação diferenciável dos pequenos blocos da matriz, verificando gradientes e memória do backward.
-
-## Ligação com iminuit
-
-A combinação NLL = -sum(log p), errordef=0.5, ordenação explícita de nomes e gradiente `jax.value_and_grad` está consistente no caminho revisado. O callback compartilha o valor e gradiente de um mesmo ponto. O ponto 1 precisa ser corrigido para que esse reaproveitamento não inclua configurações obsoletas.
-
-`valid=True` é convergência local, não certificado de mínimo global nem de precisão da integração. HESSE avalia erros locais. Os mínimos alternativos observados no teste 01 não são, isoladamente, evidência de erro na ligação com iminuit.
-
-## Validação
-
-Primeiro grupo: **26 testes passaram** em 28,68 s:
-
-- tests/test_minimizer.py
-- tests/test_integration.py
-- tests/test_gauss_legendre_integration.py
-- tests/test_dynamic_fit_consistency.py
-- tests/test_model_normalization_reuse.py
-
-Reproduções adicionais dos achados 1–3 executadas separadamente. Nenhuma correção aplicada ao núcleo nesta revisão.
-
-Segundo grupo: **20 testes passaram** em 10,99 s, cobrindo `tests/test_workflow.py` e `tests/test_amplitude_cache.py`. Total: **46 testes aprovados**. Incluem comparação de PDF genérica e cacheada, eficiência, blocos de múltiplas componentes dinâmicas e integração em chunks com último bloco parcial. A aprovação não cobre as regressões reproduzidas acima nem certifica a convergência da grade completa do teste 03.
-
-## Correções aplicadas após a revisão
-
-- Cache do Minimizer: callbacks compilados continuam compartilhados; parâmetros livres são reconstruídos a partir da instância atual. Regressão verifica limites, passo, valor padrão e start explícito, incluindo um mínimo fora dos novos limites.
-- FitSession: sem eficiência/veto, passa None para permitir reaproveitar o template de normalização. Regressões verificam reutilização entre amostras e preservação do caminho com eficiência ou veto.
-- ncall: mantida a semântica de limite aproximado por etapa, agora também passado a SIMPLEX e HESSE e documentado nos métodos fit. Não foi introduzido orçamento global.
-
-Validação das alterações: 53 testes distintos aprovados nos sete arquivos listados acima. Na primeira execução, quatro testes novos usavam um mock que não calculava fval; esse problema do teste foi corrigido para envolver os métodos reais do iminuit. O arquivo de minimização foi então reexecutado: 16/16 aprovados; os demais 37 já haviam passado. `git diff --check` passou. O lint dos arquivos completos ainda aponta ocorrências preexistentes de estilo.
-
-As limitações de precisão da grade para dinâmica variável e de memória por fit continuam como melhorias estruturais futuras; estas alterações não implementam integração dinâmica em chunks nem adaptação da grade durante o fit.
+After corrections: **53 distinct tests passed** across those seven files. Four new tests initially used a mock without fval; that test setup was corrected to wrap real iminuit methods. The minimizer file then passed 16/16; the other 37 had passed. `git diff --check` passed. Whole-file lint still reported pre-existing style issues. These changes did not implement dynamic chunking or adaptive grids during minimization.

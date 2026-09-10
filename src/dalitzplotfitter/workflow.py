@@ -106,6 +106,10 @@ def _scaled_projection_weights(
 ) -> np.ndarray:
     """Normalize MC projection weights to the requested component yield."""
 
+    if not np.isfinite(scale) or scale < 0:
+        raise ValueError("projection yield must be finite and non-negative")
+    if scale == 0:
+        return np.zeros(sample.size)
     raw = np.asarray(sample.weights, dtype=float) * np.asarray(density, dtype=float)
     total = float(np.sum(raw))
     if not np.isfinite(total) or total <= 0.0:
@@ -576,7 +580,6 @@ class FitSession:
             if projection_sample is None
             else projection_sample
         )
-        signal_density = self._projection_signal_density(sample, values)
         if self.extended:
             signal_scale = float(_resolve(self.signal_yield, values))
         elif self.background_categories:
@@ -585,6 +588,7 @@ class FitSession:
             )
         else:
             signal_scale = float(self.data.size)
+        signal_density = self._projection_signal_density(sample, values) if signal_scale else np.zeros(sample.size)
         components = [
             (
                 "signal",
@@ -612,8 +616,10 @@ class FitSession:
             self.background_categories,
             bg_scales,
         ):
-            if not isinstance(source, BackgroundSpec):
+            if scale == 0:
                 continue
+            if not isinstance(source, BackgroundSpec):
+                raise ValueError("plotting a precomputed background requires a BackgroundSpec with an evaluable shape")
             bg_sample = (
                 source.normalization_sample or self.model.normalization_sample
             ) if projection_sample is None else projection_sample
