@@ -131,7 +131,12 @@ special case of the other.
 
 ## Where to look before changing behavior
 
-Each subsystem has one focused doc under `docs/` (`fitting.md`, `lineshapes.md`,
+`docs/catalog.md` indexes every name in `dalitzplotfitter.__all__` (the whole public,
+top-level-importable API) — one line per class/function plus a pointer to the doc/notebook that
+covers it in depth. Check it first for "does something already do X" or "where is X" questions
+before searching the source directly.
+
+Each subsystem also has one focused doc under `docs/` (`fitting.md`, `lineshapes.md`,
 `mc_integration.md`, `backgrounds_and_vetoes.md`, `cp_coefficients.md`, `scf.md`,
 `square_dalitz.md`, `toy_generation.md`, `discriminants_and_constraints.md`,
 `convolution_resolution.md`, `dynamics_structure.md`, `performance.md`, `root_io.md`,

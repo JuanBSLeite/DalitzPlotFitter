@@ -75,7 +75,7 @@ from .kinematics import (
     square_dalitz_jacobian,
     square_dalitz_to_invariants,
 )
-from .likelihood import MultiBackgroundNLL
+from .likelihood import CPJointNLL, MultiBackgroundNLL
 from .pdf import SCFSignalPDF, SignalPDF
 from .plotting import binned_data, plot_binned_data, plot_dalitz, plot_square_dalitz
 from .resolution import (
@@ -110,7 +110,7 @@ from .workflow import BackgroundSpec, FitSession
 
 __all__ = [
     "AmplitudeComponent", "BackgroundCategory", "BackgroundSpec", "BreitWigner1D", "CPBackgroundCategory",
-    "CPBackgroundSpec", "CPFitSession", "CPToyBackground", "BaBarFlatte", "CPRealImag",
+    "CPBackgroundSpec", "CPFitSession", "CPJointNLL", "CPToyBackground", "BaBarFlatte", "CPRealImag",
     "CoherentAmplitudeModel", "CompositeVeto", "ConstrainedNLL", "ConstantAmplitude",
     "ConvolvedPDF1D", "CovariantAngular", "CovariantKinematics", "DalitzAmplitude",
     "DecayChannel", "DecayModel", "Exponential1D", "FactorizedDensity", "FitSession",
