@@ -95,3 +95,16 @@ def test_cp_joint_extended_uses_independent_background_yields():
     )
     values = {"n_sig": 70.0, "n_comb": 20.0, "n_misid": 10.0}
     assert jnp.allclose(nll.expected_events(values), 100.0)
+
+
+def test_cp_joint_background_can_exist_in_one_charge():
+    plus, minus = _cache(1., 2), _cache(1., 2)
+    background = CPBackgroundCategory(
+        'plus_only', jnp.ones(2), jnp.zeros(2), 1., 0.,
+    )
+    nll = CPJointNLL(plus, minus, background_categories=(background,), signal_fraction=.5)
+    dp, dm = nll.densities({})
+    assert jnp.allclose(dp, .75)
+    assert jnp.allclose(dm, .25)
+    assert jnp.isfinite(nll({}))
+    assert jnp.allclose(jnp.asarray(nll.charge_probabilities({})), jnp.asarray([.75, .25]))

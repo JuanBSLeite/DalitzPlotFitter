@@ -50,10 +50,16 @@ def _resolve(value: object, parameters: Mapping[str, object]):
 def _acceptance(efficiency, veto, data: dict[str, object]) -> jnp.ndarray:
     size = int(jnp.asarray(next(iter(data.values()))).shape[0])
     values = jnp.ones((size,), dtype=jnp.float64)
-    if efficiency is not None:
-        values = values * jnp.asarray(efficiency(data))
-    if veto is not None:
-        values = values * jnp.asarray(veto(data), dtype=values.dtype)
+    for label, function in (("efficiency", efficiency), ("veto", veto)):
+        if function is not None:
+            array = jnp.asarray(function(data))
+            if array.ndim == 0:
+                array = jnp.full((size,), array)
+            if array.shape != (size,):
+                raise ValueError(f"CP {label} must have shape ({size},)")
+            if bool(jnp.any(~jnp.isfinite(array) | (array < 0))):
+                raise ValueError(f"CP {label} must be finite and non-negative")
+            values = values * array
     return values
 
 
@@ -147,11 +153,11 @@ class CPFitSession:
 
     @cached_property
     def plus_cache(self):
-        return self.plus_model.prepare_cache(self.plus_data, self.plus_model.normalization_sample, efficiency_normalization=self.plus_acceptance_normalization)
+        return self.plus_model.prepare_cache(self.plus_data, self.plus_model.normalization_sample, efficiency_normalization=(None if self.plus_efficiency is None and self.plus_veto is None else self.plus_acceptance_normalization))
 
     @cached_property
     def minus_cache(self):
-        return self.minus_model.prepare_cache(self.minus_data, self.minus_model.normalization_sample, efficiency_normalization=self.minus_acceptance_normalization)
+        return self.minus_model.prepare_cache(self.minus_data, self.minus_model.normalization_sample, efficiency_normalization=(None if self.minus_efficiency is None and self.minus_veto is None else self.minus_acceptance_normalization))
 
     @staticmethod
     def _evaluate_shape(shape, data):

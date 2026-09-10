@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
+import jax
 import jax.numpy as jnp
 from jax import Array
 
@@ -98,6 +99,54 @@ class CPJointNLL:
                 elif len(self.background_categories) == 1 and self.background_categories[0].fraction is not None:
                     raise ValueError("a single CP background category does not need a relative fraction")
 
+        for charge, cache in (("plus", self.plus_cache), ("minus", self.minus_cache)):
+            size = cache.data_components.shape[0]
+            for label in ("efficiency", "background"):
+                name = f"{charge}_{label}"
+                value = getattr(self, name)
+                if value is not None:
+                    array = jnp.asarray(value)
+                    if label == "efficiency" and array.ndim == 0:
+                        array = jnp.full((size,), array)
+                    if array.shape != (size,):
+                        raise ValueError(f"{name} must have shape ({size},)")
+                    if bool(jnp.any(~jnp.isfinite(array) | (array < 0))):
+                        raise ValueError(f"{name} must be finite and non-negative")
+                    object.__setattr__(self, name, array)
+            for category in self.background_categories:
+                if getattr(category, f"{charge}_values").shape != (size,):
+                    raise ValueError(f"{category.name} {charge} background size mismatch")
+        if self.has_legacy_background:
+            for value in (self.plus_background_normalization, self.minus_background_normalization):
+                array = jnp.asarray(value)
+                if array.ndim != 0 or not bool(jnp.isfinite(array) & (array > 0)):
+                    raise ValueError("Background normalizations must be positive finite scalars")
+        if not bool(self._physical_parameters({})):
+            raise ValueError("Initial CP yields/fractions must be finite and physical")
+
+    def _physical_parameters(self, parameters):
+        def valid_scalar(value, upper=None):
+            resolved = jnp.asarray(_resolve(value, parameters))
+            if resolved.ndim != 0:
+                raise ValueError("CP yields and fractions must be scalars")
+            valid = jnp.isfinite(resolved) & (resolved >= 0)
+            return valid if upper is None else valid & (resolved <= upper)
+
+        valid = jnp.asarray(True)
+        if self.extended:
+            valid = valid & valid_scalar(self.signal_yield)
+            if self.has_legacy_background:
+                valid = valid & valid_scalar(self.background_yield)
+            for category in self.background_categories:
+                valid = valid & valid_scalar(category.yield_)
+        elif self.has_background:
+            valid = valid & valid_scalar(self.signal_fraction, 1)
+            for category in self.background_categories[:-1]:
+                valid = valid & valid_scalar(category.fraction, 1)
+            weights = self.background_weights(parameters)
+            valid = valid & jnp.all(jnp.isfinite(weights) & (weights >= 0))
+        return valid
+
     @property
     def has_legacy_background(self) -> bool:
         return self.plus_background is not None
@@ -113,6 +162,9 @@ class CPJointNLL:
             intensity_plus = jnp.asarray(self.plus_efficiency) * intensity_plus
             intensity_minus = jnp.asarray(self.minus_efficiency) * intensity_minus
         total_integral = integral_plus + integral_minus
+        valid = (jnp.isfinite(integral_plus) & jnp.isfinite(integral_minus)
+                 & (integral_plus >= 0) & (integral_minus >= 0) & (total_integral > 0))
+        total_integral = jnp.where(valid, total_integral, jnp.nan)
         return intensity_plus / total_integral, intensity_minus / total_integral, integral_plus, integral_minus
 
     def _legacy_background_densities(self) -> tuple[Array, Array]:
@@ -194,13 +246,21 @@ class CPJointNLL:
         return total
 
     def __call__(self, parameters: Parameters) -> Array:
-        pdf_plus, pdf_minus = self.densities(parameters)
-        tiny_plus = jnp.finfo(pdf_plus.dtype).tiny
-        tiny_minus = jnp.finfo(pdf_minus.dtype).tiny
-        nll = -jnp.sum(jnp.log(jnp.maximum(pdf_plus, tiny_plus))) - jnp.sum(jnp.log(jnp.maximum(pdf_minus, tiny_minus)))
-        if self.extended:
-            nll = nll + self.expected_events(parameters)
-        return nll
+        """Return +inf outside the physical domain, including during JIT fits."""
+        def evaluate(_):
+            plus, minus = self.densities(parameters)
+            valid = (jnp.all(jnp.isfinite(plus) & (plus > 0))
+                     & jnp.all(jnp.isfinite(minus) & (minus > 0)))
+            # Safe arguments keep invalid log branches out of the gradient.
+            nll = -jnp.sum(jnp.log(jnp.where(plus > 0, plus, 1.0)))
+            nll -= jnp.sum(jnp.log(jnp.where(minus > 0, minus, 1.0)))
+            if self.extended:
+                nll += self.expected_events(parameters)
+            return jnp.where(valid & jnp.isfinite(nll), nll, jnp.inf)
+
+        return jax.lax.cond(self._physical_parameters(parameters), evaluate,
+                            lambda _: jnp.asarray(jnp.inf, dtype=self.plus_cache.data_components.real.dtype),
+                            operand=None)
 
     def charge_probabilities(self, parameters: Parameters) -> tuple[Array, Array]:
         integral_plus = self.plus_cache.normalization(parameters)

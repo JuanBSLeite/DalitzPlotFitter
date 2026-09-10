@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Callable
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
 from dalitzplotfitter.kinematics import PhaseSpaceSample
-
 
 DensityFunction = Callable[[dict[str, object]], object]
 
@@ -33,15 +32,15 @@ def _s13_limits(
     e1 = (s12 + m1**2 - m2**2) / (2.0 * root_s12)
     e3 = (mother_mass**2 - s12 - m3**2) / (2.0 * root_s12)
     q = np.sqrt(np.maximum(_kallen(s12, m1**2, m2**2), 0.0)) / (2.0 * root_s12)
-    p = np.sqrt(np.maximum(_kallen(mother_mass**2, s12, m3**2), 0.0)) / (
-        2.0 * root_s12
-    )
+    p = np.sqrt(np.maximum(_kallen(mother_mass**2, s12, m3**2), 0.0)) / (2.0 * root_s12)
     common = m1**2 + m3**2 + 2.0 * e1 * e3
     spread = 2.0 * q * p
     return common - spread, common + spread
 
 
-def _cumulative_trapezoid(values: np.ndarray, coordinates: np.ndarray, *, axis: int) -> np.ndarray:
+def _cumulative_trapezoid(
+    values: np.ndarray, coordinates: np.ndarray, *, axis: int
+) -> np.ndarray:
     """Small dependency-free cumulative trapezoidal integrator."""
 
     values = np.asarray(values, dtype=float)
@@ -56,21 +55,30 @@ def _cumulative_trapezoid(values: np.ndarray, coordinates: np.ndarray, *, axis: 
     return np.moveaxis(result, -1, axis)
 
 
-def _inverse_row(cdf: np.ndarray, coordinate: np.ndarray, quantiles: np.ndarray) -> np.ndarray:
+def _inverse_row(
+    cdf: np.ndarray, coordinate: np.ndarray, quantiles: np.ndarray
+) -> np.ndarray:
     cdf = np.maximum.accumulate(np.asarray(cdf, dtype=float))
     coordinate = np.asarray(coordinate, dtype=float)
     if not np.isfinite(cdf[-1]) or cdf[-1] <= 0.0:
         return np.interp(quantiles, (0.0, 1.0), (coordinate[0], coordinate[-1]))
     cdf = cdf / cdf[-1]
-    unique, indices = np.unique(cdf, return_index=True)
-    points = coordinate[indices]
-    if unique[0] > 0.0:
-        unique = np.concatenate(([0.0], unique))
-        points = np.concatenate(([coordinate[0]], points))
-    if unique[-1] < 1.0:
-        unique = np.concatenate((unique, [1.0]))
-        points = np.concatenate((points, [coordinate[-1]]))
-    return np.interp(quantiles, unique, points)
+    # Search on the full CDF: a plateau represents a jump of the inverse,
+    # not a segment to interpolate across a forbidden interval.
+    index = np.searchsorted(cdf, quantiles, side="right") - 1
+    # The upper endpoint ends at the first CDF value of one, before any
+    # trailing zero-density interval.
+    index = np.where(
+        quantiles >= 1.0, np.searchsorted(cdf, 1.0, side="left") - 1, index
+    )
+    index = np.clip(index, 0, cdf.size - 2)
+    delta = cdf[index + 1] - cdf[index]
+    fraction = np.divide(
+        quantiles - cdf[index], delta, out=np.zeros_like(quantiles), where=delta > 0
+    )
+    return coordinate[index] + np.clip(fraction, 0, 1) * (
+        coordinate[index + 1] - coordinate[index]
+    )
 
 
 def _momenta_from_invariants(
@@ -112,9 +120,7 @@ def _momenta_from_invariants(
     cos_theta = 2.0 * rng.random(size) - 1.0
     phi = 2.0 * np.pi * rng.random(size)
     sin_theta = np.sqrt(np.maximum(1.0 - cos_theta**2, 0.0))
-    n1 = np.stack(
-        (sin_theta * np.cos(phi), sin_theta * np.sin(phi), cos_theta), axis=1
-    )
+    n1 = np.stack((sin_theta * np.cos(phi), sin_theta * np.sin(phi), cos_theta), axis=1)
 
     reference = np.zeros_like(n1)
     use_x = np.abs(n1[:, 2]) > 0.9
@@ -126,9 +132,7 @@ def _momenta_from_invariants(
     e_perp2 = np.cross(n1, e_perp1)
 
     alpha = 2.0 * np.pi * rng.random(size)
-    transverse = (
-        np.cos(alpha)[:, None] * e_perp1 + np.sin(alpha)[:, None] * e_perp2
-    )
+    transverse = np.cos(alpha)[:, None] * e_perp1 + np.sin(alpha)[:, None] * e_perp2
     n2 = cos12[:, None] * n1 + sin12[:, None] * transverse
 
     spatial1 = p1_mag[:, None] * n1
@@ -153,7 +157,8 @@ class DalitzInverseTransformSampler:
     The transformed marginal therefore includes the exact Jacobian
     ``2*m12 * (s13_max-s13_min)``. Conditional inverse CDFs are tabulated as
     quantiles and bilinearly interpolated during generation. Generation itself
-    has no rejection and produces continuous, duplicate-free invariants.
+    rechecks the target support and replaces candidates with zero density.
+    The density within the allowed support remains a grid approximation.
     """
 
     mother_mass: float
@@ -163,6 +168,7 @@ class DalitzInverseTransformSampler:
     marginal_m12: np.ndarray
     quantile_levels: np.ndarray
     conditional_quantiles: np.ndarray
+    density_function: DensityFunction = field(repr=False, compare=False)
 
     @classmethod
     def prepare(
@@ -173,15 +179,19 @@ class DalitzInverseTransformSampler:
         *,
         resolution: int = 1024,
         quantile_resolution: int | None = None,
-    ) -> "DalitzInverseTransformSampler":
+    ) -> DalitzInverseTransformSampler:
         if resolution < 16:
             raise ValueError("inverse-transform resolution must be at least 16")
         if quantile_resolution is None:
             quantile_resolution = resolution
         if quantile_resolution < 16:
-            raise ValueError("inverse-transform quantile resolution must be at least 16")
+            raise ValueError(
+                "inverse-transform quantile resolution must be at least 16"
+            )
         if len(masses) != 3:
-            raise ValueError("inverse-transform sampler requires exactly three daughter masses")
+            raise ValueError(
+                "inverse-transform sampler requires exactly three daughter masses"
+            )
         if mother_mass <= sum(masses):
             raise ValueError("mother mass must exceed the three-body threshold")
 
@@ -217,29 +227,24 @@ class DalitzInverseTransformSampler:
                 "requested another event field"
             ) from exc
         if density.shape != s13.shape:
-            raise ValueError("inverse-transform density must return one value per grid point")
+            raise ValueError(
+                "inverse-transform density must return one value per grid point"
+            )
         if np.any(~np.isfinite(density)) or np.any(density < 0.0):
-            raise ValueError("inverse-transform density must be finite and non-negative")
+            raise ValueError(
+                "inverse-transform density must be finite and non-negative"
+            )
 
         conditional_cumulative = _cumulative_trapezoid(density, v_grid, axis=1)
         row_integral_v = conditional_cumulative[:, -1]
         marginal_density = 2.0 * m12_eval * width * row_integral_v
-        marginal_cumulative = _cumulative_trapezoid(
-            marginal_density, m12_grid, axis=0
-        )
+        marginal_cumulative = _cumulative_trapezoid(marginal_density, m12_grid, axis=0)
         total = float(marginal_cumulative[-1])
         if not np.isfinite(total) or total <= 0.0:
-            raise ValueError("inverse-transform target density has zero or invalid integral")
+            raise ValueError(
+                "inverse-transform target density has zero or invalid integral"
+            )
         marginal_cdf_full = np.maximum.accumulate(marginal_cumulative / total)
-        unique_cdf, unique_indices = np.unique(marginal_cdf_full, return_index=True)
-        marginal_m12 = m12_grid[unique_indices]
-        if unique_cdf[0] > 0.0:
-            unique_cdf = np.concatenate(([0.0], unique_cdf))
-            marginal_m12 = np.concatenate(([m12_grid[0]], marginal_m12))
-        if unique_cdf[-1] < 1.0:
-            unique_cdf = np.concatenate((unique_cdf, [1.0]))
-            marginal_m12 = np.concatenate((marginal_m12, [m12_grid[-1]]))
-
         quantile_levels = np.linspace(0.0, 1.0, int(quantile_resolution), dtype=float)
         conditional_quantiles = np.empty(
             (m12_grid.size, quantile_levels.size), dtype=float
@@ -253,10 +258,11 @@ class DalitzInverseTransformSampler:
             mother_mass=float(mother_mass),
             masses=tuple(float(value) for value in masses),
             m12_grid=m12_grid,
-            marginal_cdf=unique_cdf,
-            marginal_m12=marginal_m12,
+            marginal_cdf=marginal_cdf_full,
+            marginal_m12=m12_grid,
             quantile_levels=quantile_levels,
             conditional_quantiles=conditional_quantiles,
+            density_function=density_function,
         )
 
     def generate(
@@ -269,9 +275,60 @@ class DalitzInverseTransformSampler:
         if size <= 0:
             raise ValueError("size must be positive")
         rng = np.random.default_rng(seed)
+        accepted = []
+        remaining = size
+        for _ in range(100):
+            candidate = self._draw(remaining, rng=rng)
+            density = np.asarray(
+                jax.device_get(self.density_function(candidate.as_dict()))
+            )
+            if density.shape != (remaining,):
+                raise ValueError(
+                    "inverse-transform density must return one value per event"
+                )
+            if np.any(~np.isfinite(density)) or np.any(density < 0):
+                raise ValueError(
+                    "inverse-transform density must be finite and non-negative"
+                )
+            indices = np.flatnonzero(density > 0)
+            if indices.size:
+                accepted.append(candidate.take(jnp.asarray(indices)))
+                remaining -= indices.size
+            if remaining == 0:
+                break
+        else:
+            raise RuntimeError(
+                "inverse-transform support rejection exhausted 100 batches; "
+                "increase resolution or use accept-reject"
+            )
+        s12, s13, s23 = (
+            np.concatenate([np.asarray(getattr(sample, name)) for sample in accepted])
+            for name in ("s12", "s13", "s23")
+        )
+        p1 = p2 = p3 = None
+        if include_momenta:
+            p1, p2, p3 = _momenta_from_invariants(
+                s12,
+                s13,
+                s23,
+                mother_mass=self.mother_mass,
+                masses=self.masses,
+                rng=rng,
+            )
+        return PhaseSpaceSample(
+            s12=jnp.asarray(s12),
+            s13=jnp.asarray(s13),
+            s23=jnp.asarray(s23),
+            weights=jnp.ones((size,), dtype=jnp.asarray(s12).dtype),
+            p1=None if p1 is None else jnp.asarray(p1),
+            p2=None if p2 is None else jnp.asarray(p2),
+            p3=None if p3 is None else jnp.asarray(p3),
+        )
+
+    def _draw(self, size: int, *, rng: np.random.Generator) -> PhaseSpaceSample:
         u_marginal = rng.random(size)
         u_conditional = rng.random(size)
-        m12 = np.interp(u_marginal, self.marginal_cdf, self.marginal_m12)
+        m12 = _inverse_row(self.marginal_cdf, self.marginal_m12, u_marginal)
 
         row = np.searchsorted(self.m12_grid, m12, side="right") - 1
         row = np.clip(row, 0, self.m12_grid.size - 2)
@@ -299,30 +356,15 @@ class DalitzInverseTransformSampler:
         v = np.clip(v0 + row_fraction * (v1 - v0), 0.0, 1.0)
 
         s12 = m12**2
-        low, high = _s13_limits(
-            s12, mother_mass=self.mother_mass, masses=self.masses
-        )
+        low, high = _s13_limits(s12, mother_mass=self.mother_mass, masses=self.masses)
         s13 = low + v * (high - low)
         m1, m2, m3 = self.masses
         s23 = self.mother_mass**2 + m1**2 + m2**2 + m3**2 - s12 - s13
-        p1 = p2 = p3 = None
-        if include_momenta:
-            p1, p2, p3 = _momenta_from_invariants(
-                s12,
-                s13,
-                s23,
-                mother_mass=self.mother_mass,
-                masses=self.masses,
-                rng=rng,
-            )
         return PhaseSpaceSample(
             s12=jnp.asarray(s12),
             s13=jnp.asarray(s13),
             s23=jnp.asarray(s23),
             weights=jnp.ones((size,), dtype=jnp.asarray(s12).dtype),
-            p1=None if p1 is None else jnp.asarray(p1),
-            p2=None if p2 is None else jnp.asarray(p2),
-            p3=None if p3 is None else jnp.asarray(p3),
         )
 
 

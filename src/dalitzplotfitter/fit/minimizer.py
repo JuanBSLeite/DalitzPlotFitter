@@ -145,12 +145,15 @@ class Minimizer:
         if self._backend_cache is not None:
             return self._backend_cache
 
+        free = tuple(parameter for parameter in self.parameters if not parameter.fixed)
         shared_key, shared = self._shared_backend()
         if shared is not None:
-            self._backend_cache = shared
-            return shared
+            # Only compiled callbacks are reusable. Defaults, limits and steps
+            # belong to this Minimizer, not the instance that compiled them.
+            _, names, fcn, grad = shared
+            self._backend_cache = (free, names, fcn, grad)
+            return self._backend_cache
 
-        free = tuple(parameter for parameter in self.parameters if not parameter.fixed)
         fixed = {
             parameter.name: parameter.value
             for parameter in self.parameters
@@ -356,12 +359,12 @@ class Minimizer:
             if parameter.step is not None:
                 minuit.errors[parameter.name] = parameter.step
         if simplex:
-            minuit.simplex()
+            minuit.simplex(ncall=ncall)
         minuit.migrad(ncall=ncall, use_simplex=False)
         if strategy == 2:
             minuit.migrad(ncall=ncall, use_simplex=False)
         if hesse:
-            minuit.hesse()
+            minuit.hesse(ncall=ncall)
         return minuit
 
     def fit(
@@ -373,6 +376,13 @@ class Minimizer:
         strategy: int = 2,
         hesse: bool = True,
     ):
+        """Fit with an approximate call limit per minimization stage.
+
+        ``ncall`` is passed to SIMPLEX (if requested), each MIGRAD call and
+        HESSE (if requested). It is not a total budget for the complete fit;
+        strategy 2 performs two MIGRAD calls. Minuit can exceed a stage's
+        approximate limit while completing an iteration.
+        """
         ncall = self._validate_ncall(ncall)
         strategy = self._validate_strategy(strategy)
         if not isinstance(hesse, bool):

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Mapping, Sequence
 
 import jax
 import jax.numpy as jnp
@@ -16,6 +16,7 @@ from dalitzplotfitter.toy_accept import (
     ToyBackground,
     _acceptance,
     _background_weights,
+    _charge_probability,
     _derived_seed,
     _empty_sample,
     _integral,
@@ -39,11 +40,15 @@ def _prepare_sampler(
     )
 
 
-def _shuffle(sample: PhaseSpaceSample, *, seed: int | None, offset: int) -> PhaseSpaceSample:
+def _shuffle(
+    sample: PhaseSpaceSample, *, seed: int | None, offset: int
+) -> PhaseSpaceSample:
     if sample.size <= 1:
         return sample
     key_seed = offset if seed is None else (int(seed) + offset) % (2**32)
-    selected = sample.take(jax.random.permutation(jax.random.key(key_seed), sample.size))
+    selected = sample.take(
+        jax.random.permutation(jax.random.key(key_seed), sample.size)
+    )
     return PhaseSpaceSample(
         s12=selected.s12,
         s13=selected.s13,
@@ -61,12 +66,13 @@ class PreparedInverseToyGenerator:
 
     Preparing the generator evaluates the requested signal and background
     densities on the Dalitz CDF grids once. Repeated calls to ``generate`` then
-    only draw uniform random numbers, invert the tabulated CDFs, reconstruct
-    four-momenta, and mix the already prepared components.
+    draw uniform random numbers, invert the tabulated CDFs, recheck target
+    support, reconstruct four-momenta, and mix the prepared components.
+    Keep the model and density callbacks unchanged while reusing the generator.
     """
 
-    signal_sampler: DalitzInverseTransformSampler
-    background_samplers: tuple[DalitzInverseTransformSampler, ...] = ()
+    signal_sampler: DalitzInverseTransformSampler | None
+    background_samplers: tuple[DalitzInverseTransformSampler | None, ...] = ()
     backgrounds: tuple[ToyBackground, ...] = ()
     signal_fraction: float = 1.0
 
@@ -102,7 +108,9 @@ class PreparedInverseToyGenerator:
                     include_momenta=include_momenta,
                 )
             )
-        for index, (sampler, count) in enumerate(zip(self.background_samplers, counts)):
+        for index, (sampler, count) in enumerate(
+            zip(self.background_samplers, counts, strict=True)
+        ):
             if int(count):
                 samples.append(
                     sampler.generate(
@@ -135,21 +143,30 @@ def prepare_inverse_toy_generator(
         raise ValueError("signal_fraction < 1 requires at least one background")
     if backgrounds and float(signal_fraction) >= 1.0:
         raise ValueError("backgrounds require signal_fraction < 1")
-    values = {} if parameters is None else parameters
+    values = {} if parameters is None else dict(parameters)
 
     def signal_density(data):
         return _acceptance(efficiency, veto, data) * jnp.asarray(
             model.intensity(data, values)
         )
 
-    signal_sampler = _prepare_sampler(
-        model,
-        signal_density,
-        resolution=resolution,
-        quantile_resolution=quantile_resolution,
+    signal_sampler = (
+        _prepare_sampler(
+            model,
+            signal_density,
+            resolution=resolution,
+            quantile_resolution=quantile_resolution,
+        )
+        if float(signal_fraction) > 0.0
+        else None
     )
     prepared_backgrounds = []
-    for background in backgrounds:
+    weights = _background_weights(backgrounds)
+    for background, weight in zip(backgrounds, weights, strict=True):
+        if weight == 0:
+            prepared_backgrounds.append(None)
+            continue
+
         def background_density(data, background=background):
             result = jnp.asarray(background.shape(data))
             if veto is not None and background.apply_veto:
@@ -263,15 +280,18 @@ def generate_cp_toy_inverse(
     if backgrounds and float(signal_fraction) >= 1.0:
         raise ValueError("CP backgrounds require signal_fraction < 1")
 
-    values = {} if parameters is None else parameters
+    values = {} if parameters is None else dict(parameters)
     rng = np.random.default_rng(seed)
     n_signal = int(rng.binomial(size, float(signal_fraction))) if backgrounds else size
     n_background = size - n_signal
 
-    i_plus = _integral(plus_model, values, plus_efficiency, plus_veto)
-    i_minus = _integral(minus_model, values, minus_efficiency, minus_veto)
-    signal_plus_probability = i_plus / (i_plus + i_minus)
-    n_signal_plus = int(rng.binomial(n_signal, signal_plus_probability))
+    n_signal_plus = 0
+    if n_signal:
+        i_plus = _integral(plus_model, values, plus_efficiency, plus_veto)
+        i_minus = _integral(minus_model, values, minus_efficiency, minus_veto)
+        n_signal_plus = int(
+            rng.binomial(n_signal, _charge_probability(i_plus, i_minus))
+        )
     n_signal_minus = n_signal - n_signal_plus
 
     def plus_signal_density(data):
@@ -284,24 +304,16 @@ def generate_cp_toy_inverse(
             minus_model.intensity(data, values)
         )
 
-    plus_signal_sampler = _prepare_sampler(
-        plus_model,
-        plus_signal_density,
-        resolution=resolution,
-        quantile_resolution=quantile_resolution,
-    )
-    minus_signal_sampler = _prepare_sampler(
-        minus_model,
-        minus_signal_density,
-        resolution=resolution,
-        quantile_resolution=quantile_resolution,
-    )
-
     plus_samples: list[PhaseSpaceSample] = []
     minus_samples: list[PhaseSpaceSample] = []
     if n_signal_plus:
         plus_samples.append(
-            plus_signal_sampler.generate(
+            _prepare_sampler(
+                plus_model,
+                plus_signal_density,
+                resolution=resolution,
+                quantile_resolution=quantile_resolution,
+            ).generate(
                 n_signal_plus,
                 seed=_derived_seed(seed, 10),
                 include_momenta=include_momenta,
@@ -309,7 +321,12 @@ def generate_cp_toy_inverse(
         )
     if n_signal_minus:
         minus_samples.append(
-            minus_signal_sampler.generate(
+            _prepare_sampler(
+                minus_model,
+                minus_signal_density,
+                resolution=resolution,
+                quantile_resolution=quantile_resolution,
+            ).generate(
                 n_signal_minus,
                 seed=_derived_seed(seed, 20),
                 include_momenta=include_momenta,
@@ -322,7 +339,9 @@ def generate_cp_toy_inverse(
         if n_background > 0
         else np.zeros(len(backgrounds), dtype=int)
     )
-    for index, (background, count) in enumerate(zip(backgrounds, bg_counts)):
+    for index, (background, count) in enumerate(
+        zip(backgrounds, bg_counts, strict=True)
+    ):
         if int(count) == 0:
             continue
         plus_norm_sample = plus_model.normalization_sample
@@ -335,14 +354,19 @@ def generate_cp_toy_inverse(
             if plus_veto is not None:
                 j_plus_values = j_plus_values * jnp.asarray(plus_veto(plus_norm_data))
             if minus_veto is not None:
-                j_minus_values = j_minus_values * jnp.asarray(minus_veto(minus_norm_data))
+                j_minus_values = j_minus_values * jnp.asarray(
+                    minus_veto(minus_norm_data)
+                )
         j_plus = float(jnp.mean(jnp.asarray(plus_norm_sample.weights) * j_plus_values))
-        j_minus = float(jnp.mean(jnp.asarray(minus_norm_sample.weights) * j_minus_values))
-        plus_probability = j_plus / (j_plus + j_minus)
+        j_minus = float(
+            jnp.mean(jnp.asarray(minus_norm_sample.weights) * j_minus_values)
+        )
+        plus_probability = _charge_probability(j_plus, j_minus)
         count_plus = int(rng.binomial(int(count), plus_probability))
         count_minus = int(count) - count_plus
 
         if count_plus:
+
             def plus_background_density(data, background=background):
                 result = jnp.asarray(background.plus_shape(data))
                 if background.apply_veto and plus_veto is not None:
@@ -363,6 +387,7 @@ def generate_cp_toy_inverse(
                 )
             )
         if count_minus:
+
             def minus_background_density(data, background=background):
                 result = jnp.asarray(background.resolved_minus_shape(data))
                 if background.apply_veto and minus_veto is not None:

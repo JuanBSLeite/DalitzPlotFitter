@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Mapping, Sequence
 
 import jax
 import jax.numpy as jnp
@@ -100,7 +100,8 @@ def _scores(pool: PhaseSpaceSample, density) -> jax.Array:
     values = jnp.asarray(pool.weights) * jnp.asarray(density)
     if values.shape != (pool.size,):
         raise ValueError(
-            f"toy density must return one value per event, got {values.shape} for {pool.size} events"
+            f"toy density must return one value per event, got {values.shape} "
+            f"for {pool.size} events"
         )
     return values
 
@@ -263,7 +264,9 @@ def _frozen_model_intensity(model, values: Mapping[str, object]):
     return jax.jit(intensity)
 
 
-def _attach_momenta(model, sample: PhaseSpaceSample, seed: int | None) -> PhaseSpaceSample:
+def _attach_momenta(
+    model, sample: PhaseSpaceSample, seed: int | None
+) -> PhaseSpaceSample:
     if sample.p1 is not None:
         return sample
     generator = PhaseSpaceMC(
@@ -271,6 +274,34 @@ def _attach_momenta(model, sample: PhaseSpaceSample, seed: int | None) -> PhaseS
         model.channel.daughter_masses,
     )
     return generator.attach_momenta(sample, seed=seed)
+
+
+def _prepare_component_momenta(model, samples, seed, include_momenta):
+    # Preserve accepted orientations; reconstruct only compact components.
+    if not include_momenta:
+        return [sample.without_momenta() for sample in samples]
+    if any(sample.p1 is not None for sample in samples):
+        return [
+            _attach_momenta(model, sample, _derived_seed(seed, 920_000 + index))
+            for index, sample in enumerate(samples)
+        ]
+    return samples
+
+
+def _charge_probability(plus, minus):
+    total = plus + minus
+    if (
+        not np.isfinite(plus)
+        or not np.isfinite(minus)
+        or plus < 0
+        or minus < 0
+        or not np.isfinite(total)
+        or total <= 0
+    ):
+        raise ValueError(
+            "CP component integrals must be finite, non-negative and have positive sum"
+        )
+    return plus / total
 
 
 def _accept_reject_component(
@@ -437,9 +468,7 @@ def _accept_reject_component(
                 continue
             denominator = envelope
 
-        accept_key = jax.random.key(
-            int(accept_rng.integers(0, 2**32, dtype=np.uint32))
-        )
+        accept_key = jax.random.key(int(accept_rng.integers(0, 2**32, dtype=np.uint32)))
         mask = jax.random.uniform(
             accept_key,
             (pool.size,),
@@ -450,9 +479,7 @@ def _accept_reject_component(
             continue
         needed = size - n_accepted
         selected = indices[:needed]
-        accepted.append(
-            pool.take(jnp.asarray(selected, dtype=jnp.int32)).without_momenta()
-        )
+        accepted.append(pool.take(jnp.asarray(selected, dtype=jnp.int32)))
         n_accepted += int(selected.size)
 
     toy = _merge_samples(accepted)
@@ -509,17 +536,23 @@ def _background_weights(backgrounds: Sequence[object]) -> np.ndarray:
     if not backgrounds:
         return np.empty((0,), dtype=float)
     if len(backgrounds) == 1:
-        if getattr(backgrounds[0], "fraction") is not None:
-            raise ValueError("a single toy background does not need a relative fraction")
+        if backgrounds[0].fraction is not None:
+            raise ValueError(
+                "a single toy background does not need a relative fraction"
+            )
         return np.ones((1,), dtype=float)
 
     explicit = []
     for background in backgrounds[:-1]:
-        if getattr(background, "fraction") is None:
-            raise ValueError("all toy backgrounds except the last require a relative fraction")
+        if background.fraction is None:
+            raise ValueError(
+                "all toy backgrounds except the last require a relative fraction"
+            )
         explicit.append(float(background.fraction))
-    if getattr(backgrounds[-1], "fraction") is not None:
-        raise ValueError("the last toy background is the remainder and must not define fraction")
+    if backgrounds[-1].fraction is not None:
+        raise ValueError(
+            "the last toy background is the remainder and must not define fraction"
+        )
     remainder = 1.0 - sum(explicit)
     weights = np.asarray(explicit + [remainder], dtype=float)
     if np.any(weights < 0.0):
@@ -559,7 +592,7 @@ def generate_signal_toy(
     )
     if include_momenta:
         toy = _attach_momenta(model, toy, _derived_seed(seed, 900_001))
-    return toy
+    return toy if include_momenta else toy.without_momenta()
 
 
 def generate_toy(
@@ -620,7 +653,9 @@ def generate_toy(
             )
         )
 
-    for index, (background, count) in enumerate(zip(backgrounds, bg_counts)):
+    for index, (background, count) in enumerate(
+        zip(backgrounds, bg_counts, strict=True)
+    ):
         if int(count) == 0:
             continue
 
@@ -643,6 +678,7 @@ def generate_toy(
             )
         )
 
+    samples = _prepare_component_momenta(model, samples, seed, include_momenta)
     toy = _merge_samples(samples)
     if shuffle and toy.size > 1:
         toy = toy.take(
@@ -723,10 +759,13 @@ def generate_cp_toy(
 
     plus_intensity = _frozen_model_intensity(plus_model, values)
     minus_intensity = _frozen_model_intensity(minus_model, values)
-    i_plus = _integral(plus_model, plus_intensity, plus_efficiency, plus_veto)
-    i_minus = _integral(minus_model, minus_intensity, minus_efficiency, minus_veto)
-    signal_plus_probability = i_plus / (i_plus + i_minus)
-    n_signal_plus = int(rng.binomial(n_signal, signal_plus_probability))
+    n_signal_plus = 0
+    if n_signal:
+        i_plus = _integral(plus_model, plus_intensity, plus_efficiency, plus_veto)
+        i_minus = _integral(minus_model, minus_intensity, minus_efficiency, minus_veto)
+        n_signal_plus = int(
+            rng.binomial(n_signal, _charge_probability(i_plus, i_minus))
+        )
     n_signal_minus = n_signal - n_signal_plus
 
     bg_mix = _background_weights(backgrounds)
@@ -739,6 +778,7 @@ def generate_cp_toy(
     minus_samples: list[PhaseSpaceSample] = []
 
     if n_signal_plus > 0:
+
         def plus_signal_density(data):
             return _acceptance(plus_efficiency, plus_veto, data) * plus_intensity(data)
 
@@ -756,8 +796,11 @@ def generate_cp_toy(
         )
 
     if n_signal_minus > 0:
+
         def minus_signal_density(data):
-            return _acceptance(minus_efficiency, minus_veto, data) * minus_intensity(data)
+            return _acceptance(minus_efficiency, minus_veto, data) * minus_intensity(
+                data
+            )
 
         minus_samples.append(
             _accept_reject_component(
@@ -772,7 +815,9 @@ def generate_cp_toy(
             )
         )
 
-    for index, (background, count) in enumerate(zip(backgrounds, bg_counts)):
+    for index, (background, count) in enumerate(
+        zip(backgrounds, bg_counts, strict=True)
+    ):
         if int(count) == 0:
             continue
         plus_norm_sample = plus_model.normalization_sample
@@ -785,14 +830,19 @@ def generate_cp_toy(
             if plus_veto is not None:
                 j_plus_values = j_plus_values * jnp.asarray(plus_veto(plus_norm_data))
             if minus_veto is not None:
-                j_minus_values = j_minus_values * jnp.asarray(minus_veto(minus_norm_data))
+                j_minus_values = j_minus_values * jnp.asarray(
+                    minus_veto(minus_norm_data)
+                )
         j_plus = float(jnp.mean(jnp.asarray(plus_norm_sample.weights) * j_plus_values))
-        j_minus = float(jnp.mean(jnp.asarray(minus_norm_sample.weights) * j_minus_values))
-        plus_probability = j_plus / (j_plus + j_minus)
+        j_minus = float(
+            jnp.mean(jnp.asarray(minus_norm_sample.weights) * j_minus_values)
+        )
+        plus_probability = _charge_probability(j_plus, j_minus)
         count_plus = int(rng.binomial(int(count), plus_probability))
         count_minus = int(count) - count_plus
 
         if count_plus > 0:
+
             def plus_background_density(data, background=background):
                 result = jnp.asarray(background.plus_shape(data))
                 if background.apply_veto and plus_veto is not None:
@@ -813,6 +863,7 @@ def generate_cp_toy(
             )
 
         if count_minus > 0:
+
             def minus_background_density(data, background=background):
                 result = jnp.asarray(background.resolved_minus_shape(data))
                 if background.apply_veto and minus_veto is not None:
@@ -832,13 +883,18 @@ def generate_cp_toy(
                 )
             )
 
-    def finish(samples: list[PhaseSpaceSample], model, key_seed: int) -> PhaseSpaceSample:
+    def finish(
+        samples: list[PhaseSpaceSample], model, key_seed: int
+    ) -> PhaseSpaceSample:
         if not samples:
             return _empty_sample(
                 model,
                 _derived_seed(seed, 500 + key_seed),
                 include_momenta=include_momenta,
             )
+        samples = _prepare_component_momenta(
+            model, samples, _derived_seed(seed, key_seed), include_momenta
+        )
         toy = _merge_samples(samples)
         if shuffle and toy.size > 1:
             toy = toy.take(

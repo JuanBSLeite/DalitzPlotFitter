@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
+
 import jax
 import jax.numpy as jnp
+
+from dalitzplotfitter.fit.parameters import Parameter, ParameterKind
 
 from ..context import ResonanceContext
 
@@ -638,7 +642,19 @@ class QMI:
                 raise ValueError(
                     "QMI imaginary parts must have the same length as knots"
                 )
+        values = ((self.magnitudes, self.phases) if polar
+                  else (self.real_parts, self.imaginary_parts))
+        for group in values:
+            for value in group:
+                if (isinstance(value, Parameter) and not value.fixed
+                        and value.kind is not ParameterKind.DYNAMICS):
+                    raise ValueError(
+                        f"QMI knot {value.name!r} must use Parameter.dynamics "
+                        "with the component owner"
+                    )
         knots = tuple(float(value) for value in self.knots)
+        if not all(isfinite(value) for value in knots):
+            raise ValueError("QMI knot masses must be finite")
         if any(
             right <= left for left, right in zip(knots[:-1], knots[1:], strict=True)
         ):

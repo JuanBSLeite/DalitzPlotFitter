@@ -53,7 +53,7 @@ and the tabulation grid is uniform in \(m_{12}=\sqrt{s_{12}}\), which resolves n
 2m_{12}\left[s_{13}^{\max}(s_{12})-s_{13}^{\min}(s_{12})\right].
 \]
 
-The sampler first inverts the marginal CDF in \(m_{12}\), then the conditional CDF in \(v\). No event is rejected and the generated invariants are continuous rather than selected from a finite candidate pool.
+The sampler first inverts the marginal CDF in \(m_{12}\), then the conditional CDF in \(v\). CDF plateaus are treated as jumps of the inverse. Each candidate is checked against the target density; candidates outside its support are rejected and replaced (with a limit of 100 batches). The generated invariants remain continuous. This support check does not remove the finite-grid approximation inside the allowed region: validate distributions by increasing both CDF resolutions, or compare with `accept-reject`.
 
 Four-momenta are reconstructed in the parent rest frame from the sampled invariants and then given a random global orientation, so ROOT toy output retains the same momentum branches as accept-reject generation.
 
@@ -79,7 +79,7 @@ toy2 = prepared.generate(100_000, seed=2)
 toy3 = prepared.generate(1_000_000, seed=3)
 ```
 
-The amplitude, efficiency and veto are evaluated on the CDF grid only during preparation. Subsequent `generate` calls perform random-number generation, CDF inversion, four-momentum reconstruction and optional component shuffling only.
+The CDF grids are evaluated once during preparation. Subsequent `generate` calls reuse them and evaluate the target density on candidate events to verify support, before four-momentum reconstruction and optional component shuffling. Keep the supplied model and density callbacks unchanged while reusing a prepared generator.
 
 If model parameters change, the prepared generator must be rebuilt because the target CDFs change.
 
@@ -101,7 +101,7 @@ For invariant-only densities the proposal square is automatically divided into e
 
 The accept-reject proposal retains the exact weighted `PhaseSpaceMC` measure, but its invariant-only path is optimized for rejection sampling. Candidate pools are generated directly in `s12/s13/s23` without constructing four-momenta. Component normalization scales and coefficients are frozen once at the requested toy truth, and coefficient-only models reuse the same fixed-normalization template already cached by the fitter. By default the stratified proposal batch uses the same array size as the pilot, so JAX does not compile the full amplitude once for the pilot shape and a second time for a larger proposal shape. The proposal density is JIT-compiled, and acceptance decisions stay on the JAX device apart from the compact boolean selection mask.
 
-If four-momenta are requested, they are reconstructed only for the final accepted events. Rejected candidates therefore never pay the cost of parent-rest-frame orientations and boosts. A custom efficiency, veto, or amplitude that explicitly requests `p1/p2/p3` automatically falls back to the full proposal representation for density evaluation, while the final selected sample is still reconstructed only once.
+If four-momenta are requested, they are reconstructed only for the final accepted events. Rejected candidates therefore never pay the cost of parent-rest-frame orientations and boosts. A custom efficiency, veto, or amplitude that explicitly requests `p1/p2/p3` automatically falls back to the full proposal representation. Accepted four-momenta are retained so their angular selection is preserved. In mixtures, only compact components have moments reconstructed; `include_momenta=False` discards moments after selection.
 
 The sampler intentionally keeps a monitored global envelope as an independent validation path. That global envelope can still be inefficient for strongly structured amplitude models; proposal-shape improvements are a separate optimization from the exact computational fast path described above.
 
@@ -228,3 +228,5 @@ with uproot.open("cp_toy.root") as f:
 ```
 
 ROOT output is implemented with `uproot`; PyROOT is not required.
+
+Components with zero generation weight are not prepared. CP generation prepares only charges with positive event counts, permits one charge to have zero rate, and requires finite non-negative charge integrals with a positive sum for each sampled component. Pure-background toys do not evaluate the absent signal normalization.
