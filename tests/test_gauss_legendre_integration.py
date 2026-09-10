@@ -194,3 +194,31 @@ def test_adaptive_square_dalitz_integrates_constant_and_refines_narrow_band():
         rtol=2e-3,
         atol=2e-6,
     )
+
+
+def test_adaptive_square_dalitz_raises_instead_of_silently_under_resolving():
+    # A resonance narrow enough that max_depth is exhausted before the m'
+    # refinement criterion (mass_span <= cell_order*width/binning_factor) is
+    # satisfied must raise rather than silently return a normalization grid
+    # that under-resolves it with no warning.
+    with pytest.raises(ValueError, match="could not refine"):
+        AdaptiveSquareDalitzGrid(
+            MOTHER_MASS,
+            MASSES,
+            narrow_resonances=(((0, 1), 0.7700, 0.00005),),
+            resolution=50,
+            pair=(0, 1),
+            binning_factor=100.0,
+        ).sample()
+
+    # The same resonance is resolvable with a deeper tree / more per-cell nodes.
+    resolved = AdaptiveSquareDalitzGrid(
+        MOTHER_MASS,
+        MASSES,
+        narrow_resonances=(((0, 1), 0.7700, 0.00005),),
+        resolution=50,
+        pair=(0, 1),
+        binning_factor=100.0,
+        max_depth=20,
+    ).sample()
+    assert resolved.size > 0

@@ -356,6 +356,15 @@ class PreparedAmplitudeCache:
     bound XLA compilation cost.  Its tiny per-component scales and fixed
     normalization matrix can then be reused by the parent ``DecayModel`` so
     later datasets only need the data-side amplitude evaluation.
+
+    ``prepare()`` bakes the fixed/floating status of every DYNAMICS parameter
+    into the evaluation path once, from the ``parameters`` given at prepare
+    time. Advanced callers assembling ``Minimizer`` directly (bypassing
+    ``DecayModel``/``FitSession``) must pass that *same* parameter list to
+    ``Minimizer`` — passing a different list that disagrees on which DYNAMICS
+    parameters are fixed produces no error but silently drops that
+    parameter's gradient to exactly zero. Call ``check_parameters`` to guard
+    against this when the two lists are not obviously the same object.
     """
 
     components: tuple[AmplitudeComponent, ...]
@@ -664,6 +673,42 @@ class PreparedAmplitudeCache:
     @property
     def is_compact(self) -> bool:
         return not self.floating_dynamic_owners
+
+    def check_parameters(self, parameters: Sequence[Parameter]) -> None:
+        """Raise if ``parameters`` disagrees with the fixed/floating DYNAMICS
+        split this cache was prepared with.
+
+        ``prepare()`` bakes each DYNAMICS parameter's fixed-vs-floating status
+        into the compact-vs-dynamic evaluation path at prepare time: a fixed
+        component is folded into ``data_components``/``normalization_matrix_fixed``
+        once and never re-reads ``fit_values`` again. If a later caller (e.g. a
+        ``Minimizer`` built directly for advanced/low-level use, per
+        ``docs/user_friendly_api.md``) supplies a *different* ``Parameter``
+        sequence that marks the same name as floating, ``evaluate``/``amplitude``/
+        ``normalization`` silently keep ignoring it — the gradient along that
+        direction is a structural zero, not merely a small one, and Minuit will
+        treat it as a flat direction with no error raised. Call this before
+        handing a parameter list to ``Minimizer`` whenever it is not the exact
+        object passed to ``prepare()``.
+        """
+        incoming = frozenset(
+            p.owner
+            for p in parameters
+            if p.kind is ParameterKind.DYNAMICS and not p.fixed and p.owner is not None
+        )
+        if incoming == self.floating_dynamic_owners:
+            return
+        stale_fixed = sorted(incoming - self.floating_dynamic_owners)
+        stale_floating = sorted(self.floating_dynamic_owners - incoming)
+        raise ValueError(
+            "parameters are inconsistent with the dynamics this cache was "
+            "prepared with: components "
+            f"{stale_fixed} are floating in `parameters` but were fixed when "
+            f"this cache was prepared; components {stale_floating} are fixed "
+            "in `parameters` but were floating at prepare time. Rebuild the "
+            "cache with PreparedAmplitudeCache.prepare(..., parameters=parameters) "
+            "or pass the same parameter list used to prepare the cache to Minimizer."
+        )
 
     def coefficient_vector(self, fit_values: Mapping[str, object]) -> Array:
         return jnp.asarray(

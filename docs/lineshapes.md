@@ -273,6 +273,8 @@ s_high = max(s12, s13)
 
 which imposes the exchange symmetry directly on the two-dimensional field. This is the natural default for studies of `D_s+ -> pi- pi+ pi+` when `s12` and `s13` correspond to the two `pi+ pi-` combinations.
 
+`folded=True` requires `s12_edges` and `s13_edges` to be identical (the constructor raises otherwise): the lookup above puts `s_low` on the `s12` grid and `s_high` on the `s13` grid, so mismatched ranges would silently clamp whichever physical value happens to be smaller/larger to the narrower grid's boundary instead of producing the intended single symmetric field.
+
 A QMI2D component is attached directly to the coherent amplitude model:
 
 ```python

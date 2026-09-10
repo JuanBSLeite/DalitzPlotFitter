@@ -12,6 +12,7 @@ from .phase_space_mc import PhaseSpaceMC
 from .sample import PhaseSpaceSample
 from .square_dalitz import (
     SquareDalitzGrid,
+    fold_thetaprime,
     invariants_to_square_dalitz,
     square_dalitz_jacobian,
     square_dalitz_to_invariants,
@@ -27,6 +28,7 @@ __all__ = [
     "covariant_kinematics",
     "covariant_kinematics_from_invariants",
     "dalitz_s13_limits",
+    "fold_thetaprime",
     "invariant_mass_squared",
     "invariants_to_square_dalitz",
     "spatial_magnitude",

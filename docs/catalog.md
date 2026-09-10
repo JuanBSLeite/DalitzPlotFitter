@@ -107,6 +107,7 @@ Docs: `docs/mc_integration.md`, `docs/toy_generation.md`.
 | `invariants_to_square_dalitz` | function | Convert `(s12,s13,s23)` to Laura++ `(m', theta')`. |
 | `square_dalitz_to_invariants` | function | Inverse of the above. |
 | `square_dalitz_jacobian` | function | Absolute Jacobian `|d(s_ij,s_ik)/d(m',theta')|` for the SDP map. |
+| `fold_thetaprime` | function | Map `theta'` onto `[0, 0.5]` (identical-particle exchange fold); used by `SquareDalitzHistogramEfficiency`/`Background(folded=True)` and `plot_square_dalitz(folded=True)`, see `docs/backgrounds_and_vetoes.md`. |
 
 Docs: `docs/square_dalitz.md`.
 

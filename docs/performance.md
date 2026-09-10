@@ -68,6 +68,23 @@ The Minuit value and gradient callbacks also share the last evaluated parameter 
 
 The established strategy-2 refinement is intentionally retained: refined fits still run the existing two MIGRAD passes followed by HESSE. Removing the second pass changed convergence/precision in the regression suite. It should therefore only be reconsidered as an explicit fast-fit mode after dedicated closure studies.
 
+### Hazard: mismatched parameter lists between cache and `Minimizer`
+
+`PreparedAmplitudeCache.prepare()` decides, once, which DYNAMICS parameters go
+through the compact fixed-evaluation path versus the dynamic-recompute path,
+based on the `fixed` flag of the `parameters` it was given. `Minimizer` is a
+separate, decoupled class that accepts its own `parameters` sequence. `FitSession`/
+`CPFitSession`/`DecayModel.prepare_cache` always thread the same `model.parameters`
+into both, so this cannot drift in the documented high-level workflow. But an
+advanced caller assembling `PreparedAmplitudeCache` and `Minimizer` directly (see
+`docs/user_friendly_api.md`) must pass the *same* parameter list to both: handing
+`Minimizer` a list that marks a DYNAMICS parameter as floating when the cache was
+prepared with it fixed produces no error, and Minuit sees an exact zero gradient
+along that direction instead of a small one — the value simply never reaches the
+cache's compact evaluation path. Call `cache.check_parameters(parameters)` before
+constructing `Minimizer` whenever the two parameter lists are not obviously the
+same object.
+
 ## QMI preparation
 
 For cubic one-dimensional QMI amplitudes, the natural-spline linear system depends only on the fixed knot coordinates. Its inverse is cached and reused; changing magnitudes or phases no longer solves the same system from scratch.

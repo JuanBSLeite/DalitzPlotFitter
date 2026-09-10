@@ -34,13 +34,20 @@ class FunctionalBackground:
 
 @dataclass(frozen=True)
 class HistogramBackground:
-    """Piecewise-constant 2D background shape on Dalitz variables."""
+    """Piecewise-constant 2D background shape on Dalitz variables.
+
+    ``folded=True`` folds the ``(x_variable, y_variable)`` pair onto
+    ``x <= y`` before the bin lookup; see
+    :class:`~dalitzplotfitter.efficiency.HistogramEfficiency` for the
+    identical-daughter convention and the ``x_edges == y_edges`` requirement.
+    """
 
     x_edges: Array
     y_edges: Array
     values: Array
     x_variable: str = "s12"
     y_variable: str = "s13"
+    folded: bool = False
 
     def __post_init__(self) -> None:
         x_edges = _validate_histogram_edges(self.x_edges, "x")
@@ -53,6 +60,14 @@ class HistogramBackground:
             raise ValueError("Histogram background values must be finite")
         if bool(jnp.any(values < 0.0)):
             raise ValueError("Histogram background values must be non-negative")
+        if self.folded and not bool(jnp.array_equal(x_edges, y_edges)):
+            raise ValueError(
+                "folded HistogramBackground requires x_edges and y_edges to be "
+                "identical: folding looks min(x,y) up on the x grid and "
+                "max(x,y) up on the y grid, so mismatched ranges would "
+                "silently clamp whichever value is smaller/larger to the "
+                "narrower grid's boundary"
+            )
         object.__setattr__(self, "x_edges", x_edges)
         object.__setattr__(self, "y_edges", y_edges)
         object.__setattr__(self, "values", values)
@@ -60,6 +75,8 @@ class HistogramBackground:
     def __call__(self, data: dict[str, Array]) -> Array:
         x = jnp.asarray(data[self.x_variable])
         y = jnp.asarray(data[self.y_variable])
+        if self.folded:
+            x, y = jnp.minimum(x, y), jnp.maximum(x, y)
         ix = jnp.searchsorted(self.x_edges, x, side="right") - 1
         iy = jnp.searchsorted(self.y_edges, y, side="right") - 1
         in_range = (

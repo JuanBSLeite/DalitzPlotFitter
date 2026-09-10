@@ -125,16 +125,34 @@ class AdaptiveSquareDalitzGrid:
             for index in range(base_cells)
         ]
         leaves: list[tuple[float, float]] = []
+        unresolved: list[tuple[float, float]] = []
 
         while stack:
             low, high, depth = stack.pop()
-            if depth < self.max_depth and self._needs_refinement(low, high):
+            needs_more = self._needs_refinement(low, high)
+            if depth < self.max_depth and needs_more:
                 middle = 0.5 * (low + high)
                 next_depth = depth + 1
                 stack.append((low, middle, next_depth))
                 stack.append((middle, high, next_depth))
             else:
                 leaves.append((low, high))
+                if needs_more:
+                    unresolved.append((low, high))
+
+        if unresolved:
+            low, high = unresolved[0]
+            raise ValueError(
+                "AdaptiveSquareDalitzGrid could not refine "
+                f"{len(unresolved)} m' cell(s) (e.g. [{low:.6g}, {high:.6g}]) down to "
+                "the target resolution within max_depth="
+                f"{self.max_depth}: the aligned narrow resonance(s) are too narrow "
+                "relative to binning_factor/max_depth for this grid to resolve, and "
+                "the normalization integral would otherwise be silently inaccurate "
+                "there. Increase max_depth or cell_order, or decrease binning_factor, "
+                "by constructing AdaptiveSquareDalitzGrid directly and passing its "
+                "sample() as DecayModel(normalization_sample=...)."
+            )
 
         leaves.sort()
         return tuple(leaves)

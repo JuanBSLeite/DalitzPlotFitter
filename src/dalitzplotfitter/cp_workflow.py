@@ -326,16 +326,38 @@ class CPFitSession:
         )
         return plus if charge == "plus" else minus
 
-    def plot_projection(self, result, variable="s13", *, bins=60, range=None, show_components=True, log_scale=False, projection_size=250_000, projection_seed=20260901, axes=None):
+    def plot_projection(self, result, variable="s13", *, bins=60, range=None, show_components=True, log_scale=False, projection_size=250_000, projection_seed=20260901, folded=False, partner_variable=None, fold_side="low", axes=None):
         """Plot smooth B+/B- projections without histogramming quadrature nodes.
 
         Two weighted phase-space MC samples are used only for rendering. Their
         component weights are normalized jointly across charges, preserving the
         integrated charge asymmetry of the fitted model.
+
+        ``folded=True`` projects onto ``s_low = min(variable, partner_variable)``
+        (``fold_side="low"``, default) or ``s_high = max(...)``
+        (``fold_side="high"``), event by event, *within each charge's own
+        subplot* (B+ and B- are never mixed); see
+        ``FitSession.plot_projection`` for the identical-daughter convention
+        this exploits.
         """
         import matplotlib.pyplot as plt
+        if folded and partner_variable is None:
+            raise ValueError("folded=True requires partner_variable")
+        if fold_side not in ("low", "high"):
+            raise ValueError("fold_side must be 'low' or 'high'")
+        fold_fn = np.minimum if fold_side == "low" else np.maximum
+
+        def _folded_values(sample):
+            values_ = np.asarray(getattr(sample, variable))
+            if not folded:
+                return values_
+            partner_values = np.asarray(getattr(sample, partner_variable))
+            return fold_fn(values_, partner_values)
+
         values = self.result_values(result)
-        combined = np.concatenate([np.asarray(getattr(d, variable)) for d in (self.plus_data, self.minus_data)])
+        combined = np.concatenate([
+            _folded_values(d) for d in (self.plus_data, self.minus_data)
+        ])
         if range is None and combined.size == 0:
             raise ValueError("provide range when both charge datasets are empty")
         hist_range = range if range is not None else (float(np.min(combined)), float(np.max(combined)))
@@ -345,18 +367,22 @@ class CPFitSession:
         plus_sample = self.plus_model.generate_phase_space(projection_size, seed=projection_seed)
         minus_sample = self.minus_model.generate_phase_space(projection_size, seed=projection_seed + 1)
         plus_components, minus_components = self._projection_components_pair(values, plus_sample, minus_sample)
+        label = (
+            rf"$s_{{\mathrm{{{fold_side}}}}}$" if folded else rf"${variable}$"
+        )
         for ax, charge, data, components in zip(axes, ("plus","minus"), (self.plus_data,self.minus_data), (plus_components,minus_components)):
-            dv = np.asarray(getattr(data, variable))
+            dv = _folded_values(data)
             unit = r"GeV$^2$" if variable in ("s12","s13","s23") else ""
             plot_binned_data(dv, bins=edges, ax=ax, label=f"B{'+' if charge=='plus' else '-'} data", unit=unit, log_scale=log_scale)
             total = np.zeros(bins)
             for name, sample, weights in components:
-                counts, _ = np.histogram(np.asarray(getattr(sample, variable)), bins=edges, weights=weights)
+                cv = _folded_values(sample)
+                counts, _ = np.histogram(cv, bins=edges, weights=np.asarray(weights))
                 total += counts
                 if show_components:
                     ax.stairs(counts, edges, label=name)
             ax.stairs(total, edges, label="total fit", linewidth=2.0)
-            ax.set_xlabel(rf"${variable}$ [GeV$^2$]")
+            ax.set_xlabel(label + (" [GeV$^2$]" if unit else ""))
             ax.legend()
         return axes
 

@@ -200,6 +200,17 @@ class QMI2D:
         if len(self.s12_edges)<2 or len(self.s13_edges)<2: raise ValueError("QMI2D requires at least one bin on each axis")
         if any(b<=a for a,b in zip(self.s12_edges[:-1],self.s12_edges[1:])): raise ValueError("QMI2D s12_edges must be strictly increasing")
         if any(b<=a for a,b in zip(self.s13_edges[:-1],self.s13_edges[1:])): raise ValueError("QMI2D s13_edges must be strictly increasing")
+        s12_edges = tuple(float(v) for v in self.s12_edges)
+        s13_edges = tuple(float(v) for v in self.s13_edges)
+        if self.folded and s12_edges != s13_edges:
+            raise ValueError(
+                "QMI2D folded=True requires s12_edges and s13_edges to be identical: "
+                "_coordinates() looks up min(s12,s13) on the s12 grid and "
+                "max(s12,s13) on the s13 grid, so mismatched axis ranges silently "
+                "clamp whichever physical value happens to be smaller/larger to the "
+                "narrower grid's boundary instead of raising, distorting the field "
+                "near and beyond that boundary"
+            )
         nx,ny=self.shape
         if len(self.magnitudes)!=nx or any(len(r)!=ny for r in self.magnitudes): raise ValueError("QMI2D magnitudes shape must match the 2D binning")
         if len(self.phases)!=nx or any(len(r)!=ny for r in self.phases): raise ValueError("QMI2D phases shape must match the 2D binning")

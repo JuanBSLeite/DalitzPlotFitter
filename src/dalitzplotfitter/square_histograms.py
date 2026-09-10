@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import jax.numpy as jnp
 from jax import Array
 
-from dalitzplotfitter.kinematics import invariants_to_square_dalitz
+from dalitzplotfitter.kinematics import fold_thetaprime, invariants_to_square_dalitz
 
 
 def _validate_edges(edges: Array, label: str) -> Array:
@@ -27,6 +27,7 @@ class _SquareDalitzHistogram2D:
     mother_mass: float
     masses: tuple[float, float, float]
     pair: tuple[int, int] = (0, 1)
+    folded: bool = False
 
     def __post_init__(self) -> None:
         mp = _validate_edges(self.mprime_edges, "mprime")
@@ -39,6 +40,13 @@ class _SquareDalitzHistogram2D:
             raise ValueError("Square-Dalitz histogram values must be finite and non-negative")
         if len(self.masses) != 3:
             raise ValueError("Square-Dalitz histograms require exactly three daughter masses")
+        if self.folded and float(tp[-1]) > 0.5 + 1e-9:
+            raise ValueError(
+                "folded Square-Dalitz histograms require thetaprime_edges within "
+                "[0, 0.5]: evaluation folds theta' onto that half via "
+                "fold_thetaprime before the bin lookup, so bins above 0.5 would "
+                "never be reached"
+            )
         object.__setattr__(self, "mprime_edges", mp)
         object.__setattr__(self, "thetaprime_edges", tp)
         object.__setattr__(self, "values", values)
@@ -47,12 +55,15 @@ class _SquareDalitzHistogram2D:
         missing = [key for key in ("s12", "s13", "s23") if key not in data]
         if missing:
             raise ValueError(f"Square-Dalitz histogram evaluation requires s12, s13 and s23; missing {missing}")
-        return invariants_to_square_dalitz(
+        mp, tp = invariants_to_square_dalitz(
             data["s12"], data["s13"], data["s23"],
             mother_mass=self.mother_mass,
             masses=self.masses,
             pair=self.pair,
         )
+        if self.folded:
+            tp = fold_thetaprime(tp)
+        return mp, tp
 
     def __call__(self, data: dict[str, Array]) -> Array:
         mp, tp = self.square_coordinates(data)
@@ -69,12 +80,34 @@ class _SquareDalitzHistogram2D:
 
 @dataclass(frozen=True)
 class SquareDalitzHistogramEfficiency(_SquareDalitzHistogram2D):
-    """Piecewise-constant efficiency map in ``(m', theta')``."""
+    """Piecewise-constant efficiency map in ``(m', theta')``.
+
+    ``folded=True`` folds ``theta'`` onto ``[0, 0.5]`` (via
+    :func:`~dalitzplotfitter.kinematics.fold_thetaprime`) before the bin
+    lookup. ``values`` and ``thetaprime_edges`` must then describe only that
+    half; this is the usual way to build an efficiency map from a limited MC
+    sample when the physics is symmetric under exchanging an identical pair,
+    doubling the effective statistics per bin.
+
+    ``pair`` **must be that identical pair itself**, e.g. ``pair=(1, 2)`` for
+    ``DecayChannel("D+", ("pi-", "pi+", "pi+"))`` (indices 0, 1, 2) where the
+    two ``pi+`` are identical: only then does exchanging ``pair`` leave ``m'``
+    fixed and map ``theta' -> 1 - theta'``, the symmetry ``folded=True``
+    exploits. Nothing here can check this from ``masses`` alone — two
+    distinct particles sharing a mass (e.g. ``pi+``/``pi-``) are not
+    identical for this purpose, and picking the wrong ``pair`` (e.g. the
+    bachelor-plus-one-identical-daughter pair) folds by a symmetry the data
+    don't actually have, silently.
+    """
 
 
 @dataclass(frozen=True)
 class SquareDalitzHistogramBackground(_SquareDalitzHistogram2D):
-    """Piecewise-constant background shape in ``(m', theta')``."""
+    """Piecewise-constant background shape in ``(m', theta')``.
+
+    ``folded=True`` folds ``theta'`` onto ``[0, 0.5]`` before the bin lookup;
+    see :class:`SquareDalitzHistogramEfficiency`.
+    """
 
 
 __all__ = ["SquareDalitzHistogramBackground", "SquareDalitzHistogramEfficiency"]
