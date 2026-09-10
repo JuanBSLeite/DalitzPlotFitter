@@ -244,6 +244,35 @@ plot_square_dalitz(
 
 One-dimensional fitted projections use a separate weighted phase-space rendering sample so arbitrary histogram bins remain smooth. This rendering sample does not replace the deterministic quadrature used for likelihood normalization or fit fractions.
 
+`FitSession.plot_projection`/`CPFitSession.plot_projection` also accept `folded=True` with `partner_variable=` and `fold_side="low"|"high"` (default `"low"`), projecting event-by-event onto `s_low = min(variable, partner_variable)` or `s_high = max(...)` for a channel with two identical daughters — see "Folded Dalitz Plot / Square Dalitz Plot" below.
+
+## Folded Dalitz Plot / Square Dalitz Plot
+
+For a channel with two identical final-state particles (e.g. `D+ -> pi- pi+ pi+`), `DecayChannel` detects them automatically from PDG IDs and `Resonance` amplitudes are symmetrized under their exchange with no extra configuration, so an unbinned fit is already correct on the full, unfolded Dalitz plane. `folded=True` is a **statistics** convenience on top of that — useful for building an efficiency/background map from a limited sample (it doubles the effective events per bin) or for a compact diagnostic plot — not something the fit itself needs:
+
+```python
+from dalitzplotfitter import SquareDalitzHistogramEfficiency, plot_dalitz, plot_square_dalitz
+from dalitzplotfitter.efficiency import HistogramEfficiency
+
+# plain (s12, s13) Dalitz coordinates
+efficiency = HistogramEfficiency(
+    x_edges=edges, y_edges=edges, values=values,
+    x_variable="s12", y_variable="s13", folded=True,
+)
+
+# Square-Dalitz (m', theta'); pair must be the identical daughters themselves
+efficiency_sdp = SquareDalitzHistogramEfficiency(
+    mprime_edges=mp_edges, thetaprime_edges=tp_edges, values=values,
+    mother_mass=channel.parent_mass, masses=channel.daughter_masses,
+    pair=(1, 2), folded=True,
+)
+
+plot_dalitz(data, x="s12", y="s13", folded=True)
+plot_square_dalitz(data, mother_mass=..., masses=..., pair=(1, 2), folded=True)
+```
+
+`HistogramBackground`/`SquareDalitzHistogramBackground` accept the same `folded=True`, as do `histogram_efficiency_from_root`/`histogram_background_from_root`/`square_dalitz_efficiency_from_root`/`square_dalitz_background_from_root` for loading an already-folded ROOT histogram. All of these — and `QMI2D(folded=True)` — use the same `min`/`max` convention (`theta' -> min(theta', 1-theta')` for the Square-Dalitz case). `pair` (or `x_edges == y_edges`) must be the *actual* identical pair: this cannot be checked from `masses` alone, since two distinct particles (e.g. `pi+`/`pi-`) can share a mass without being identical. A `folded=True` efficiency/background composes with `FitSession`/`CPFitSession` exactly like any other model; the normalization/generation grid itself is never folded. See `docs/backgrounds_and_vetoes.md` and `notebooks/23_b2pipipi_cp_folded_dalitz_fit.ipynb`.
+
 ## ROOT input/output with uproot
 
 ROOT files are supported directly through `uproot`, with no PyROOT dependency.
@@ -301,6 +330,8 @@ Narrow-resonance handling is automatic in both methods. Resonances with nominal 
 For conventional Gauss-Legendre normalization, narrow bands in `m13` or `m23` are integrated with a locally refined piecewise grid. If a narrow band lies on the diagonal `m12` direction of the conventional `(m13,m23)` plane, the code follows the Laura++ strategy and switches the internal integration coordinates to Square Dalitz for that normalization.
 
 For explicit Square-Dalitz normalization, the selected `normalization_pair` is preserved and adaptation is applied only along the mass coordinate `m'`. The `theta'` axis keeps the standard fixed resolution. Only narrow resonances aligned with `normalization_pair` refine `m'`; crossed narrow bands are sampled with the standard `theta'` grid.
+
+For an extremely narrow resonance (well below the ~MeV scale), `AdaptiveSquareDalitzGrid` raises `ValueError` rather than silently returning a coarser-than-requested grid if its fixed refinement depth (`max_depth`, `cell_order`) is exhausted before `normalization_binning_factor` is satisfied. Construct `AdaptiveSquareDalitzGrid` directly with a larger `max_depth`/`cell_order` (or a smaller `normalization_binning_factor`) and pass its `.sample()` as `normalization_sample=` if you hit this.
 
 ```python
 model = DecayModel(
@@ -480,7 +511,6 @@ The repository contains a progressive set of examples:
 - `notebooks/11_b2kpipi_gaussian_constraints.ipynb`: Gaussian constraints;
 - `notebooks/12_b2kpipi_scf_with_veto.ipynb`: SCF + reconstructed-space veto;
 - `notebooks/13_b2kpipi_root_tree_input.ipynb`: ROOT TTree input;
-- `notebooks/14_b2kpipi_root_hist_eff_background.ipynb`: ROOT TH2 maps in ordinary Dalitz coordinates;
 - `notebooks/15_b2kpipi_square_dalitz_eff_background.ipynb`: ROOT TH2 efficiency/background maps in `(m', theta')`;
 - `notebooks/16_user_friendly_quickstart.ipynb`: concise non-CP `FitSession` workflow;
 - `notebooks/17_b2kpipi_cp_user_friendly.ipynb`: concise `CPFitSession` workflow and charge-separated fitted projections;
@@ -488,6 +518,7 @@ The repository contains a progressive set of examples:
 - `notebooks/19_toy_root_output.ipynb`: non-CP and CP toy generation with ROOT TTree output;
 - `notebooks/20_pdf_convolution_resolution.ipynb`: relativistic Breit-Wigner intensity convolved with Gaussian detector resolution.
 - `notebooks/22_flat_dalitz_toy_mc_integration.ipynb`: one million flat conventional-Dalitz events used as an external toy-MC normalization sample, with matrix/fit-fraction comparison and a non-CP closure fit.
+- `notebooks/23_b2pipipi_cp_folded_dalitz_fit.ipynb`: `B+/- -> pi+/- pi+ pi-` with two identical same-sign pions, folded DP/SqDP efficiency and background maps, and a full `CPFitSession` fit with folded diagnostic plots.
 
 The B-to-Kpipi examples consistently use
 

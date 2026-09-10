@@ -21,7 +21,7 @@ assume the literal upstream formula is followed if the docstring says otherwise.
 ```bash
 python -m pip install -e ".[dev]"     # install with test + ruff extras
 
-pytest                                 # full suite (testpaths = tests/, ~390 tests, few minutes)
+pytest                                 # full suite (testpaths = tests/, ~410 tests, few minutes)
 pytest tests/test_rescattering2.py -v  # single file
 pytest tests/test_rescattering2.py::test_rescattering2_matches_laura_reference_points  # single test
 
@@ -110,6 +110,14 @@ re-integrate the Dalitz plot after the first prepare. When changing anything in 
 computation is supposed to be cached vs. recomputed, and re-run the relevant benchmark rather
 than assuming a change is free.
 
+The fixed/floating split for each `ParameterKind.DYNAMICS` parameter is baked in once, from the
+`parameters` given to `PreparedAmplitudeCache.prepare()`. If a low-level caller then builds
+`Minimizer` with a *different* `Parameter` list for the same names (bypassing `DecayModel`/
+`FitSession`, which always thread one shared list and can't drift), the cache silently keeps
+ignoring that parameter — a structural zero gradient, not an approximate one, with no error.
+Call `cache.check_parameters(parameters)` before handing a separately-built parameter list to
+`Minimizer`; see `docs/performance.md`.
+
 ### CP fits share one normalization across charges
 
 `CPJointNLL` (`likelihood/cp.py`) treats charge as part of the fitted sample space: B+/B- are
@@ -119,6 +127,25 @@ asymmetry. `cp_workflow.py`'s projection helpers must preserve this — e.g.
 `_joint_scaled_weights` divides each charge's projection sample by its *own* size before summing,
 since adaptive/external MC samples for B+ and B- need not have equal size. See
 `docs/cp_coefficients.md`.
+
+### Folded Dalitz Plot / Square Dalitz Plot for identical particles
+
+For a channel with two identical final-state particles, `DecayChannel` detects them
+automatically from PDG IDs, and `Resonance` amplitudes are symmetrized under their exchange with
+no extra configuration — an unbinned fit is therefore already correct on the full (unfolded)
+plane. `folded=True` is instead a **statistics** tool for building efficiency/background maps
+from a limited sample or for diagnostic plots, not a correctness requirement:
+`HistogramEfficiency`/`HistogramBackground` (plain `s12`/`s13`, `efficiency`/`background`
+modules), `SquareDalitzHistogramEfficiency`/`SquareDalitzHistogramBackground` (`(m', theta')`,
+`square_histograms.py`), `plot_dalitz`/`plot_square_dalitz`, and `FitSession`/
+`CPFitSession.plot_projection` (`fold_side="low"|"high"`) all fold with the same `min`/`max`
+convention `QMI2D(folded=True)` already uses. `pair` (or `x_edges == y_edges`) **must be the
+actual identical pair** — nothing can check this from `masses` alone, since two *distinct*
+particles (e.g. `pi+`/`pi-`) can share a mass without being identical; picking the wrong pair
+folds by a symmetry the data don't have, silently. See `docs/backgrounds_and_vetoes.md`. The
+normalization/generation grid (`SquareDalitzGrid`, `DecayModel`'s automatic selection) is
+deliberately never folded — halving it would only be correct if the coherent amplitude were
+itself exactly symmetric, which nothing here can verify automatically.
 
 ### Toy generation: two independent public samplers
 
