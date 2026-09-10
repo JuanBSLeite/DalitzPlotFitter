@@ -35,6 +35,29 @@ class PhaseSpaceSample:
             raise ValueError("This sample does not contain four-momenta")
         return {"p1": self.p1, "p2": self.p2, "p3": self.p3}
 
+    @property
+    def nbytes(self) -> int:
+        """Approximate bytes occupied by the sample's array payloads."""
+
+        arrays = (self.s12, self.s13, self.s23, self.weights, self.p1, self.p2, self.p3)
+        return sum(
+            int(jnp.asarray(array).size * jnp.asarray(array).dtype.itemsize)
+            for array in arrays
+            if array is not None
+        )
+
+    def without_momenta(self) -> "PhaseSpaceSample":
+        """Return a compact view containing only invariants and event weights."""
+
+        if self.p1 is None and self.p2 is None and self.p3 is None:
+            return self
+        return PhaseSpaceSample(
+            s12=self.s12,
+            s13=self.s13,
+            s23=self.s23,
+            weights=self.weights,
+        )
+
     def take(self, indices: Array) -> "PhaseSpaceSample":
         indices = jnp.asarray(indices)
         return PhaseSpaceSample(

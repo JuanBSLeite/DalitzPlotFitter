@@ -211,3 +211,26 @@ s23 = m^2(pi+ pi-).
 ```
 
 The signal-only tutorial uses `CPJointNLL` directly. The efficiency/background tutorial uses `signal_fraction` by default and also shows how to instantiate the extended likelihood with `signal_yield` and `background_yield`. Both tutorials start the minimization from deliberately displaced values and report generated, start and fitted coefficients together with charge-separated fit fractions.
+
+## Physical domain and acceptance validation
+
+`CPJointNLL` rejects invalid initial yields/fractions. Yields must be finite and
+non-negative, the signal fraction must lie in `[0, 1]`, and relative background
+fractions must be non-negative with sum at most one. During a fit, parameter
+points violating these conditions return positive infinite NLL through a
+JAX-compatible branch. Use physical parameter bounds and feasible starts;
+the domain check is a safeguard, not a replacement for those settings.
+
+The NLL also returns infinity if the resulting density is non-positive or
+non-finite at an observed event, or the joint signal normalization is invalid.
+Negative densities are no longer silently floored. A zero component yield is
+allowed when the remaining components provide a valid total density.
+
+Each charge's efficiency must be a finite, non-negative vector of length equal
+to that charge's sample size. Scalars are explicitly expanded. Column arrays
+of shape `(N, 1)` are rejected, avoiding accidental broadcasting. CPFitSession
+applies equivalent checks to efficiency and veto outputs on data and integration
+samples. Supplied background arrays must also match their charge's data size.
+
+For fixed dynamics, CPFitSession reuses model normalization templates separately
+for each charge when that charge has neither efficiency nor veto.

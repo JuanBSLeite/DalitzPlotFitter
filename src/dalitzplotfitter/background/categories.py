@@ -19,7 +19,11 @@ def _validate_values(values, label: str) -> Array:
 
 def _validate_normalization(value, label: str) -> Array:
     normalization = jnp.asarray(value)
-    if normalization.ndim != 0 or not bool(jnp.isfinite(normalization)) or bool(normalization <= 0.0):
+    if (
+        normalization.ndim != 0
+        or not bool(jnp.isfinite(normalization))
+        or bool(normalization <= 0.0)
+    ):
         raise ValueError(f"{label} normalization must be a positive finite scalar")
     return normalization
 
@@ -38,10 +42,14 @@ class BackgroundCategory:
         if not self.name:
             raise ValueError("background category name must be non-empty")
         if self.fraction is not None and self.yield_ is not None:
-            raise ValueError("a background category cannot define both fraction and yield")
+            raise ValueError(
+                "a background category cannot define both fraction and yield"
+            )
         object.__setattr__(self, "values", _validate_values(self.values, self.name))
         object.__setattr__(
-            self, "normalization", _validate_normalization(self.normalization, self.name)
+            self,
+            "normalization",
+            _validate_normalization(self.normalization, self.name),
         )
 
     @property
@@ -65,19 +73,32 @@ class CPBackgroundCategory:
         if not self.name:
             raise ValueError("background category name must be non-empty")
         if self.fraction is not None and self.yield_ is not None:
-            raise ValueError("a CP background category cannot define both fraction and yield")
-        object.__setattr__(self, "plus_values", _validate_values(self.plus_values, f"{self.name} plus"))
-        object.__setattr__(self, "minus_values", _validate_values(self.minus_values, f"{self.name} minus"))
+            raise ValueError(
+                "a CP background category cannot define both fraction and yield"
+            )
         object.__setattr__(
-            self,
-            "plus_normalization",
-            _validate_normalization(self.plus_normalization, f"{self.name} plus"),
+            self, "plus_values", _validate_values(self.plus_values, f"{self.name} plus")
         )
         object.__setattr__(
             self,
-            "minus_normalization",
-            _validate_normalization(self.minus_normalization, f"{self.name} minus"),
+            "minus_values",
+            _validate_values(self.minus_values, f"{self.name} minus"),
         )
+        for charge in ("plus", "minus"):
+            value = jnp.asarray(getattr(self, f"{charge}_normalization"))
+            if value.ndim != 0 or not bool(jnp.isfinite(value)) or bool(value < 0):
+                raise ValueError(
+                    f"{self.name} {charge} normalization must be "
+                    "finite and non-negative"
+                )
+            if bool(value == 0) and bool(
+                jnp.any(getattr(self, f"{charge}_values") != 0)
+            ):
+                raise ValueError(
+                    f"{self.name} {charge} zero normalization requires zero values"
+                )
+            object.__setattr__(self, f"{charge}_normalization", value)
+        _validate_normalization(self.normalization, self.name)
 
     @property
     def normalization(self) -> Array:

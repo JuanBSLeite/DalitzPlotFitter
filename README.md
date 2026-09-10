@@ -85,6 +85,16 @@ toy_reference = generate_toy(
 )
 ```
 
+The accept-reject reference path is also optimized for large toys: proposal
+candidates are generated directly in Dalitz invariants, model normalization
+scales are frozen once at the toy truth, and four-momenta are reconstructed
+only after selection. Thus rejected candidates do not pay the cost of
+four-vector construction. Invariant-only densities automatically use monitored
+local envelopes on an occupancy-aware Dalitz cell grid; cells are proposed
+proportionally to their envelope and any envelope violation forces a full safe
+restart. Momentum-dependent custom densities retain the global-envelope
+fallback.
+
 For repeated toys, prepare the inverse CDFs once:
 
 ```python
@@ -129,6 +139,70 @@ plus_toy, minus_toy = generate_cp_toy(
 ```
 
 See `docs/toy_generation.md` and `notebooks/19_toy_root_output.ipynb`.
+
+## Memory-conscious workflows
+
+Large toys do not need to retain four-momenta when the downstream fit uses only
+Dalitz invariants. Keep the historical default with `include_momenta=True`, or
+request a compact sample explicitly:
+
+```python
+toy = generate_toy(
+    model,
+    1_000_000,
+    parameters=fit_values,
+    seed=2,
+    include_momenta=False,
+)
+
+print(toy.nbytes / 1024**2, "MiB")
+```
+
+For float64 arrays, a one-million-event unweighted sample with
+`s12/s13/s23/weights` occupies about 32 MiB. Retaining the three four-momenta
+adds another 96 MiB, for about 128 MiB total. With inverse-transform generation,
+`include_momenta=False` also skips momentum reconstruction, reducing peak as
+well as retained memory. An existing sample can be compacted without copying its
+invariant arrays:
+
+```python
+compact = sample.without_momenta()
+```
+
+Normalization is already evaluated in fixed-size chunks for coefficient-only
+fits. The chunk size is configurable when device memory is constrained:
+
+```python
+model = DecayModel(
+    channel,
+    components,
+    normalization_sample=integration_toy,
+    normalization_chunk_size=20_000,
+)
+```
+
+The default remains 100,000 points per chunk. Smaller chunks reduce temporary
+normalization memory approximately linearly, at the cost of more chunk
+executions. They do not change the integration sample or normalization formula.
+
+For QMI and other fits with floating dynamical parameters, speed is treated
+separately. The dynamic cache keeps the fixed waves evaluated on the
+normalization sample and recomputes only the floating-dynamics block. Scalar
+QMI amplitudes use a dedicated spin-0 path: redundant `p`, `p*`, `q` and
+`cos(theta)` arrays are not retained for the floating S-wave, the fixed QMI
+knot interval is precomputed with a compact integer index, and the likelihood
+does not rebuild a full `N_normalization x N_components` matrix on every
+evaluation. This path is automatic and does not require enabling a lower-memory
+mode.
+
+The benchmark
+
+```text
+benchmarks/benchmark_qmi_memory_speed.py
+```
+
+reports both retained cache memory and repeated JIT objective time for a
+20-knot B+ -> pi+ pi+ pi- QMI model.
 
 ## Simultaneous CP fits
 

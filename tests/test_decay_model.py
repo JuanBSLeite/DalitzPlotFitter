@@ -132,6 +132,7 @@ def test_external_toy_mc_sample_replaces_grid_for_all_normalization():
         "adaptive": False,
         "sample_size": 4,
         "weighted": True,
+        "chunk_size": 100_000,
     }
 
     data = PhaseSpaceSample(
@@ -342,6 +343,24 @@ def test_decay_model_rejects_unphysical_core_parameter_bounds():
         )
 
 
+def test_decay_model_can_generate_compact_phase_space():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    model = _model(channel, [NonResonant(RealImag(1.0, 0.0))])
+
+    full = model.generate_phase_space(128, seed=16)
+    compact = model.generate_phase_space(128, seed=16, include_momenta=False)
+
+    assert compact.p1 is None and compact.p2 is None and compact.p3 is None
+    assert compact.size == full.size == 128
+    invariant_sum = compact.s12 + compact.s13 + compact.s23
+    expected = channel.parent_mass**2 + sum(
+        mass**2 for mass in channel.daughter_masses
+    )
+    assert jnp.allclose(invariant_sum, expected, rtol=0.0, atol=1e-12)
+    assert bool(jnp.all(compact.weights > 0.0))
+    assert compact.nbytes * 4 == full.nbytes
+
+
 def test_decay_model_builds_symmetrized_resonance_without_manual_particle_masses():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     model = _model(
@@ -428,6 +447,15 @@ def test_prepared_cache_recomputes_floating_dynamics():
         "rho.x": 0.8,
         "rho.y": 0.2,
     }
+    assert cache.data is not None
+    assert cache.normalization_data is not None
+    assert "p1" not in cache.data and "p2" not in cache.data and "p3" not in cache.data
+    assert (
+        "p1" not in cache.normalization_data
+        and "p2" not in cache.normalization_data
+        and "p3" not in cache.normalization_data
+    )
+
     intensity_initial, norm_initial = cache.evaluate(initial)
     intensity_shifted, norm_shifted = cache.evaluate(shifted)
     assert not jnp.allclose(intensity_initial, intensity_shifted)
@@ -491,6 +519,30 @@ def test_amplitude_model_is_built_once_and_reused():
     second = model.amplitude_model
     assert first is second
     assert first.components[0] is second.components[0]
+
+
+def test_normalization_chunk_size_is_configurable():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    model = DecayModel(
+        channel,
+        [NonResonant(RealImag(1.0, 0.0), name="NR")],
+        normalization_method="square-dalitz",
+        normalization_resolution=20,
+        normalization_chunk_size=37,
+    )
+
+    kernel = model._compact_prepare_kernel(
+        normalize_components=True,
+        has_efficiency=False,
+    )
+    assert kernel.normalization_kernel.chunk_size == 37
+
+    with pytest.raises(ValueError, match="normalization_chunk_size must be positive"):
+        DecayModel(
+            channel,
+            [NonResonant(RealImag(1.0, 0.0), name="NR")],
+            normalization_chunk_size=0,
+        )
 
 
 def test_compact_prepare_kernel_is_reused_by_model():

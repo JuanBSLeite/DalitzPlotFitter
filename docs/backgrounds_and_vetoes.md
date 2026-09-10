@@ -154,3 +154,27 @@ The background normalization must then be computed from `vetoed_background` on t
 ## Relation to SCF
 
 Vetoes act on the accepted reconstructed phase space. When SCF is enabled, the SCF migration map should be constructed for the same accepted region, or vetoed reconstructed bins should carry zero accepted probability. The SCF machinery and veto maps are intentionally kept as separate objects so detector migration and analysis selection remain independently testable.
+
+## Validation and zero support
+
+Non-CP and CP mixtures reject non-finite or unphysical starting fractions/yields.
+During minimization, invalid parameter points return infinite NLL. Relative
+background fractions must form a simplex: their explicit sum cannot exceed one.
+Yields must be non-negative.
+
+An event with zero total density has infinite NLL. SignalPDF returns exactly zero
+outside signal support; its `floor` constructor argument is retained for
+compatibility but no longer replaces physical zeros or clips positive densities.
+A background may provide support where the signal is zero. Negative or non-finite
+densities are invalid, not probabilities to be floored.
+
+FitSession accepts scalar efficiency/veto values (explicitly expanded) or a vector
+with exactly one entry per event. Values must be finite and non-negative. Relative
+efficiency values may exceed one. SignalPDF enforces the same shapes; under JAX,
+invalid numerical inputs produce invalid densities/infinite NLL rather than a
+host-side validation exception.
+
+A CP background may have zero normalization for one charge if all its supplied
+values in that charge are zero. Individual integrals must be finite and
+non-negative, and their sum must be positive and finite. Ordinary non-CP
+backgrounds still require a strictly positive normalization.

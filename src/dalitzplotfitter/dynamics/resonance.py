@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import permutations
 from typing import Mapping
+from uuid import uuid4
 
 import jax.numpy as jnp
 from jax import Array
@@ -54,10 +55,6 @@ def _kinematics_prefix(
     bachelor_key: str,
 ) -> str:
     return f"__kin_{daughter_key}_{partner_key}_{bachelor_key}"
-
-
-def _lineshape_prepared_key(prefix: str) -> str:
-    return f"{prefix}_lineshape_prepared"
 
 
 def _identical_permutations(
@@ -112,12 +109,47 @@ class ResonanceAmplitude:
     angular: object = CovariantAngular()
     bachelor_momentum_frame: str = "resonance"
 
+    # Prepared interpolation data belong to this amplitude, not just its pair.
+    _prepared_namespace: str = field(
+        default_factory=lambda: uuid4().hex, init=False, repr=False, compare=False
+    )
+
+    def _lineshape_prepared_key(self, prefix: str) -> str:
+        return f"{prefix}_lineshape_prepared_{self._prepared_namespace}"
+
     def __post_init__(self) -> None:
         if self.bachelor_momentum_frame not in {"resonance", "parent"}:
             raise ValueError(
                 "bachelor_momentum_frame must be either 'resonance' or 'parent'"
             )
 
+    @property
+    def supports_invariant_input(self) -> bool:
+        """Built-in resonance amplitudes can be evaluated from Dalitz invariants."""
+
+        return True
+
+    def _scalar_fast_path(self) -> bool:
+        return int(self.context.spin) == 0 and isinstance(self.angular, CovariantAngular)
+
+    def _resonance_mass(
+        self,
+        data: Mapping[str, Array],
+        daughter_key: str,
+        partner_key: str,
+        bachelor_key: str,
+        context: ResonanceContext,
+    ) -> Array:
+        prefix = _kinematics_prefix(daughter_key, partner_key, bachelor_key)
+        prepared_key = f"{prefix}_mass"
+        if prepared_key in data:
+            return jnp.asarray(data[prepared_key])
+        resonance_key = _invariant_key(daughter_key, partner_key)
+        if resonance_key in data:
+            return jnp.sqrt(jnp.maximum(jnp.asarray(data[resonance_key]), 0.0))
+        return self._kinematics(
+            data, daughter_key, partner_key, bachelor_key, context
+        ).resonance_mass
     def _pairings(self) -> tuple[tuple[str, str, str], ...]:
         base_keys = (self.daughter_key, self.partner_key, self.bachelor_key)
         if self.final_state is None:
@@ -168,6 +200,30 @@ class ResonanceAmplitude:
             data[daughter_key], data[partner_key], data[bachelor_key]
         )
 
+    def compact_prepared_data(
+        self,
+        data: Mapping[str, Array],
+    ) -> dict[str, Array]:
+        """Retain only arrays needed for repeated evaluation of this component."""
+
+        if not self._scalar_fast_path():
+            return dict(data)
+
+        prepared = {}
+        self_contained = bool(
+            getattr(self.lineshape, "prepared_mass_is_self_contained", False)
+        )
+        for daughter_key, partner_key, bachelor_key in self._pairings():
+            prefix = _kinematics_prefix(daughter_key, partner_key, bachelor_key)
+            prepared_key = self._lineshape_prepared_key(prefix)
+            if prepared_key in data:
+                prepared[prepared_key] = data[prepared_key]
+            if not self_contained:
+                mass_key = f"{prefix}_mass"
+                if mass_key in data:
+                    prepared[mass_key] = data[mass_key]
+        return prepared or dict(data)
+
     def prepare_data(self, data: Mapping[str, Array]) -> dict[str, Array]:
         """Attach parameter-independent kinematics and lineshape response data."""
 
@@ -176,6 +232,21 @@ class ResonanceAmplitude:
         prepare_lineshape = getattr(self.lineshape, "prepare_mass", None)
         for daughter_key, partner_key, bachelor_key in self._pairings():
             prefix = _kinematics_prefix(daughter_key, partner_key, bachelor_key)
+
+            if self._scalar_fast_path():
+                mass = self._resonance_mass(
+                    prepared,
+                    daughter_key,
+                    partner_key,
+                    bachelor_key,
+                    context,
+                )
+                prepared[f"{prefix}_mass"] = mass
+                prepared_key = self._lineshape_prepared_key(prefix)
+                if prepare_lineshape is not None and prepared_key not in prepared:
+                    prepared[prepared_key] = prepare_lineshape(mass, context)
+                continue
+
             if f"{prefix}_mass" in prepared:
                 kin = self._kinematics(
                     prepared,
@@ -201,7 +272,7 @@ class ResonanceAmplitude:
                         f"{prefix}_costheta": kin.cos_theta,
                     }
                 )
-            prepared_key = _lineshape_prepared_key(prefix)
+            prepared_key = self._lineshape_prepared_key(prefix)
             if prepare_lineshape is not None and prepared_key not in prepared:
                 prepared[prepared_key] = prepare_lineshape(
                     kin.resonance_mass,
@@ -218,6 +289,38 @@ class ResonanceAmplitude:
         parameters: Mapping[str, object] | None,
     ) -> Array:
         context = self.context.resolve(parameters)
+        lineshape = resolve_value(self.lineshape, parameters)
+
+        if self._scalar_fast_path():
+            prefix = _kinematics_prefix(daughter_key, partner_key, bachelor_key)
+            prepared_key = self._lineshape_prepared_key(prefix)
+            evaluate_prepared = getattr(lineshape, "evaluate_prepared", None)
+            if (
+                evaluate_prepared is not None
+                and prepared_key in data
+                and bool(getattr(lineshape, "prepared_mass_is_self_contained", False))
+            ):
+                return evaluate_prepared(
+                    None,
+                    data[prepared_key],
+                    context,
+                )
+
+            mass = self._resonance_mass(
+                data,
+                daughter_key,
+                partner_key,
+                bachelor_key,
+                context,
+            )
+            if evaluate_prepared is not None and prepared_key in data:
+                return evaluate_prepared(
+                    mass,
+                    data[prepared_key],
+                    context,
+                )
+            return lineshape(mass, context)
+
         kin = self._kinematics(
             data,
             daughter_key,
@@ -225,7 +328,6 @@ class ResonanceAmplitude:
             bachelor_key,
             context,
         )
-        lineshape = resolve_value(self.lineshape, parameters)
         angular_model = resolve_value(self.angular, parameters)
         l = int(context.spin)
         m1, m2 = context.daughter_masses
@@ -254,7 +356,7 @@ class ResonanceAmplitude:
         )
 
         prefix = _kinematics_prefix(daughter_key, partner_key, bachelor_key)
-        prepared_key = _lineshape_prepared_key(prefix)
+        prepared_key = self._lineshape_prepared_key(prefix)
         evaluate_prepared = getattr(lineshape, "evaluate_prepared", None)
         if evaluate_prepared is not None and prepared_key in data:
             resonance = evaluate_prepared(

@@ -68,6 +68,51 @@ def test_generate_signal_toy_supports_inverse_transform():
     assert toy.p1 is not None and toy.p2 is not None and toy.p3 is not None
 
 
+def test_inverse_transform_can_skip_four_momenta_without_changing_invariants():
+    model = _model()
+    full = generate_signal_toy(
+        model,
+        500,
+        seed=102,
+        inverse_resolution=96,
+        include_momenta=True,
+    )
+    compact = generate_signal_toy(
+        model,
+        500,
+        seed=102,
+        inverse_resolution=96,
+        include_momenta=False,
+    )
+
+    assert compact.p1 is None and compact.p2 is None and compact.p3 is None
+    assert jnp.array_equal(compact.s12, full.s12)
+    assert jnp.array_equal(compact.s13, full.s13)
+    assert jnp.array_equal(compact.s23, full.s23)
+    assert jnp.array_equal(compact.weights, full.weights)
+    assert compact.nbytes * 4 == full.nbytes
+
+
+def test_accept_reject_can_return_compact_toy():
+    toy = generate_signal_toy(
+        _model(),
+        100,
+        seed=103,
+        method="accept-reject",
+        pool_size=500,
+        include_momenta=False,
+    )
+    assert toy.p1 is None and toy.p2 is None and toy.p3 is None
+    assert toy.size == 100
+
+
+def test_prepared_inverse_generator_can_return_compact_toy():
+    prepared = prepare_inverse_toy_generator(_model(), resolution=80)
+    toy = prepared.generate(120, seed=104, include_momenta=False)
+    assert toy.size == 120
+    assert toy.p1 is None and toy.p2 is None and toy.p3 is None
+
+
 def test_resample_is_not_a_public_toy_method():
     with pytest.raises(ValueError, match="method must be one of"):
         generate_toy(_model(), 20, method="resample")

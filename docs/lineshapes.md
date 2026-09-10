@@ -127,7 +127,8 @@ A_S(s_k) = a_k exp(i delta_k)
 A_S(s)   = a(s) exp(i delta(s)).
 ```
 
-Magnitude and phase are interpolated separately. Two interpolation modes are available:
+By default, magnitude and phase are interpolated separately. Two interpolation
+modes are available:
 
 ```python
 QMI(..., interpolation="linear")  # default; reproduces the published LHCb convention
@@ -151,6 +152,31 @@ qmi = QMI(
 
 Published QMI values should be validated in analysis-specific studies before
 being used in a production model.
+
+For fits where the polar coordinates become poorly conditioned, the same class
+accepts Cartesian knot values:
+
+```python
+qmi = QMI(
+    knots=(0.30, 0.50, 0.70, 0.90, 1.10),
+    real_parts=(x0, x1, x2, x3, x4),
+    imaginary_parts=(y0, y1, y2, y3, y4),
+    interpolation="linear",
+)
+```
+
+In this form, the real and imaginary parts are interpolated directly and
+independently in `s=m**2`, and the amplitude is
+
+```text
+A_S(s) = x(s) + i y(s).
+```
+
+This avoids phase-branch ambiguities and the magnitude-zero singularity during
+minimization. `interpolated_magnitude_phase(mass)` remains available and derives
+the polar coordinates from the interpolated complex value. A QMI declaration
+must provide exactly one complete parameter set: either `magnitudes` and
+`phases`, or `real_parts` and `imaginary_parts`.
 
 ## QMI2D Dalitz amplitude
 
@@ -214,6 +240,18 @@ field = QMI2D(
 )
 ```
 
+For cubic interpolation, slopes use the physical distances between bin
+centers. Nonuniform grids have continuous first derivatives at internal
+centers; uniform grids retain the previous Catmull–Rom interpolation, including
+its repeated-value boundary convention. Interpolation remains local to a 4x4
+neighborhood.
+
+`physical_bin_mask` clips each bin to the kinematic s12 interval before sampling
+the analytic boundary. It accepts rectangular grids extending outside the
+Dalitz domain. The intersection search is sampled, so check mask convergence
+with `samples_per_bin` for very narrow intersections. Free parameters in cells
+marked inactive are rejected; fixed values remain valid placeholders.
+
 For `interpolation="none"`, inactive cells evaluate to zero. For linear/cubic interpolation, inactive rectangular cells act only as ghost support filled from the nearest active cell; they are not intended to carry independent physics parameters.
 
 For channels with two identical particles, `folded=True` evaluates the field at
@@ -235,6 +273,26 @@ model = DecayModel(
 ```
 
 The global complex normalization/phase ambiguity remains present, just as for a 1D QMI, and a fit must fix an appropriate reference convention. A completely free two-dimensional field can also develop poorly constrained or null directions; closure tests and Hessian/correlation diagnostics are therefore essential before using it on data.
+
+## QMI fit parameters and scale convention
+
+Declare every free QMI/QMI2D node with
+`Parameter.dynamics(name, value, owner=component_name)`. Generic free
+`Parameter(...)` nodes are rejected because they would otherwise be exposed to
+Minuit while remaining frozen in the amplitude cache. Fixed generic parameters
+remain supported. Knot masses and QMI2D bin edges must be finite.
+
+Prepared interpolation data are isolated per resonance amplitude, so multiple
+QMI components on the same particle pair may use different knot grids.
+
+With `normalize_component=True`, a common positive rescaling of all Cartesian
+QMI nodes (or all polar magnitudes) cancels against the component norm. If all
+those nodes float, this leaves an unidentifiable scale even when the component's
+global coefficient is fixed. Either fix an appropriate node-scale convention,
+or use `normalize_component=False` and a fixed QMI coefficient, together with
+a separate reference amplitude that defines the total scale/phase convention.
+Do not automatically fix a relative phase: that may constrain the physical
+model. The fitter does not choose these conventions automatically.
 
 ## Component composition and normalization
 

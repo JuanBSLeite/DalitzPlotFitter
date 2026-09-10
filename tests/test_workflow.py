@@ -134,3 +134,39 @@ def test_fit_session_projection_weights_reproduce_expected_events():
         session.data.size,
         rtol=1e-6,
     )
+
+
+def test_sessions_reuse_normalization_without_acceptance(monkeypatch):
+    model = _model()
+    first = FitSession(model, model.generate_phase_space(16, seed=401))
+    _ = first.signal_cache
+    scales, matrix = model._fixed_normalization_templates[True]
+
+    def unexpected_prepare(**kwargs):
+        raise AssertionError('Normalization must not be prepared again')
+
+    # A reused template only needs the data kernel, never the full norm kernel.
+    monkeypatch.setattr(DecayModel, '_compact_prepare_kernel',
+                        lambda self, **kwargs: unexpected_prepare(**kwargs))
+    second = FitSession(model, model.generate_phase_space(16, seed=402))
+    assert jnp.allclose(second.signal_cache.normalization_matrix_fixed, matrix)
+    assert jnp.allclose(second.signal_cache.component_scales, scales)
+    assert 'acceptance_normalization' not in second.__dict__
+    assert jnp.allclose(second._cached_signal_density({'NR.x': 1.0}),
+                        second.signal_pdf(second.data.as_dict(), {'NR.x': 1.0}))
+
+
+def test_sessions_with_efficiency_or_veto_do_not_reuse_unweighted_template():
+    model = _model()
+    data = model.generate_phase_space(32, seed=403)
+    unweighted = FitSession(model, data).signal_cache.normalization_matrix_fixed
+    for kwargs in (
+        {'efficiency': lambda d: 0.25 * jnp.ones_like(d['s12'])},
+        {'veto': lambda d: d['s12'] > 1.0},
+    ):
+        session = FitSession(model, data, **kwargs)
+        weighted = session.signal_cache.normalization_matrix_fixed
+        assert not jnp.allclose(weighted, unweighted)
+        assert jnp.allclose(session._cached_signal_density({'NR.x': 1.0}),
+                            session.signal_pdf(data.as_dict(), {'NR.x': 1.0}),
+                            atol=1e-12)

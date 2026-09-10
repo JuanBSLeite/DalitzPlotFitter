@@ -44,10 +44,31 @@ class CountingModel:
     def __getattr__(self, name):
         return getattr(self._model, name)
 
-    def generate_phase_space(self, size, *, seed=None):
+    def generate_phase_space(self, size, *, seed=None, include_momenta=True):
         self.phase_space_calls += 1
         self.phase_space_points += int(size)
-        return self._model.generate_phase_space(size, seed=seed)
+        return self._model.generate_phase_space(
+            size,
+            seed=seed,
+            include_momenta=include_momenta,
+        )
+
+    def generate_stratified_phase_space(
+        self,
+        size,
+        *,
+        cell_probabilities,
+        grid_shape,
+        seed=None,
+    ):
+        self.phase_space_calls += 1
+        self.phase_space_points += int(size)
+        return self._model.generate_stratified_phase_space(
+            size,
+            cell_probabilities=cell_probabilities,
+            grid_shape=grid_shape,
+            seed=seed,
+        )
 
 
 @dataclass
@@ -133,14 +154,20 @@ def result_from_sample(
     )
 
 
-def run_accept(model, size: int, seed: int):
+def run_accept(model, size: int, seed: int, *, include_momenta: bool):
     counted = CountingModel(model)
     start = time.perf_counter()
-    sample = generate_toy(counted, size, seed=seed, method="accept-reject")
+    sample = generate_toy(
+        counted,
+        size,
+        seed=seed,
+        method="accept-reject",
+        include_momenta=include_momenta,
+    )
     block(sample)
     seconds = time.perf_counter() - start
     return result_from_sample(
-        "accept-reject",
+        "accept-reject-full" if include_momenta else "accept-reject-compact",
         sample,
         seconds,
         phase_space_calls=counted.phase_space_calls,
@@ -211,10 +238,26 @@ def main() -> None:
     model = make_model()
 
     # Warm up JAX work outside the timed region.
-    warm, _ = run_accept(model, 2_000, args.seed - 1)
+    warm, _ = run_accept(
+        model,
+        2_000,
+        args.seed - 1,
+        include_momenta=False,
+    )
     del warm
 
-    accept, accept_sample = run_accept(model, args.size, args.seed)
+    accept_compact, accept_sample = run_accept(
+        model,
+        args.size,
+        args.seed,
+        include_momenta=False,
+    )
+    accept_full, _ = run_accept(
+        model,
+        args.size,
+        args.seed,
+        include_momenta=True,
+    )
     inverse_total, inverse_prepared, inverse_sample, preparation_seconds = run_inverse(
         model, args.size, args.seed + 1, args.inverse_resolution
     )
@@ -224,7 +267,8 @@ def main() -> None:
         "inverse_resolution": args.inverse_resolution,
         "inverse_preparation_seconds": preparation_seconds,
         "results": [
-            asdict(accept),
+            asdict(accept_compact),
+            asdict(accept_full),
             asdict(inverse_total),
             asdict(inverse_prepared),
         ],
