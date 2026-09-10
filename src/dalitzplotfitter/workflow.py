@@ -86,10 +86,16 @@ def _acceptance(efficiency, veto, data: dict[str, object]) -> jnp.ndarray:
 
     size = int(jnp.asarray(next(iter(data.values()))).shape[0])
     values = jnp.ones((size,), dtype=jnp.float64)
-    if efficiency is not None:
-        values = values * jnp.asarray(efficiency(data))
-    if veto is not None:
-        values = values * jnp.asarray(veto(data), dtype=values.dtype)
+    for label, function in (("efficiency", efficiency), ("veto", veto)):
+        if function is not None:
+            array = jnp.asarray(function(data))
+            if array.ndim == 0:
+                array = jnp.full((size,), array)
+            if array.shape != (size,):
+                raise ValueError(f"{label} must have shape ({size},)")
+            if bool(jnp.any(~jnp.isfinite(array) | (array < 0))):
+                raise ValueError(f"{label} must be finite and non-negative")
+            values = values * array
     return values
 
 
@@ -100,6 +106,10 @@ def _scaled_projection_weights(
 ) -> np.ndarray:
     """Normalize MC projection weights to the requested component yield."""
 
+    if not np.isfinite(scale) or scale < 0:
+        raise ValueError("projection yield must be finite and non-negative")
+    if scale == 0:
+        return np.zeros(sample.size)
     raw = np.asarray(sample.weights, dtype=float) * np.asarray(density, dtype=float)
     total = float(np.sum(raw))
     if not np.isfinite(total) or total <= 0.0:
@@ -202,7 +212,11 @@ class FitSession:
         return self.model.prepare_cache(
             self.data,
             self.model.normalization_sample,
-            efficiency_normalization=self.acceptance_normalization,
+            efficiency_normalization=(
+                None
+                if self.efficiency is None and self.veto is None
+                else self.acceptance_normalization
+            ),
         )
 
     @cached_property
@@ -323,7 +337,9 @@ class FitSession:
         del data
         intensity, normalization = self.signal_cache.evaluate(parameters)
         numerator = self.acceptance_data * intensity
-        return jnp.log(jnp.clip(numerator, min=1e-300)) - jnp.log(normalization)
+        from dalitzplotfitter.pdf.signal import _normalized_log_density
+
+        return _normalized_log_density(numerator, normalization)
 
     @staticmethod
     def _evaluate_shape(shape: object, data: dict) -> jnp.ndarray:
@@ -441,6 +457,11 @@ class FitSession:
         tolerance: float = 1e-4,
         verbose: int = 0,
     ):
+        """Fit with ``ncall`` as an approximate limit per optimizer stage.
+
+        The limit applies separately to SIMPLEX, each MIGRAD call and HESSE,
+        not to the whole fit. Strategy 2 runs MIGRAD twice.
+        """
         return self.minimizer(tolerance=tolerance, verbose=verbose).fit(
             start_values=start_values,
             simplex=simplex,
@@ -559,7 +580,6 @@ class FitSession:
             if projection_sample is None
             else projection_sample
         )
-        signal_density = self._projection_signal_density(sample, values)
         if self.extended:
             signal_scale = float(_resolve(self.signal_yield, values))
         elif self.background_categories:
@@ -568,6 +588,7 @@ class FitSession:
             )
         else:
             signal_scale = float(self.data.size)
+        signal_density = self._projection_signal_density(sample, values) if signal_scale else np.zeros(sample.size)
         components = [
             (
                 "signal",
@@ -595,8 +616,10 @@ class FitSession:
             self.background_categories,
             bg_scales,
         ):
-            if not isinstance(source, BackgroundSpec):
+            if scale == 0:
                 continue
+            if not isinstance(source, BackgroundSpec):
+                raise ValueError("plotting a precomputed background requires a BackgroundSpec with an evaluable shape")
             bg_sample = (
                 source.normalization_sample or self.model.normalization_sample
             ) if projection_sample is None else projection_sample

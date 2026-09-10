@@ -25,7 +25,10 @@ class VetoMap:
     def accept(self, data: dict[str, Array]) -> Array:
         return jnp.asarray(self(data), dtype=bool)
 
-    def apply(self, sample: PhaseSpaceSample) -> PhaseSpaceSample:
+    def apply(self, sample: PhaseSpaceSample, *, for_integration: bool = False) -> PhaseSpaceSample:
+        """Select data, or preserve integration weights when explicitly requested."""
+        if for_integration:
+            return sample.select_for_integration(self.accept(sample.as_dict()))
         indices = jnp.nonzero(self.accept(sample.as_dict()), size=None)[0]
         return sample.take(indices)
 

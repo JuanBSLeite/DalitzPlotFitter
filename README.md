@@ -85,6 +85,16 @@ toy_reference = generate_toy(
 )
 ```
 
+The accept-reject reference path is also optimized for large toys: proposal
+candidates are generated directly in Dalitz invariants, model normalization
+scales are frozen once at the toy truth, and four-momenta are reconstructed
+only after selection. Thus rejected candidates do not pay the cost of
+four-vector construction. Invariant-only densities automatically use monitored
+local envelopes on an occupancy-aware Dalitz cell grid; cells are proposed
+proportionally to their envelope and any envelope violation forces a full safe
+restart. Momentum-dependent custom densities retain the global-envelope
+fallback.
+
 For repeated toys, prepare the inverse CDFs once:
 
 ```python
@@ -129,6 +139,70 @@ plus_toy, minus_toy = generate_cp_toy(
 ```
 
 See `docs/toy_generation.md` and `notebooks/19_toy_root_output.ipynb`.
+
+## Memory-conscious workflows
+
+Large toys do not need to retain four-momenta when the downstream fit uses only
+Dalitz invariants. Keep the historical default with `include_momenta=True`, or
+request a compact sample explicitly:
+
+```python
+toy = generate_toy(
+    model,
+    1_000_000,
+    parameters=fit_values,
+    seed=2,
+    include_momenta=False,
+)
+
+print(toy.nbytes / 1024**2, "MiB")
+```
+
+For float64 arrays, a one-million-event unweighted sample with
+`s12/s13/s23/weights` occupies about 32 MiB. Retaining the three four-momenta
+adds another 96 MiB, for about 128 MiB total. With inverse-transform generation,
+`include_momenta=False` also skips momentum reconstruction, reducing peak as
+well as retained memory. An existing sample can be compacted without copying its
+invariant arrays:
+
+```python
+compact = sample.without_momenta()
+```
+
+Normalization is already evaluated in fixed-size chunks for coefficient-only
+fits. The chunk size is configurable when device memory is constrained:
+
+```python
+model = DecayModel(
+    channel,
+    components,
+    normalization_sample=integration_toy,
+    normalization_chunk_size=20_000,
+)
+```
+
+The default remains 100,000 points per chunk. Smaller chunks reduce temporary
+normalization memory approximately linearly, at the cost of more chunk
+executions. They do not change the integration sample or normalization formula.
+
+For QMI and other fits with floating dynamical parameters, speed is treated
+separately. The dynamic cache keeps the fixed waves evaluated on the
+normalization sample and recomputes only the floating-dynamics block. Scalar
+QMI amplitudes use a dedicated spin-0 path: redundant `p`, `p*`, `q` and
+`cos(theta)` arrays are not retained for the floating S-wave, the fixed QMI
+knot interval is precomputed with a compact integer index, and the likelihood
+does not rebuild a full `N_normalization x N_components` matrix on every
+evaluation. This path is automatic and does not require enabling a lower-memory
+mode.
+
+The benchmark
+
+```text
+benchmarks/benchmark_qmi_memory_speed.py
+```
+
+reports both retained cache memory and repeated JIT objective time for a
+20-knot B+ -> pi+ pi+ pi- QMI model.
 
 ## Simultaneous CP fits
 
@@ -214,11 +288,12 @@ See `docs/root_io.md` for details.
 
 ## Normalization
 
-Amplitude and PDF normalization use deterministic quadrature. There are only two public normalization methods:
+Amplitude and PDF normalization can use deterministic quadrature or a user-supplied Monte Carlo integration sample. The public normalization methods are:
 
 ```text
 gauss-legendre
 square-dalitz
+toy-mc
 ```
 
 Narrow-resonance handling is automatic in both methods. Resonances with nominal width at or below 20 MeV are treated as narrow. Their integration region is refined around `m0 ± 5*Gamma`, with default target spacing `Gamma/100`; broad regions retain the usual coarse integration scale. Identical-particle symmetrisation is included when locating narrow bands, and overlapping narrow regions use the finest requested spacing.
@@ -250,6 +325,42 @@ model = DecayModel(
     normalization_pair=(0, 1),
 )
 ```
+
+For Monte Carlo integration, pass a `PhaseSpaceSample` directly. Supplying
+`normalization_sample` automatically selects `normalization_method="toy-mc"`:
+
+```python
+normalization_toy = read_phase_space_sample(
+    "phsp.root",
+    "DecayTree",
+    s12="s12",
+    s13="s13",
+    s23="s23",
+    weight="weight",  # omit this argument for an unweighted sample
+)
+
+model = DecayModel(
+    channel,
+    components,
+    normalization_sample=normalization_toy,
+)
+```
+
+The Monte Carlo estimator follows the package-wide convention
+`mean(sample.weights * f)`. For an unweighted integration toy the weights are
+unit values; for a weighted toy they must be the integration/importance
+weights appropriate to the proposal that generated the events. Within one
+model, a common overall factor in the weights cancels in normalized PDFs,
+component fit fractions and interference fractions. In a simultaneous CP fit,
+the B+ and B- integration samples must use the same global weight convention,
+because a relative rescaling between charges would alter the integrated charge
+fraction.
+
+An unweighted sample may only be treated as unit-weight integration MC when
+its sampling distribution is appropriate for the desired integration measure.
+In particular, an unweighted signal toy generated according to `|A|^2` is not
+a flat phase-space integration sample and must not be substituted directly for
+normalization MC without the corresponding importance weights.
 
 When a narrow resonance is detected, the package prints which adaptive strategy is being used and, for Square Dalitz, the resulting `m' x theta'` point count. The deterministic strategy can also be inspected without constructing the grid through
 
@@ -350,7 +461,7 @@ Gaussian external measurements can be added with `GaussianConstraint` and `Const
 
 ## Phase-space Monte Carlo
 
-`PhaseSpaceMC` is used for accept-reject proposal/event generation and for weighted rendering samples used by smooth fitted projections. It is **not** used for amplitude/PDF normalization or fit fractions, which remain deterministic. The default inverse-transform toy path instead samples the physical Dalitz plane from prepared inverse CDFs.
+`PhaseSpaceMC` is used for accept-reject proposal/event generation and for weighted rendering samples used by smooth fitted projections. It can also be supplied explicitly as `normalization_sample` when Monte Carlo normalization is desired. The default remains deterministic quadrature unless an external normalization sample is supplied. The inverse-transform toy path samples the fitted signal density and therefore should not be confused with flat phase-space integration MC.
 
 ## Tutorial notebooks
 
@@ -376,6 +487,7 @@ The repository contains a progressive set of examples:
 - `notebooks/18_user_friendly_toy_generation.ipynb`: signal/background and CP pseudo-data generation;
 - `notebooks/19_toy_root_output.ipynb`: non-CP and CP toy generation with ROOT TTree output;
 - `notebooks/20_pdf_convolution_resolution.ipynb`: relativistic Breit-Wigner intensity convolved with Gaussian detector resolution.
+- `notebooks/22_flat_dalitz_toy_mc_integration.ipynb`: one million flat conventional-Dalitz events used as an external toy-MC normalization sample, with matrix/fit-fraction comparison and a non-CP closure fit.
 
 The B-to-Kpipi examples consistently use
 

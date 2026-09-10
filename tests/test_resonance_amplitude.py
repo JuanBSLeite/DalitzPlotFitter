@@ -60,6 +60,25 @@ def test_spin_one_daughter_exchange_flips_complete_amplitude_sign():
     assert jnp.allclose(first, -second, rtol=1e-6, atol=1e-7)
 
 
+def test_default_scalar_preparation_keeps_only_mass_kinematics():
+    component = _component(0)
+    data = _data()
+    prepared = component.prepare_data(data)
+
+    prefix = "__kin_p1_p2_p3"
+    assert f"{prefix}_mass" in prepared
+    assert f"{prefix}_pstar" not in prepared
+    assert f"{prefix}_p" not in prepared
+    assert f"{prefix}_q" not in prepared
+    assert f"{prefix}_costheta" not in prepared
+    assert jnp.allclose(
+        component(prepared),
+        component(data),
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
 def test_spin_zero_daughter_exchange_leaves_complete_amplitude_unchanged():
     data = _data()
     first = _component(0, "p1", "p2")(data)

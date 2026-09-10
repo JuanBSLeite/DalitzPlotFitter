@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
-from math import sqrt
+from math import isfinite, sqrt
 
 import jax
 import jax.numpy as jnp
+
+from dalitzplotfitter.fit.parameters import Parameter, ParameterKind
 
 
 def _kallen(x, y, z):
@@ -16,6 +18,8 @@ def _kallen(x, y, z):
 
 def _s13_limits_scalar(s12, mother_mass, masses):
     m1, m2, m3 = masses
+    if s12 == 0.0 and m1 == 0.0 and m2 == 0.0:
+        return m3 * m3, mother_mass * mother_mass
     root = sqrt(max(s12, 0.0))
     e1 = (s12 + m1*m1 - m2*m2) / (2.0*root)
     e3 = (mother_mass*mother_mass - s12 - m3*m3) / (2.0*root)
@@ -27,13 +31,37 @@ def _s13_limits_scalar(s12, mother_mass, masses):
 
 
 def physical_bin_mask(s12_edges, s13_edges, *, mother_mass, masses, folded=False, samples_per_bin=129):
-    """Return bins that intersect the exact physical Dalitz region."""
+    """Estimate bin intersections by sampling the analytic Dalitz boundary.
+
+    Each bin is clipped to the physical s12 range before sampling. Finite
+    sampling can miss very narrow intersections; increase samples_per_bin
+    to check boundary-mask convergence.
+    """
+    if isinstance(samples_per_bin, bool) or not isinstance(samples_per_bin, int):
+        raise ValueError("samples_per_bin must be an integer")
     if samples_per_bin < 3:
         raise ValueError("samples_per_bin must be at least 3")
     xedges = tuple(float(v) for v in s12_edges)
     yedges = tuple(float(v) for v in s13_edges)
+    if len(masses) != 3:
+        raise ValueError("masses must contain three daughter masses")
+    masses = tuple(float(v) for v in masses)
+    mother_mass = float(mother_mass)
+    if (not all(isfinite(v) and v >= 0 for v in masses)
+            or not isfinite(mother_mass) or mother_mass <= sum(masses)):
+        raise ValueError("Masses must be finite and the parent above threshold")
+    for edges in (xedges, yedges):
+        if (len(edges) < 2 or not all(isfinite(v) for v in edges)
+                or any(b <= a for a, b in zip(edges[:-1], edges[1:]))):
+            raise ValueError("Bin edges must be finite and strictly increasing")
+    physical_low = (masses[0] + masses[1]) ** 2
+    physical_high = (mother_mass - masses[2]) ** 2
     rows = []
     for x0, x1 in zip(xedges[:-1], xedges[1:]):
+        x0, x1 = max(x0, physical_low), min(x1, physical_high)
+        if x0 > x1:
+            rows.append(tuple(False for _ in yedges[1:]))
+            continue
         row = []
         for y0, y1 in zip(yedges[:-1], yedges[1:]):
             active = False
@@ -72,15 +100,42 @@ def _bilinear(x, y, xc, yc, values):
     return (1.0-ty)*((1.0-tx)*v00+tx*v10) + ty*((1.0-tx)*v01+tx*v11)
 
 
+def _cubic_axis(values, centers, left, right, fraction):
+    """Hermite interpolation with slopes in physical coordinates.
+
+    Ghost coordinates extend one interval past each edge with a repeated
+    value, preserving the previous Catmull-Rom behavior on uniform grids.
+    """
+    before = jnp.maximum(left - 1, 0)
+    after = jnp.minimum(right + 1, centers.shape[0] - 1)
+    x1, x2 = centers[left], centers[right]
+    x0 = jnp.where(left == 0, 2 * x1 - x2, centers[before])
+    x3 = jnp.where(right == centers.shape[0] - 1, 2 * x2 - x1, centers[after])
+    p0, p1, p2, p3 = values[before], values[left], values[right], values[after]
+    width = x2 - x1
+    slope1 = (p2 - p0) / (x2 - x0)
+    slope2 = (p3 - p1) / (x3 - x1)
+    t = fraction
+    return ((2*t**3 - 3*t**2 + 1)*p1 + (t**3 - 2*t**2 + t)*width*slope1
+            + (-2*t**3 + 3*t**2)*p2 + (t**3 - t**2)*width*slope2)
+
+
 def _bicubic_one(x, y, xc, yc, values):
-    nx, ny = values.shape
     ix1, ix2, tx = _indices_and_fraction(x, xc)
     iy1, iy2, ty = _indices_and_fraction(y, yc)
-    ix = jnp.clip(jnp.asarray([ix1-1,ix1,ix2,ix2+1]),0,nx-1)
-    iy = jnp.clip(jnp.asarray([iy1-1,iy1,iy2,iy2+1]),0,ny-1)
-    patch = values[ix[:,None],iy[None,:]]
-    along = jax.vmap(lambda c: _catmull_rom(c[0],c[1],c[2],c[3],tx), in_axes=1)(patch)
-    return _catmull_rom(along[0],along[1],along[2],along[3],ty)
+    # Retain local 4x4 support, including for large event samples.
+    ix = jnp.clip(jnp.asarray([ix1-1, ix1, ix2, ix2+1]), 0, values.shape[0]-1)
+    x1, x2 = xc[ix1], xc[ix2]
+    x0 = jnp.where(ix1 == 0, 2*x1-x2, xc[ix[0]])
+    x3 = jnp.where(ix2 == xc.shape[0]-1, 2*x2-x1, xc[ix[3]])
+    xcoords = jnp.stack((x0, x1, x2, x3))
+    iy = jnp.clip(jnp.asarray([iy1-1, iy1, iy2, iy2+1]), 0, values.shape[1]-1)
+    patch = values[ix[:, None], iy[None, :]]
+    along = jax.vmap(lambda c: _cubic_axis(c, xcoords, 1, 2, tx), in_axes=1)(patch)
+    y1, y2 = yc[iy1], yc[iy2]
+    y0 = jnp.where(iy1 == 0, 2*y1-y2, yc[iy[0]])
+    y3 = jnp.where(iy2 == yc.shape[0]-1, 2*y2-y1, yc[iy[3]])
+    return _cubic_axis(along, jnp.stack((y0, y1, y2, y3)), 1, 2, ty)
 
 
 def _nearest_active_sources(mask):
@@ -131,6 +186,17 @@ class QMI2D:
     active_mask: tuple[tuple[bool,...],...] | None = None
 
     def __post_init__(self):
+        if not all(isfinite(float(v)) for v in (*self.s12_edges, *self.s13_edges)):
+            raise ValueError("QMI2D bin edges must be finite")
+        for grid in (self.magnitudes, self.phases):
+            for row in grid:
+                for value in row:
+                    if (isinstance(value, Parameter) and not value.fixed
+                            and value.kind is not ParameterKind.DYNAMICS):
+                        raise ValueError(
+                            f"QMI2D node {value.name!r} must use Parameter.dynamics "
+                            "with the component owner"
+                        )
         if len(self.s12_edges)<2 or len(self.s13_edges)<2: raise ValueError("QMI2D requires at least one bin on each axis")
         if any(b<=a for a,b in zip(self.s12_edges[:-1],self.s12_edges[1:])): raise ValueError("QMI2D s12_edges must be strictly increasing")
         if any(b<=a for a,b in zip(self.s13_edges[:-1],self.s13_edges[1:])): raise ValueError("QMI2D s13_edges must be strictly increasing")
@@ -142,6 +208,16 @@ class QMI2D:
         if self.interpolation=="cubic" and (nx<2 or ny<2): raise ValueError("cubic QMI2D interpolation requires at least 2x2 bins")
         if self.active_mask is not None and not any(any(row) for row in self.active_mask):
             raise ValueError("QMI2D active_mask contains no physical bins")
+        if self.active_mask is not None:
+            for i, row in enumerate(self.active_mask):
+                for j, active in enumerate(row):
+                    if not active:
+                        for value in (self.magnitudes[i][j], self.phases[i][j]):
+                            if isinstance(value, Parameter) and not value.fixed:
+                                raise ValueError(
+                                    f"QMI2D inactive cell ({i}, {j}) cannot contain "
+                                    f"free parameter {value.name!r}"
+                                )
 
     @property
     def shape(self): return (len(self.s12_edges)-1,len(self.s13_edges)-1)

@@ -76,7 +76,8 @@ def test_minimizer_reuses_backend_across_instances_for_same_objective():
 
     first = Minimizer(objective, (parameter,))
     second = Minimizer(objective, (parameter,), tolerance=1e-6, verbose=1)
-    assert first._backend() is second._backend()
+    assert first._backend()[2] is second._backend()[2]
+    assert first._backend()[3] is second._backend()[3]
 
 
 def test_minimizer_does_not_share_backend_when_fixed_value_changes():
@@ -176,3 +177,53 @@ def test_multistart_trial_does_not_depend_on_number_of_later_starts():
                 float(reference_result.values[name]),
                 abs_tol=1e-12,
             )
+
+
+def test_shared_callbacks_use_current_limits_defaults_and_steps(monkeypatch):
+    from iminuit import Minuit
+
+    def objective(values):
+        return (values['x'] - 3.0) ** 2
+
+    first = Minimizer(objective, (Parameter('x', 0.0, bounds=(-5, 5), step=0.1),))
+    first._backend()
+    second = Minimizer(objective, (Parameter('x', 0.5, bounds=(0, 1), step=0.01),))
+    assert second._backend()[2] is first._backend()[2]
+    observed = []
+    original = Minuit.migrad
+
+    def capture(self, *args, **kwargs):
+        observed.append((self.values['x'], self.errors['x'], tuple(self.limits['x'])))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Minuit, 'migrad', capture)
+    result = second.fit(strategy=1)
+    assert observed == [(0.5, 0.01, (0.0, 1.0))]
+    assert result.valid
+    assert 0.99 < result.values['x'] <= 1.0
+    # An explicit start still overrides the new default, not its bounds.
+    second.fit(start_values={'x': 0.25}, strategy=1)
+    assert observed[1][0] == 0.25
+
+
+@pytest.mark.parametrize('strategy', [1, 2])
+@pytest.mark.parametrize('ncall', [None, 321])
+def test_ncall_is_forwarded_to_every_requested_stage(monkeypatch, strategy, ncall):
+    from iminuit import Minuit
+
+    calls = []
+    for stage in ('simplex', 'migrad', 'hesse'):
+        original_stage = getattr(Minuit, stage)
+
+        def record(self, *, _stage=stage, _original=original_stage, **kwargs):
+            calls.append((_stage, kwargs))
+            return _original(self, **kwargs)
+        monkeypatch.setattr(Minuit, stage, record)
+
+    minimizer = Minimizer(lambda v: v['x'] ** 2, (Parameter('x', 1.0),))
+    minimizer.fit(ncall=ncall, strategy=strategy, simplex=True, hesse=True)
+    assert calls == (
+        [('simplex', {'ncall': ncall})]
+        + [('migrad', {'ncall': ncall, 'use_simplex': False})] * strategy
+        + [('hesse', {'ncall': ncall})]
+    )

@@ -86,13 +86,19 @@ The scattering constants are fixed by default while the process-dependent `betas
 spin-0 one-dimensional lineshape. It parameterizes
 
 ```text
-A(m) = g_00(m) exp(i phi_00(m))
+A(m) = g_00(m) exp(i phi_00(m)) / (1 + m^2/Lambda^2)
 ```
 
 with Chebyshev expansions in two mass regions: from the charged-kaon threshold
-`2 m_K` to 1.47 GeV, and from 1.47 to 2.00 GeV. The default `B`, `C`,
-`D`, and `F` coefficients are the Laura++ defaults. The two expansions are
-constructed to be continuous at 1.47 GeV.
+`2 m_K` to 1.47 GeV, and from 1.47 to 2.00 GeV. `phi_00` is evaluated as a
+Chebyshev series in degrees and converted to radians once, after evaluation,
+matching `LauRescattering2Res::resAmp`. `g_00(m)`, and therefore `A(m)`, is
+exactly zero below the charged-kaon threshold `2 m_K`; region I is not
+extrapolated into the sub-threshold region for the amplitude actually
+returned by `__call__` (`Rescattering2.magnitude()` still exposes the raw,
+un-cut Chebyshev value for diagnostics). The default `B`, `C`, `D`, `F`
+coefficients and `Lambda = 1` GeV are the Laura++ defaults. The two Chebyshev
+expansions are constructed to be continuous at 1.47 GeV.
 
 ```python
 from dalitzplotfitter import RealImag, Rescattering2, Resonance
@@ -127,14 +133,19 @@ A_S(s_k) = a_k exp(i delta_k)
 A_S(s)   = a(s) exp(i delta(s)).
 ```
 
-Magnitude and phase are interpolated separately. Two interpolation modes are available:
+By default, magnitude and phase are interpolated separately. Four interpolation
+modes are available:
 
 ```python
 QMI(..., interpolation="linear")  # default; reproduces the published LHCb convention
-QMI(..., interpolation="cubic")   # natural cubic spline in s=m^2
+QMI(..., interpolation="cubic")   # local smoothstep, two adjacent knots
+QMI(..., interpolation="hermite") # local Hermite, finite-difference slopes
+QMI(..., interpolation="natural") # global natural cubic spline in s=m^2
 ```
 
-The cubic mode is implemented directly in JAX with natural boundary conditions, so the knot magnitudes and phases remain differentiable fit parameters. Both modes pass exactly through all supplied knots; outside the knot range the nearest endpoint value is used.
+All modes are implemented in JAX and pass through the supplied knots; outside the knot range the nearest endpoint value is used. `natural` solves the global spline system: its second derivative vanishes at the two endpoints and its first and second derivatives are continuous at interior knots. Moving a node can affect every interval. With two knots it reduces to linear interpolation. Natural boundary conditions apply inside the knot range; constant continuation outside it need not have a matching first derivative.
+
+The natural option supports polar and Cartesian parameters, prepared evaluation, JIT and automatic gradients. It solves a knot-sized system without storing an event-by-knot basis matrix. It uses ordinary JAX autodiff, so it does not have the grouped custom VJP optimization of the local modes; large-fit performance should be measured separately. As with other cubic splines, overshoot is possible, including negative interpolated polar magnitudes. `linear` remains the default, and `cubic` retains its local behavior.
 
 The public `knots` argument is given as masses in GeV, matching the published tables; internally `QMI` squares the masses and interpolates in `s`. Entries of `magnitudes` and `phases` may be numerical constants or fit `Parameter` objects. Phases are expressed in radians and should be supplied as a continuous/unwrapped sequence; interpolation does not impose a `[-pi, pi)` branch cut.
 
@@ -145,12 +156,37 @@ qmi = QMI(
     knots=(0.30, 0.50, 0.70, 0.90, 1.10),
     magnitudes=(a0, a1, a2, a3, a4),
     phases=(d0, d1, d2, d3, d4),
-    interpolation="cubic",
+    interpolation="natural",
 )
 ```
 
 Published QMI values should be validated in analysis-specific studies before
 being used in a production model.
+
+For fits where the polar coordinates become poorly conditioned, the same class
+accepts Cartesian knot values:
+
+```python
+qmi = QMI(
+    knots=(0.30, 0.50, 0.70, 0.90, 1.10),
+    real_parts=(x0, x1, x2, x3, x4),
+    imaginary_parts=(y0, y1, y2, y3, y4),
+    interpolation="linear",
+)
+```
+
+In this form, the real and imaginary parts are interpolated directly and
+independently in `s=m**2`, and the amplitude is
+
+```text
+A_S(s) = x(s) + i y(s).
+```
+
+This avoids phase-branch ambiguities and the magnitude-zero singularity during
+minimization. `interpolated_magnitude_phase(mass)` remains available and derives
+the polar coordinates from the interpolated complex value. A QMI declaration
+must provide exactly one complete parameter set: either `magnitudes` and
+`phases`, or `real_parts` and `imaginary_parts`.
 
 ## QMI2D Dalitz amplitude
 
@@ -214,6 +250,18 @@ field = QMI2D(
 )
 ```
 
+For cubic interpolation, slopes use the physical distances between bin
+centers. Nonuniform grids have continuous first derivatives at internal
+centers; uniform grids retain the previous Catmull–Rom interpolation, including
+its repeated-value boundary convention. Interpolation remains local to a 4x4
+neighborhood.
+
+`physical_bin_mask` clips each bin to the kinematic s12 interval before sampling
+the analytic boundary. It accepts rectangular grids extending outside the
+Dalitz domain. The intersection search is sampled, so check mask convergence
+with `samples_per_bin` for very narrow intersections. Free parameters in cells
+marked inactive are rejected; fixed values remain valid placeholders.
+
 For `interpolation="none"`, inactive cells evaluate to zero. For linear/cubic interpolation, inactive rectangular cells act only as ghost support filled from the nearest active cell; they are not intended to carry independent physics parameters.
 
 For channels with two identical particles, `folded=True` evaluates the field at
@@ -235,6 +283,26 @@ model = DecayModel(
 ```
 
 The global complex normalization/phase ambiguity remains present, just as for a 1D QMI, and a fit must fix an appropriate reference convention. A completely free two-dimensional field can also develop poorly constrained or null directions; closure tests and Hessian/correlation diagnostics are therefore essential before using it on data.
+
+## QMI fit parameters and scale convention
+
+Declare every free QMI/QMI2D node with
+`Parameter.dynamics(name, value, owner=component_name)`. Generic free
+`Parameter(...)` nodes are rejected because they would otherwise be exposed to
+Minuit while remaining frozen in the amplitude cache. Fixed generic parameters
+remain supported. Knot masses and QMI2D bin edges must be finite.
+
+Prepared interpolation data are isolated per resonance amplitude, so multiple
+QMI components on the same particle pair may use different knot grids.
+
+With `normalize_component=True`, a common positive rescaling of all Cartesian
+QMI nodes (or all polar magnitudes) cancels against the component norm. If all
+those nodes float, this leaves an unidentifiable scale even when the component's
+global coefficient is fixed. Either fix an appropriate node-scale convention,
+or use `normalize_component=False` and a fixed QMI coefficient, together with
+a separate reference amplitude that defines the total scale/phase convention.
+Do not automatically fix a relative phase: that may constrain the physical
+model. The fitter does not choose these conventions automatically.
 
 ## Component composition and normalization
 

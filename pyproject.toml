@@ -15,6 +15,7 @@ dependencies = [
   "matplotlib>=3.9",
   "mplhep>=0.4",
   "numpy>=2.0",
+  "pandas>=2.0",
   "particle>=1.0.0",
   "uproot>=5.6",
 ]

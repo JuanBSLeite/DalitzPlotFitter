@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 
 import jax.numpy as jnp
 
@@ -35,9 +34,18 @@ def _chebyshev_series(x, coefficients):
 class Rescattering2:
     """Port of the Laura++ LauRescattering2Res alternative rescattering model.
 
-    The amplitude is A(m) = g_00(m) exp(i phi_00(m)), with separate Chebyshev
-    expansions below and above 1.47 GeV. The default coefficients are those
-    hard-coded in Laura++. The first interval starts at the charged-kaon
+    The amplitude is
+
+        A(m) = g_00(m) exp(i phi_00(m)) / (1 + m^2/Lambda^2),
+
+    with separate Chebyshev expansions below and above 1.47 GeV, and
+    g_00(m) = 0 below the charged-kaon threshold 2*m_K (``LauRescattering2Res::
+    resAmp`` sets ``mag = 0`` there). The Chebyshev coefficients B/C/D/F are
+    evaluated in degrees, exactly as in the Laura++ source; the whole phase
+    phi_00(m) is converted to radians once, after evaluation, matching
+    ``resAmp``'s ``phi00(...) * pi/180``. The default coefficients are those
+    hard-coded in Laura++, including the ``1/(1+m^2/Lambda^2)`` suppression
+    with ``Lambda = 1`` GeV. The first interval starts at the charged-kaon
     threshold, 2*m_K, and the second ends at 2.0 GeV.
 
     The Laura++ source appears to contain a typo in initialise(): C0 and F0
@@ -45,9 +53,8 @@ class Rescattering2:
     g00(sqr_tmax[1]*sqr_tmax[1], 1), even though sqr_tmax stores masses and
     resAmp passes mass (not mass squared) to phi00/g00. Here we use the
     dimensionally and internally consistent transition mass itself, 1.47 GeV.
-    This also makes the two Chebyshev regions continuous at the transition.
-    As in Laura++, region I is still extrapolated below 2*m_K; the threshold
-    only defines the Chebyshev scaling interval.
+    This also makes the two Chebyshev regions continuous at the transition,
+    which the literal squared-mass anchor does not.
     """
 
     B1: object = 23.6
@@ -67,8 +74,10 @@ class Rescattering2:
 
     F1: object = -0.043
     F2: object = -0.008
-    F3: object = -0.28
+    F3: object = -0.028
     F4: object = 0.026
+
+    lambda_scale: float = 1.0
 
     kaon_mass: float = 0.493677
     transition_mass: float = 1.47
@@ -94,8 +103,10 @@ class Rescattering2:
         return 2.0 * (jnp.asarray(mass) - lower) / (upper - lower) - 1.0
 
     def _low_phase_coefficients(self):
-        phase_at_threshold = math.radians(float(self.threshold_phase_degrees))
-        b0 = phase_at_threshold + self.B1 - self.B2 + self.B3
+        # B0 and the phase Chebyshev series stay in degrees here, matching
+        # Laura++'s ``B0_ = 226.5 + B1 - B2 + B3``. The degrees-to-radians
+        # conversion is applied once, to the full phi_00(m), in ``phase()``.
+        b0 = float(self.threshold_phase_degrees) + self.B1 - self.B2 + self.B3
         return (b0, self.B1, self.B2, self.B3)
 
     def _low_phase(self, mass):
@@ -146,10 +157,16 @@ class Rescattering2:
         )
         low = self._low_phase(m)
         high = _chebyshev_series(x_high, self._high_phase_coefficients())
-        return jnp.where(m <= self.transition_mass, low, high)
+        degrees = jnp.where(m <= self.transition_mass, low, high)
+        return jnp.deg2rad(degrees)
 
     def magnitude(self, mass):
-        """Return the signed Laura++ function g_00(m)."""
+        """Return the signed Laura++ function g_00(m).
+
+        This is the raw Chebyshev magnitude only: it does not apply the
+        charged-kaon-threshold cut or the ``1/(1+m^2/Lambda^2)`` suppression
+        that ``resAmp``/``__call__`` add on top of it.
+        """
 
         m = jnp.asarray(mass)
         x_high = self._scaled_mass(
@@ -164,7 +181,9 @@ class Rescattering2:
             raise ValueError("Rescattering2 is defined for a spin-0 S-wave")
 
         m = jnp.asarray(mass)
-        value = self.magnitude(m) * jnp.exp(1j * self.phase(m))
+        magnitude = jnp.where(m < self.threshold_mass, 0.0, self.magnitude(m))
+        suppression = 1.0 / (1.0 + (m / float(self.lambda_scale)) ** 2)
+        value = magnitude * suppression * jnp.exp(1j * self.phase(m))
         inside = m < self.maximum_mass
         return jnp.where(inside, value, 0.0j)
 

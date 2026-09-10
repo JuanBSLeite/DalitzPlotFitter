@@ -125,5 +125,4 @@ For Square-Dalitz quadrature, `norm.weights` already contain the transformation 
 ## Examples
 
 - `notebooks/13_b2kpipi_root_tree_input.ipynb`: TTree -> `PhaseSpaceSample` -> amplitude fit;
-- `notebooks/14_b2kpipi_root_hist_eff_background.ipynb`: ROOT TH2 maps in ordinary Dalitz coordinates;
 - `notebooks/15_b2kpipi_square_dalitz_eff_background.ipynb`: ROOT TH2 efficiency/background maps in `(m', theta')`, with SDP and ordinary-Dalitz plots and a signal/background fit.
