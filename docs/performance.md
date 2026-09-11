@@ -87,7 +87,15 @@ same object.
 
 ## QMI preparation
 
-For cubic one-dimensional QMI amplitudes, the natural-spline linear system depends only on the fixed knot coordinates. Its inverse is cached and reused; changing magnitudes or phases no longer solves the same system from scratch.
+For the local one-dimensional QMI modes (`linear`, `cubic`, `hermite`), `prepare_mass` caches the
+fixed knot interval index and interpolation fraction (plus the event order and per-interval
+`starts`/`ends` used by the reverse pass) once; each mode's forward evaluation and its
+hand-written `jax.custom_vjp` then cost one gather and one grouped-interval-sum reduction per
+event, with no global linear solve and no event-sized reverse scatter-add. `natural` (the global
+natural cubic spline) is different: it is *not* on this fixed/cached path. Every evaluation
+solves its knot-sized tridiagonal system from scratch with `jnp.linalg.solve`, through ordinary
+JAX autodiff rather than a custom VJP, so changing magnitudes or phases re-solves the system;
+benchmark it separately from the local modes for large fits (see `docs/lineshapes.md`).
 
 For `QMI2D`, fixed interpolation geometry is also cached: bin edges, bin centres, active masks and the nearest-active gather map used to fill ghost cells. Floating magnitudes/phases therefore update only the value field and interpolation algebra, not the geometry construction.
 

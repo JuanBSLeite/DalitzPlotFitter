@@ -78,6 +78,15 @@ barriers. `DalitzAmplitude` bypasses that isobar construction entirely for ampli
 intrinsically two-dimensional (`QMI2D`, `dynamics/qmi2d.py`), evaluated directly over
 `(s12, s13)`.
 
+`QMI`'s `interpolation="cubic"` is not a cubic spline in the usual sense: it is a strictly local
+smoothstep between the two knots bordering an event's interval, and that locality is exactly what
+forces its derivative to zero at every knot (the zero-derivative value is the only one guaranteed
+to match across neighboring intervals without consulting further knots) — the visible
+flatten-then-bulge look this produces is by design, not a bug. `interpolation="hermite"` removes
+it at the same per-event cost (knot tangents are precomputed once from neighbors, then reused
+through the same grouped-VJP reduction as `cubic`) and should be preferred whenever a smooth
+curve matters; see `docs/lineshapes.md` and `docs/performance.md`.
+
 ### Normalization: the central invariant
 
 Every integral in the codebase (grid quadrature *and* Monte Carlo) follows one convention:
