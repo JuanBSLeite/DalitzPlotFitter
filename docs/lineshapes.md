@@ -7,7 +7,10 @@ DalitzPlotFitter implements resonance dynamics directly in JAX. Laura++ and publ
 ```python
 RelativisticBreitWigner()
 Pole()
+SigmaPole()
 GounarisSakurai()
+RhoOmegaMixing(component="rho")
+PipiKKRescattering()
 Flatte(...)
 LASS(...)
 KMatrix(...)
@@ -40,6 +43,19 @@ R(m) = 1 / (m - m0 - i Gamma0/2).
 R(m) = [1 + D Gamma0/m0] /
        [m0^2 - m^2 + f(m) - i m0 Gamma(m)].
 ```
+
+`RhoOmegaMixing` implements Eq. (15) of the LHCb isobar model. Its `rho`
+and `omega` variants are the two effective terms obtained by splitting the
+common denominator; the omega propagator uses its fixed pole width, without
+momentum or barrier factors, as in Laura++ `LauRhoOmegaMix`.
+
+`SigmaPole` is the separate pole convention used for the paper's
+`f0(500)`, `sqrt(s_sigma) = m_sigma - i Gamma_sigma`, rather than the generic
+fixed-width `Pole` convention.
+
+`PipiKKRescattering` implements the source term and the inelastic amplitude
+from Eqs. (17)--(21) of the paper and is explicitly zero outside
+`1.0 <= m(pi pi) <= 1.5 GeV`.
 
 ## Flatte
 

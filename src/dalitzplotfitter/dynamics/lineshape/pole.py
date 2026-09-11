@@ -1,4 +1,4 @@
-"""Simple fixed-width pole lineshape."""
+"""Pole lineshapes."""
 
 from __future__ import annotations
 
@@ -20,4 +20,19 @@ class Pole:
         return 1.0 / (m - m0 - 0.5j * gamma0)
 
 
-__all__ = ["Pole"]
+@dataclass(frozen=True)
+class SigmaPole:
+    """The simple ``f0(500)`` pole used by the LHCb isobar model.
+
+    The convention in the paper is ``sqrt(s_sigma) = m_sigma - i Gamma_sigma``
+    and ``A_sigma(m) = 1 / (s_sigma - m**2)``.  In particular, the width is
+    not divided by two here.
+    """
+
+    def __call__(self, mass, context: ResonanceContext):
+        m = jnp.asarray(mass)
+        pole = jnp.asarray(context.pole_mass) - 1j * jnp.asarray(context.pole_width)
+        return 1.0 / (pole**2 - m**2)
+
+
+__all__ = ["Pole", "SigmaPole"]

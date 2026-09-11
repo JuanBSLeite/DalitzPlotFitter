@@ -38,7 +38,9 @@ from .dynamics import (
     GounarisSakurai,
     KMatrix,
     Pole,
+    PipiKKRescattering,
     RelativisticBreitWigner,
+    RhoOmegaMixing,
     Rescattering2,
     ResonanceAmplitude,
     ResonanceContext,
@@ -46,6 +48,7 @@ from .dynamics import (
     ZemachPstar,
     Zemach_P,
     Zemach_Pstar,
+    SigmaPole,
     physical_bin_mask,
 )
 from .fit import Minimizer, MultiStartResult, Parameter, ParameterKind
@@ -119,7 +122,7 @@ __all__ = [
     "GooFitLegacyAngular", "GounarisSakurai", "Histogram1D", "KMatrix", "LASS", "LineshapeIntensity1D", "DalitzGaussLegendreGrid",
     "MassWindowVeto", "Minimizer", "MultiBackgroundNLL", "MultiStartResult", "NonResonant",
     "Parameter", "ParameterKind", "PhaseSpaceMC", "PhaseSpaceSample", "Pole",
-    "PreparedAmplitudeCache", "PreparedInverseToyGenerator", "QMI", "QMI2D", "RealImag", "RelativisticBreitWigner", "Rescattering2",
+    "PreparedAmplitudeCache", "PreparedInverseToyGenerator", "PipiKKRescattering", "QMI", "QMI2D", "RealImag", "RelativisticBreitWigner", "RhoOmegaMixing", "Rescattering2", "SigmaPole",
     "Resonance", "ResonanceAmplitude", "ResonanceContext", "SCFSignalPDF", "SignalPDF",
     "SparseMigration", "SquareDalitzGrid", "SquareDalitzHistogramBackground", "SquareDalitzHistogramEfficiency",
     "SquareDalitzSCFMap", "ToyBackground", "VetoMap", "VetoedDensity", "ZemachP", "ZemachPstar",
