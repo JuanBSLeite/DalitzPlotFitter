@@ -7,7 +7,10 @@ DalitzPlotFitter implements resonance dynamics directly in JAX. Laura++ and publ
 ```python
 RelativisticBreitWigner()
 Pole()
+SigmaPole()
 GounarisSakurai()
+RhoOmegaMixing(component="rho")
+PipiKKRescattering()
 Flatte(...)
 LASS(...)
 KMatrix(...)
@@ -40,6 +43,27 @@ R(m) = 1 / (m - m0 - i Gamma0/2).
 R(m) = [1 + D Gamma0/m0] /
        [m0^2 - m^2 + f(m) - i m0 Gamma(m)].
 ```
+
+`RhoOmegaMixing` implements Eq. (15) of the LHCb isobar model. Its `rho`
+and `omega` variants are the two effective terms obtained by splitting the
+common denominator; the omega propagator uses its fixed pole width, without
+momentum or barrier factors, as in Laura++ `LauRhoOmegaMix`.
+
+`SigmaPole` is the separate pole convention used for the paper's
+`f0(500)`, `sqrt(s_sigma) = m_sigma - i Gamma_sigma`, rather than the generic
+fixed-width `Pole` convention.
+
+`PipiKKRescattering` implements the source term and the inelastic amplitude
+from Eqs. (17)--(21) of the paper and is explicitly zero outside
+`1.0 <= m(pi pi) <= 1.5 GeV`.
+
+The default `convention="paper"` uses the literal printed expression.
+`convention="laura"` instead follows the production factor in `s=m**2`
+and overall phase `i` in Laura++ 3.8 `LauRescatteringRes::amplitude`.
+The source denominators then have units GeV squared. The explicit mass window
+is retained; reproducing Laura++'s full support requires setting `mass_min`
+to the KK threshold. These conventions must be matched to the coefficients:
+a global phase of one component changes its interference with other components.
 
 ## Flatte
 
@@ -146,6 +170,8 @@ QMI(..., interpolation="natural") # global natural cubic spline in s=m^2
 All modes are implemented in JAX and pass through the supplied knots; outside the knot range the nearest endpoint value is used. `natural` solves the global spline system: its second derivative vanishes at the two endpoints and its first and second derivatives are continuous at interior knots. Moving a node can affect every interval. With two knots it reduces to linear interpolation. Natural boundary conditions apply inside the knot range; constant continuation outside it need not have a matching first derivative.
 
 The natural option supports polar and Cartesian parameters, prepared evaluation, JIT and automatic gradients. It solves a knot-sized system without storing an event-by-knot basis matrix. It uses ordinary JAX autodiff, so it does not have the grouped custom VJP optimization of the local modes; large-fit performance should be measured separately. As with other cubic splines, overshoot is possible, including negative interpolated polar magnitudes. `linear` remains the default, and `cubic` retains its local behavior.
+
+`cubic`'s locality is what forces its derivative to exactly zero at every knot, from both sides: the smoothstep weight `3t^2 - 2t^3` is the only cubic blend on two points (`values[index]`, `values[index+1]`) whose derivative is guaranteed to match its neighboring interval's without any information about further knots. Because that zero-derivative value is fixed to the interval's own two endpoints and never to the surrounding trend of the curve, `cubic` visibly flattens at each knot and then bulges between knots to compensate; this is expected, not a defect, and is exercised by `test_qmi_local_cubic_uses_only_the_two_adjacent_knots`. `hermite` removes this artifact at no extra per-event cost — its knot tangents are precomputed once from neighboring knots (`_hermite_slopes`, a central difference for interior knots) and its custom VJP uses the same grouped-interval-sum reduction as `cubic` (see `docs/performance.md`) — so prefer `hermite` over `cubic` whenever a smooth-looking curve matters and the strict two-knot dependency of `cubic` is not itself a requirement.
 
 The public `knots` argument is given as masses in GeV, matching the published tables; internally `QMI` squares the masses and interpolates in `s`. Entries of `magnitudes` and `phases` may be numerical constants or fit `Parameter` objects. Phases are expressed in radians and should be supplied as a continuous/unwrapped sequence; interpolation does not impose a `[-pi, pi)` branch cut.
 
@@ -273,6 +299,8 @@ s_high = max(s12, s13)
 
 which imposes the exchange symmetry directly on the two-dimensional field. This is the natural default for studies of `D_s+ -> pi- pi+ pi+` when `s12` and `s13` correspond to the two `pi+ pi-` combinations.
 
+`folded=True` requires `s12_edges` and `s13_edges` to be identical (the constructor raises otherwise): the lookup above puts `s_low` on the `s12` grid and `s_high` on the `s13` grid, so mismatched ranges would silently clamp whichever physical value happens to be smaller/larger to the narrower grid's boundary instead of producing the intended single symmetric field.
+
 A QMI2D component is attached directly to the coherent amplitude model:
 
 ```python
@@ -319,3 +347,9 @@ J. Back et al., *Laura++: a Dalitz plot fitter*, Computer Physics Communications
 V. V. Anisovich and A. V. Sarantsev, *K-matrix analysis of the (IJ^PC = 00++)-wave in the mass region below 1900 MeV*, Eur. Phys. J. A 16 (2003) 229.
 
 LHCb Collaboration, *Amplitude analysis of the D_s+ -> pi- pi+ pi+ decay*, arXiv:2209.09840.
+
+LHCb Collaboration, *Amplitude analysis of the B+ -> pi+ pi+ pi- decay*, Phys. Rev. D 101,
+012006 (2020), arXiv:1909.05212. `SigmaPole`, `RhoOmegaMixing` and `PipiKKRescattering`
+reproduce this paper's isobar conventions; see `docs/reviews/paper_isobar_conventions.md` for the
+numeric reproduction against Laura++ and the published tables, including the remaining unresolved
+discrepancies.

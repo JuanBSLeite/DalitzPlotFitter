@@ -648,6 +648,9 @@ class FitSession:
         projection_size: int = 100_000,
         projection_seed: int = 20260901,
         projection_sample: PhaseSpaceSample | None = None,
+        folded: bool = False,
+        partner_variable: str | None = None,
+        fold_side: str = "low",
         ax=None,
     ):
         """Plot data and a smooth fitted projection.
@@ -657,12 +660,36 @@ class FitSession:
         generated sample and coefficient-only prepared amplitudes are cached by
         the session, so plotting another invariant or changing bins does not
         repeat phase-space generation or fixed resonance dynamics.
+
+        ``folded=True`` projects onto ``s_low = min(variable, partner_variable)``
+        (``fold_side="low"``, the default) or ``s_high = max(...)``
+        (``fold_side="high"``) event by event, for both data and each fitted
+        component. ``partner_variable`` is the other exchange-symmetric
+        invariant for a channel with two identical daughters, e.g.
+        ``variable="s12"``, ``partner_variable="s13"``. This is the same
+        ``min``/``max`` fold used by ``plot_dalitz``/``plot_square_dalitz`` and
+        the folded efficiency/background models, applied here to a 1D
+        projection; call it twice, with ``fold_side="low"`` and ``"high"``, to
+        get the usual pair of folded spectra.
         """
 
         import matplotlib.pyplot as plt
 
+        if folded and partner_variable is None:
+            raise ValueError("folded=True requires partner_variable")
+        if fold_side not in ("low", "high"):
+            raise ValueError("fold_side must be 'low' or 'high'")
+        fold_fn = np.minimum if fold_side == "low" else np.maximum
+
+        def _folded_values(sample):
+            values_ = np.asarray(getattr(sample, variable))
+            if not folded:
+                return values_
+            partner_values = np.asarray(getattr(sample, partner_variable))
+            return fold_fn(values_, partner_values)
+
         values = self.result_values(result)
-        data_values = np.asarray(getattr(self.data, variable))
+        data_values = _folded_values(self.data)
         hist_range = range or (
             float(np.min(data_values)),
             float(np.max(data_values)),
@@ -689,16 +716,20 @@ class FitSession:
             values,
             sample,
         ):
+            component_values = _folded_values(component_sample)
             counts, _ = np.histogram(
-                np.asarray(getattr(component_sample, variable)),
+                component_values,
                 bins=edges,
-                weights=weights,
+                weights=np.asarray(weights),
             )
             total += counts
             if show_components:
                 ax.stairs(counts, edges, label=name)
         ax.stairs(total, edges, label="total fit", linewidth=2.0)
-        ax.set_xlabel(rf"${variable}$ [GeV$^2$]")
+        label = (
+            rf"$s_{{\mathrm{{{fold_side}}}}}$" if folded else rf"${variable}$"
+        )
+        ax.set_xlabel(label + (" [GeV$^2$]" if unit else ""))
         ax.legend()
         return ax
 

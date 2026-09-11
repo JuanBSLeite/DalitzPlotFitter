@@ -63,11 +63,30 @@ rho_reco(r) = (1 - f_SCF(r)) epsilon(r) |A(r)|^2
               + rho_SCF(r).
 ```
 
-Since every true-bin migration distribution is normalized,
+`SCFSignalPDF.normalization` always integrates this in the same split form as
+the vetoed case (`V(r) = 1` below), not as a single continuous integral of
+`epsilon(t)|A(t)|^2` over the whole domain:
 
 ```text
-integral rho_reco(r) dr = integral epsilon(t) |A(t)|^2 dt.
+integral rho_reco(r) dr = integral (1 - f_SCF(t)) epsilon(t) |A(t)|^2 dt
+                           + sum_t f_SCF(t) epsilon(t) |A(t)|^2 DeltaOmega_t.
 ```
+
+The first term is integrated continuously on the model's own grid; the second
+uses the migration map's Square-Dalitz binning, with `epsilon(t)|A(t)|^2`
+evaluated once at each bin's centre (`rho(t)` above) — the same midpoint
+approximation `smeared_bin_density` uses to build `rho_SCF`. This equals
+`integral epsilon(t) |A(t)|^2 dt` only when `epsilon(t)|A(t)|^2` is
+approximately constant across each SCF bin (or in the limit of arbitrarily
+fine `bins_mprime`/`bins_thetaprime`); for a coarse map with a strongly
+varying intensity, expect a normalization offset at the level of the SCF
+bins' own discretization error. Earlier code took an unvetoed shortcut that
+computed the single continuous integral instead, which is the exact
+`integral epsilon(t)|A(t)|^2 dt` but is *not* what `rho_reco(r)` (the
+`numerator()` used by `pdf()`/`logpdf()`) actually integrates to once
+`f_SCF > 0` on any bin — supplying an always-accepting veto (a no-op
+physically) used to change the computed normalization for exactly this
+reason. `normalization()` no longer special-cases `veto is None`.
 
 ## Reconstructed-space vetoes
 

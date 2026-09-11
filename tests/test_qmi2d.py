@@ -155,6 +155,28 @@ def test_qmi2d_parameters_are_collected_and_change_decay_intensity():
     assert bool(jnp.any(jnp.abs(nominal - shifted) > 1e-10))
 
 
+def test_qmi2d_folded_rejects_mismatched_axis_edges():
+    # `_coordinates()` looks up min(s12,s13) on the s12 grid and max(s12,s13)
+    # on the s13 grid; if the two grids have different ranges this silently
+    # clamps whichever physical value happens to be smaller/larger to the
+    # narrower grid's boundary instead of raising, distorting the field near
+    # and beyond that boundary. folded=True is documented (docs/lineshapes.md)
+    # to always be used with identical s12_edges/s13_edges, so a mismatch is
+    # rejected outright rather than silently misinterpreted.
+    try:
+        QMI2D(
+            s12_edges=(0.0, 1.0, 2.0),
+            s13_edges=(0.0, 1.0, 2.0, 3.0),
+            magnitudes=((1.0, 2.0), (3.0, 4.0)),
+            phases=((0.0, 0.2), (0.4, 0.6)),
+            folded=True,
+        )
+    except ValueError as exc:
+        assert "folded" in str(exc)
+    else:
+        raise AssertionError("QMI2D accepted folded=True with mismatched axis edges")
+
+
 def test_qmi2d_rejects_unknown_interpolation_mode():
     try:
         QMI2D(

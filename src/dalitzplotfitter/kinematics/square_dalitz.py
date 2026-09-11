@@ -149,6 +149,18 @@ def invariants_to_square_dalitz(
     return mprime, thetaprime
 
 
+def fold_thetaprime(thetaprime):
+    """Map ``theta'`` onto ``[0, 0.5]`` via the identical-particle exchange.
+
+    For a Square-Dalitz pair built from two identical daughters, exchanging
+    them leaves ``m'`` unchanged and maps ``theta' -> 1 - theta'``
+    (``square_dalitz_to_invariants``'s docstring). Folding restricts to the
+    physically distinct half ``theta' <= 0.5``.
+    """
+    tp = jnp.asarray(thetaprime)
+    return jnp.minimum(tp, 1.0 - tp)
+
+
 def _quadrature_axis(n: int, quadrature: str) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Return nodes in [0,1] and weights compatible with package mean integration."""
     if quadrature == "midpoint":
@@ -218,6 +230,7 @@ class SquareDalitzGrid:
 
 __all__ = [
     "SquareDalitzGrid",
+    "fold_thetaprime",
     "invariants_to_square_dalitz",
     "square_dalitz_jacobian",
     "square_dalitz_to_invariants",

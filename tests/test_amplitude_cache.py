@@ -367,3 +367,61 @@ def test_multiple_dynamic_rows_match_full_matrix_recomputation():
     assert cache.normalization_components[0].shape == (48,)
     assert jnp.allclose(matrix, expected, rtol=1e-12, atol=1e-12)
     assert jnp.allclose(optimized, expected, rtol=1e-12, atol=1e-12)
+
+
+def test_check_parameters_accepts_the_list_the_cache_was_prepared_with():
+    f1 = CountingAmplitude([1.0 + 0.0j, 2.0 + 0.0j])
+    f2 = CountingAmplitude([0.2 + 0.1j, 0.4 - 0.2j])
+    c1 = _coefficient("a", 1.0, 0.0, fixed=True)
+    c2 = _coefficient("b", 0.5, 0.3)
+    dynamic = Parameter.dynamics("a.scale", 1.0, backend_name="scale", owner="a")
+    parameters = (*c1.parameters, *c2.parameters, dynamic)
+    components = (AmplitudeComponent("a", f1, c1), AmplitudeComponent("b", f2, c2))
+    cache = PreparedAmplitudeCache.prepare(
+        components,
+        data={"x": jnp.arange(8.0)},
+        normalization_data={"x": jnp.arange(32.0)},
+        normalization_weights=jnp.ones(32),
+        parameters=parameters,
+    )
+    cache.check_parameters(parameters)
+
+
+def test_check_parameters_rejects_a_dynamics_parameter_fixed_at_a_different_status():
+    # Reproduces the hazard documented in docs/performance.md: a component's
+    # DYNAMICS parameter that was fixed when the cache was prepared (so it was
+    # folded into the compact evaluation path and never re-read from
+    # `fit_values`) must not later be handed to `Minimizer` as floating —
+    # `evaluate`/`amplitude`/`normalization` would keep ignoring it, giving an
+    # exact-zero gradient along that direction instead of raising.
+    f1 = CountingAmplitude([1.0 + 0.0j, 2.0 + 0.0j])
+    c1 = _coefficient("a", 1.0, 0.0, fixed=True)
+    component = AmplitudeComponent("a", f1, c1)
+    fixed_dynamic = Parameter.dynamics(
+        "a.scale", 1.0, backend_name="scale", owner="a", fixed=True
+    )
+    cache = PreparedAmplitudeCache.prepare(
+        (component,),
+        data={"x": jnp.arange(8.0)},
+        normalization_data={"x": jnp.arange(32.0)},
+        normalization_weights=jnp.ones(32),
+        parameters=(*c1.parameters, fixed_dynamic),
+    )
+    assert cache.is_compact
+
+    floating_dynamic = Parameter.dynamics(
+        "a.scale", 1.0, backend_name="scale", owner="a", fixed=False
+    )
+    mismatched_parameters = (*c1.parameters, floating_dynamic)
+
+    # The hazard itself: the cache silently ignores the "floating" value.
+    intensity_low, _ = cache.evaluate({"a.scale": 1.0})
+    intensity_high, _ = cache.evaluate({"a.scale": 5.0})
+    assert jnp.allclose(intensity_low, intensity_high)
+
+    try:
+        cache.check_parameters(mismatched_parameters)
+    except ValueError as error:
+        assert "a" in str(error)
+    else:
+        raise AssertionError("check_parameters should reject the mismatched list")

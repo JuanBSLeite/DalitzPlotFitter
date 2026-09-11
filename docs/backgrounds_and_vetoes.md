@@ -151,6 +151,82 @@ vetoed_background = VetoedDensity(background, veto)
 
 The background normalization must then be computed from `vetoed_background` on the normalization sample. This ensures signal, every background category, generated toys and fitted data all use exactly the same accepted Dalitz region.
 
+## Folded Dalitz Plot / Square Dalitz Plot efficiency and background
+
+For a channel with two identical final-state particles, `DecayChannel`
+already detects them automatically from PDG IDs
+(`DecayChannel("D+", ("pi-", "pi+", "pi+")).final_state_ids`), and `Resonance`
+amplitudes are symmetrized under their exchange without any extra
+configuration (`docs/dynamics_structure.md`). An unbinned fit therefore
+already gives correct results on the full Dalitz Plot / Square Dalitz Plot
+with no folding required — folding is a statistics tool, not a correctness
+requirement, and is most useful when *building* an efficiency or background
+map from a limited MC/data sample: since the physics is symmetric under
+exchanging the identical pair, folding effectively doubles the events per bin.
+
+`HistogramEfficiency`/`HistogramBackground` (`efficiency`/`background`
+modules, plain Dalitz invariants) and `SquareDalitzHistogramEfficiency`/
+`SquareDalitzHistogramBackground` (`square_histograms.py`, `(m', theta')`)
+all accept `folded=True`:
+
+```python
+from dalitzplotfitter.efficiency import HistogramEfficiency
+
+# s12/s13 are the two invariants exchanged when swapping the identical pair
+# (e.g. the two pi+ in D+ -> pi- pi+ pi+); x_edges must equal y_edges.
+efficiency = HistogramEfficiency(
+    x_edges=edges, y_edges=edges, values=values,
+    x_variable="s12", y_variable="s13", folded=True,
+)
+```
+
+```python
+from dalitzplotfitter import SquareDalitzHistogramEfficiency
+
+# pair must be the identical daughters themselves, so m' is already symmetric
+# and only theta' -> 1 - theta' needs folding; thetaprime_edges <= 0.5.
+efficiency = SquareDalitzHistogramEfficiency(
+    mprime_edges=mp_edges, thetaprime_edges=tp_edges, values=values,
+    mother_mass=mother_mass, masses=masses, pair=(1, 2), folded=True,
+)
+```
+
+Both raise at construction if the edges can't represent a folded domain
+(`x_edges != y_edges`, or `thetaprime_edges` extending past 0.5) — the same
+protection `QMI2D(folded=True)` already applies to its own `s12_edges`/
+`s13_edges`. `square_dalitz_efficiency_from_root`/`square_dalitz_background_from_root`
+and their plain-Dalitz equivalents accept `folded=True` too, for loading an
+already-folded histogram straight from a ROOT file. `plot_dalitz`/
+`plot_square_dalitz` also accept `folded=True`, to visualize data or
+projections on the same folded half. These fold at evaluation time using
+`fold_thetaprime` (or plain `min`/`max` for the plain-Dalitz case) — a
+`folded=True` efficiency/background composes directly with `FitSession` and
+`CPFitSession` exactly like any other efficiency/background model.
+
+`FitSession.plot_projection`/`CPFitSession.plot_projection` accept
+`folded=True` with `partner_variable=` (the other exchange-symmetric
+invariant, e.g. `variable="s12"`, `partner_variable="s13"`) and
+`fold_side="low"|"high"` (default `"low"`): this is the same `min`/`max` fold
+used everywhere else in this feature, applied event by event to project onto
+`s_low = min(variable, partner_variable)` or `s_high = max(...)` instead of
+`variable` alone. `s_low` and `s_high` are genuinely different distributions
+(not two views of the same one), so call `plot_projection` twice — once per
+`fold_side` — to get the usual pair of folded spectra; each call still plots
+exactly one histogram, holding the same number of events as the unfolded
+case. `CPFitSession.plot_projection` always renders one panel per charge
+(`axes`, when given, must be a `[B+ axis, B- axis]` pair, never a single
+axis); folding is applied *within* each charge's own panel, B+ and B- are
+never mixed with each other.
+
+This feature deliberately does **not** fold the normalization/generation
+grid itself (`SquareDalitzGrid`, `DecayModel`'s automatic normalization
+selection): halving that grid and doubling the result would only be correct
+if the *coherent amplitude* is itself exactly symmetric under the exchange,
+and nothing here can safely verify that for an arbitrary user model. The
+existing automatic `Resonance` symmetrization (or a `QMI2D(folded=True)`
+component) already makes the full-domain integral correct without needing
+to fold it.
+
 ## Relation to SCF
 
 Vetoes act on the accepted reconstructed phase space. When SCF is enabled, the SCF migration map should be constructed for the same accepted region, or vetoed reconstructed bins should carry zero accepted probability. The SCF machinery and veto maps are intentionally kept as separate objects so detector migration and analysis selection remain independently testable.

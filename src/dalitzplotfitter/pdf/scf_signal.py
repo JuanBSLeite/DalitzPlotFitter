@@ -49,11 +49,11 @@ class SCFSignalPDF:
         return self.efficiency(true_data) * self.intensity(true_data, parameters)
 
     def normalization(self, parameters: Parameters) -> Array:
-        if self.veto is None:
-            return self.integrator.integrate(
-                lambda data: self.efficiency(data) * self.intensity(data, parameters)
-            )
-
+        # Always split CR (continuous) + SCF (migration-binned): a single
+        # continuous integral of efficiency*intensity, used only when veto was
+        # None, silently assumed the coarse SCF-bin midpoint mass equals the
+        # true continuous SCF integral, which is false for non-constant
+        # intensity and made a trivially-accepting veto change the result.
         def cr_integrand(data):
             base = self.efficiency(data) * self.intensity(data, parameters)
             f_scf = self.scf_map.scf_fraction_at(data["s12"], data["s13"], data["s23"])

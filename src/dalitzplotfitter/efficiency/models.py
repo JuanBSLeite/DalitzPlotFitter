@@ -46,13 +46,23 @@ class FunctionalEfficiency:
 
 @dataclass(frozen=True)
 class HistogramEfficiency:
-    """Piecewise-constant 2D relative efficiency histogram."""
+    """Piecewise-constant 2D relative efficiency histogram.
+
+    ``folded=True`` folds the ``(x_variable, y_variable)`` pair onto
+    ``x <= y`` (via ``min``/``max``) before the bin lookup, for two
+    exchange-symmetric Dalitz invariants (e.g. ``x_variable="s12"``,
+    ``y_variable="s13"`` for a channel with two identical daughters sharing
+    the third, bachelor particle). ``x_edges`` and ``y_edges`` must then be
+    identical, since folding always looks the smaller value up on the ``x``
+    grid and the larger on the ``y`` grid.
+    """
 
     x_edges: Array
     y_edges: Array
     values: Array
     x_variable: str = "s12"
     y_variable: str = "s13"
+    folded: bool = False
 
     def __post_init__(self) -> None:
         x_edges = _validate_histogram_edges(self.x_edges, "x")
@@ -65,6 +75,14 @@ class HistogramEfficiency:
             raise ValueError("Histogram efficiency values must be finite")
         if bool(jnp.any(values < 0.0)):
             raise ValueError("Histogram efficiency values must be non-negative")
+        if self.folded and not bool(jnp.array_equal(x_edges, y_edges)):
+            raise ValueError(
+                "folded HistogramEfficiency requires x_edges and y_edges to be "
+                "identical: folding looks min(x,y) up on the x grid and "
+                "max(x,y) up on the y grid, so mismatched ranges would "
+                "silently clamp whichever value is smaller/larger to the "
+                "narrower grid's boundary"
+            )
         object.__setattr__(self, "x_edges", x_edges)
         object.__setattr__(self, "y_edges", y_edges)
         object.__setattr__(self, "values", values)
@@ -72,6 +90,8 @@ class HistogramEfficiency:
     def __call__(self, data: dict[str, Array]) -> Array:
         x = jnp.asarray(data[self.x_variable])
         y = jnp.asarray(data[self.y_variable])
+        if self.folded:
+            x, y = jnp.minimum(x, y), jnp.maximum(x, y)
         ix = jnp.searchsorted(self.x_edges, x, side="right") - 1
         iy = jnp.searchsorted(self.y_edges, y, side="right") - 1
         in_range = (

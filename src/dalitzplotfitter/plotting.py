@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 import numpy as np
 
-from dalitzplotfitter.kinematics import invariants_to_square_dalitz
+from dalitzplotfitter.kinematics import fold_thetaprime, invariants_to_square_dalitz
 
 
 def _values(sample, variable: str):
@@ -109,24 +109,40 @@ def plot_dalitz(
     title: str | None = None,
     colorbar: bool = True,
     log_scale: bool = False,
+    folded: bool = False,
 ):
     """Plot a standard two-dimensional Dalitz histogram in one call.
 
     Set ``log_scale=True`` to display the bin contents with logarithmic color
-    normalization.
+    normalization. Set ``folded=True`` when ``x`` and ``y`` are two
+    exchange-symmetric invariants (two identical daughters sharing the third,
+    bachelor particle) to plot only the physically distinct half
+    ``x <= y``, folding each point via ``min``/``max`` first.
     """
+
+    x_values = _values(sample, x)
+    y_values = _values(sample, y)
+    if folded:
+        x_values, y_values = (
+            np.minimum(x_values, y_values),
+            np.maximum(x_values, y_values),
+        )
 
     if ax is None:
         _, ax = plt.subplots(figsize=(7, 5.5))
     hist = ax.hist2d(
-        _values(sample, x),
-        _values(sample, y),
+        x_values,
+        y_values,
         bins=bins,
         weights=weights,
         norm=LogNorm() if log_scale else None,
     )
-    ax.set_xlabel(rf"${x}$ [GeV$^2$]")
-    ax.set_ylabel(rf"${y}$ [GeV$^2$]")
+    if folded:
+        ax.set_xlabel(rf"min(${x}$, ${y}$) [GeV$^2$]")
+        ax.set_ylabel(rf"max(${x}$, ${y}$) [GeV$^2$]")
+    else:
+        ax.set_xlabel(rf"${x}$ [GeV$^2$]")
+        ax.set_ylabel(rf"${y}$ [GeV$^2$]")
     if title is not None:
         ax.set_title(title)
     if colorbar:
@@ -146,11 +162,15 @@ def plot_square_dalitz(
     title: str | None = None,
     colorbar: bool = True,
     log_scale: bool = False,
+    folded: bool = False,
 ):
     """Plot a Square-Dalitz histogram from ordinary invariant coordinates.
 
     Set ``log_scale=True`` to display the bin contents with logarithmic color
-    normalization.
+    normalization. Set ``folded=True`` when ``pair`` is built from two
+    identical daughters to fold ``theta'`` onto ``[0, 0.5]``
+    (:func:`~dalitzplotfitter.kinematics.fold_thetaprime`), plotting only the
+    physically distinct half.
     """
 
     data = sample.as_dict() if hasattr(sample, "as_dict") else sample
@@ -160,6 +180,8 @@ def plot_square_dalitz(
         masses=masses,
         pair=pair,
     )
+    if folded:
+        tp = fold_thetaprime(tp)
     if ax is None:
         _, ax = plt.subplots(figsize=(7, 5.5))
     hist = ax.hist2d(
@@ -167,11 +189,11 @@ def plot_square_dalitz(
         np.asarray(tp),
         bins=bins,
         weights=weights,
-        range=((0, 1), (0, 1)),
+        range=((0, 1), (0, 0.5) if folded else (0, 1)),
         norm=LogNorm() if log_scale else None,
     )
     ax.set_xlabel(r"$m'$")
-    ax.set_ylabel(r"$\theta'$")
+    ax.set_ylabel(r"$\theta'$ (folded)" if folded else r"$\theta'$")
     if title is not None:
         ax.set_title(title)
     if colorbar:

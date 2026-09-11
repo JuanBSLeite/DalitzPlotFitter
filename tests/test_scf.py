@@ -181,6 +181,78 @@ def test_scf_veto_is_applied_in_reconstructed_space_and_renormalized():
     assert pdf.normalization({}) > 0.0
 
 
+def test_scf_normalization_is_unaffected_by_an_always_accepting_veto():
+    # An always-True veto is a physical no-op and must not change the
+    # computed normalization. `normalization()` used to special-case
+    # `veto is None` with a plain continuous integral that implicitly assumed
+    # the coarse SCF-bin midpoint mass exactly equals the true continuous SCF
+    # integral -- false for a non-constant intensity -- so adding a trivial
+    # veto silently shifted the result through the (correct) split formula.
+    grid = SquareDalitzGrid(
+        mother_mass=1.86966,
+        masses=(0.13957, 0.13957, 0.13957),
+        resolution=30,
+        pair=(0, 1),
+    ).sample()
+    bins = 5
+    n_bins = bins * bins
+    migration = jnp.eye(n_bins) * 0.6 + jnp.roll(jnp.eye(n_bins), 1, axis=1) * 0.4
+    scf = SquareDalitzSCFMap(
+        migration=migration,
+        scf_fraction=jnp.linspace(0.1, 0.4, n_bins),
+        mother_mass=1.86966,
+        masses=(0.13957, 0.13957, 0.13957),
+        bins_mprime=bins,
+        bins_thetaprime=bins,
+        pair=(0, 1),
+    )
+
+    def intensity(data, parameters):
+        return 1.0 + 0.5 * data["s12"] - 0.2 * data["s13"]
+
+    integrator = GridIntegrator(grid)
+    pdf_no_veto = SCFSignalPDF(intensity=intensity, integrator=integrator, scf_map=scf)
+    always_accept = FunctionalVeto(lambda data: jnp.ones_like(data["s12"], dtype=bool))
+    pdf_trivial_veto = SCFSignalPDF(
+        intensity=intensity, integrator=integrator, scf_map=scf, veto=always_accept
+    )
+
+    n0 = pdf_no_veto.normalization({})
+    n1 = pdf_trivial_veto.normalization({})
+    assert jnp.allclose(n0, n1, rtol=1e-12, atol=1e-12)
+
+
+def test_scf_pdf_integrates_to_one_without_a_veto():
+    grid = SquareDalitzGrid(
+        mother_mass=1.86966,
+        masses=(0.13957, 0.13957, 0.13957),
+        resolution=40,
+        pair=(0, 1),
+    ).sample()
+    bins = 10
+    n_bins = bins * bins
+    migration = jnp.eye(n_bins) * 0.7 + jnp.roll(jnp.eye(n_bins), 1, axis=1) * 0.3
+    scf = SquareDalitzSCFMap(
+        migration=migration,
+        scf_fraction=jnp.linspace(0.1, 0.4, n_bins),
+        mother_mass=1.86966,
+        masses=(0.13957, 0.13957, 0.13957),
+        bins_mprime=bins,
+        bins_thetaprime=bins,
+        pair=(0, 1),
+    )
+
+    def intensity(data, parameters):
+        return 1.0 + 0.5 * data["s12"] - 0.2 * data["s13"]
+
+    pdf = SCFSignalPDF(
+        intensity=intensity, integrator=GridIntegrator(grid), scf_map=scf
+    )
+    data = grid.as_dict()
+    total = jnp.mean(jnp.asarray(grid.weights) * pdf(data, {}))
+    assert abs(float(total) - 1.0) < 5e-3
+
+
 def test_scf_map_rejects_non_normalized_true_rows():
     bad = jnp.eye(4).at[0, 0].set(0.7)
     try:
