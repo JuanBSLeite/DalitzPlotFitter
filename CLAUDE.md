@@ -37,7 +37,7 @@ python benchmarks/benchmark_cache_stages.py --events 100000 --normalization-reso
 python benchmarks/benchmark_qmi_memory_speed.py
 ```
 
-CI (`.github/workflows/tests.yml`) runs `pytest tests` on Python 3.10 and 3.12, plus a notebook
+CI (`.github/workflows/tests.yml`) runs `pytest tests` on Python 3.12, 3.13, and 3.14, plus a notebook
 sanity check that parses every `notebooks/*.ipynb` with `nbformat` and compiles (not executes)
 each code cell. `full-validation.yml` and `toy-benchmark.yml` are `workflow_dispatch`-only and
 not run on every push. There is no GPU CI; `docs/gpu_ubuntu_24_04.md` documents the manual
