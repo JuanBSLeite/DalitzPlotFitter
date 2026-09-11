@@ -37,21 +37,27 @@ from .dynamics import (
     GooFitLegacyAngular,
     GounarisSakurai,
     KMatrix,
-    Pole,
     PipiKKRescattering,
+    Pole,
     RelativisticBreitWigner,
-    RhoOmegaMixing,
     Rescattering2,
     ResonanceAmplitude,
     ResonanceContext,
-    ZemachP,
-    ZemachPstar,
+    RhoOmegaMixing,
+    SigmaPole,
     Zemach_P,
     Zemach_Pstar,
-    SigmaPole,
+    ZemachP,
+    ZemachPstar,
     physical_bin_mask,
 )
 from .fit import Minimizer, MultiStartResult, Parameter, ParameterKind
+from .goodness_of_fit import (
+    BinnedChi2Result,
+    PointToPointResult,
+    chi2_from_histograms,
+    point_to_point_dissimilarity,
+)
 from .integration import DalitzGaussLegendreGrid
 from .io import (
     histogram_background_from_root,
@@ -81,7 +87,13 @@ from .kinematics import (
 )
 from .likelihood import CPJointNLL, MultiBackgroundNLL, YieldAsymmetry
 from .pdf import SCFSignalPDF, SignalPDF
-from .plotting import binned_data, plot_binned_data, plot_dalitz, plot_square_dalitz
+from .plotting import (
+    binned_data,
+    plot_binned_data,
+    plot_dalitz,
+    plot_pulls,
+    plot_square_dalitz,
+)
 from .resolution import (
     ConvolvedPDF1D,
     GaussianResolution1D,
@@ -106,14 +118,14 @@ from .veto import (
     CompositeVeto,
     FunctionalVeto,
     MassWindowVeto,
-    VetoMap,
     VetoedDensity,
+    VetoMap,
     vetoed_signal_pdf,
 )
 from .workflow import BackgroundSpec, FitSession
 
 __all__ = [
-    "AmplitudeComponent", "BackgroundCategory", "BackgroundSpec", "BreitWigner1D", "CPBackgroundCategory",
+    "AmplitudeComponent", "BackgroundCategory", "BackgroundSpec", "BinnedChi2Result", "BreitWigner1D", "CPBackgroundCategory",
     "CPBackgroundSpec", "CPFitSession", "CPJointNLL", "CPToyBackground", "BaBarFlatte", "CPRealImag",
     "CoherentAmplitudeModel", "CompositeVeto", "ConstrainedNLL", "ConstantAmplitude",
     "ConvolvedPDF1D", "CovariantAngular", "CovariantKinematics", "DalitzAmplitude",
@@ -121,18 +133,18 @@ __all__ = [
     "Flatte", "FunctionalVeto", "Gaussian1D", "GaussianConstraint", "GaussianResolution1D",
     "GooFitLegacyAngular", "GounarisSakurai", "Histogram1D", "KMatrix", "LASS", "LineshapeIntensity1D", "DalitzGaussLegendreGrid",
     "MassWindowVeto", "Minimizer", "MultiBackgroundNLL", "MultiStartResult", "NonResonant",
-    "Parameter", "ParameterKind", "PhaseSpaceMC", "PhaseSpaceSample", "Pole",
+    "Parameter", "ParameterKind", "PhaseSpaceMC", "PhaseSpaceSample", "Pole", "PointToPointResult",
     "PreparedAmplitudeCache", "PreparedInverseToyGenerator", "PipiKKRescattering", "QMI", "QMI2D", "RealImag", "RelativisticBreitWigner", "RhoOmegaMixing", "Rescattering2", "SigmaPole",
     "Resonance", "ResonanceAmplitude", "ResonanceContext", "SCFSignalPDF", "SignalPDF",
     "SparseMigration", "SquareDalitzGrid", "SquareDalitzHistogramBackground", "SquareDalitzHistogramEfficiency",
     "SquareDalitzSCFMap", "ToyBackground", "VetoMap", "VetoedDensity", "ZemachP", "ZemachPstar",
     "Zemach_P", "Zemach_Pstar",
-    "boost_to_rest_frame", "binned_data", "covariant_kinematics",
+    "boost_to_rest_frame", "binned_data", "chi2_from_histograms", "covariant_kinematics",
     "covariant_kinematics_from_invariants", "dalitz_s13_limits", "enable_x64",
     "fold_thetaprime",
     "generate_cp_toy", "generate_signal_toy", "generate_toy", "histogram_background_from_root",
     "histogram_efficiency_from_root", "invariants_to_square_dalitz", "physical_bin_mask",
-    "plot_binned_data", "plot_dalitz", "plot_square_dalitz", "prepare_inverse_toy_generator",
+    "plot_binned_data", "plot_dalitz", "plot_pulls", "plot_square_dalitz", "point_to_point_dissimilarity", "prepare_inverse_toy_generator",
     "read_phase_space_sample", "read_root_histogram2d", "read_root_tree",
     "square_dalitz_background_from_root", "square_dalitz_efficiency_from_root", "square_dalitz_jacobian",
     "square_dalitz_to_invariants", "vetoed_signal_pdf", "weighted_resample",

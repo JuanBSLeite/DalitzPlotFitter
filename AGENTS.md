@@ -186,7 +186,7 @@ Each subsystem also has one focused doc under `docs/` (`fitting.md`, `lineshapes
 `mc_integration.md`, `backgrounds_and_vetoes.md`, `cp_coefficients.md`, `scf.md`,
 `square_dalitz.md`, `toy_generation.md`, `discriminants_and_constraints.md`,
 `convolution_resolution.md`, `dynamics_structure.md`, `performance.md`, `root_io.md`,
-`user_friendly_api.md`). `docs/reviews/` contains dated, adversarial numeric-reproduction review
+`user_friendly_api.md`, `goodness_of_fit.md`). `docs/reviews/` contains dated, adversarial numeric-reproduction review
 write-ups (concrete inputs, reproduced numbers, "Applied fixes" sections, or — as in
 `paper_isobar_conventions.md` — an explicit "Remaining discrepancy" section when a reproduction
 is not yet closed) — this repo's working style is to reproduce a suspected discrepancy

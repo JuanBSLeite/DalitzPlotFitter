@@ -245,6 +245,19 @@ Docs: `docs/discriminants_and_constraints.md`. Notebooks: `10_b2kpipi_discrimina
 
 Docs: `docs/convolution_resolution.md`. Notebooks: `20_pdf_convolution_resolution.ipynb`.
 
+## Goodness of fit
+
+| Name | Kind | What it does |
+|---|---|---|
+| `BinnedChi2Result` | class | Binned Pearson chi2 result: chi2, dof bounds, p-value bounds, per-bin pulls and edges. |
+| `chi2_from_histograms` | function | Low-level binned Pearson chi2 test between observed/expected count arrays (1D or 2D). |
+| `PointToPointResult` | class | Point-to-point dissimilarity (PPD) result: statistic, permutation-test p-value. |
+| `point_to_point_dissimilarity` | function | Low-level unbinned PPD test (Williams, arXiv:1006.3019) between plain coordinate/density arrays. |
+
+`FitSession`/`CPFitSession` expose these as `goodness_of_fit_projection`/`goodness_of_fit_chi2`/
+`point_to_point_dissimilarity` methods, reusing the same reweighted-MC-projection machinery as
+`plot_projection`. Docs: `docs/goodness_of_fit.md`.
+
 ## Plotting
 
 | Name | Kind | What it does |
@@ -253,8 +266,9 @@ Docs: `docs/convolution_resolution.md`. Notebooks: `20_pdf_convolution_resolutio
 | `plot_square_dalitz` | function | Plot a 2D Square-Dalitz histogram from ordinary invariant coordinates. |
 | `plot_binned_data` | function | Plot 1D data as black points with statistical error bars. |
 | `binned_data` | function | Return bin centers, counts, uncertainties and edges without plotting (for custom figures). |
+| `plot_pulls` | function | Plot per-bin pulls from a `BinnedChi2Result` (1D bar plot or 2D diverging heatmap). |
 
-Docs: `docs/user_friendly_api.md` ("Automatic projections", "Plot helpers").
+Docs: `docs/user_friendly_api.md` ("Automatic projections", "Plot helpers"), `docs/goodness_of_fit.md`.
 
 ## High-level sessions
 
@@ -262,8 +276,8 @@ Composition layers over everything above; see `docs/user_friendly_api.md` "Desig
 
 | Name | Kind | What it does |
 |---|---|---|
-| `FitSession` | class | Compose PDF + likelihood + backgrounds + constraints + minimizer for one sample in a few lines; `fit()`, `report()`, `plot_projection()`, `.from_root(...)`. |
-| `CPFitSession` | class | Same composition for simultaneous B+/B- fits over `CPJointNLL`; shared `Parameter`s collected once. |
+| `FitSession` | class | Compose PDF + likelihood + backgrounds + constraints + minimizer for one sample in a few lines; `fit()`, `report()`, `plot_projection()`, `goodness_of_fit_projection()`/`goodness_of_fit_chi2()`/`point_to_point_dissimilarity()`, `.from_root(...)`. |
+| `CPFitSession` | class | Same composition for simultaneous B+/B- fits over `CPJointNLL`; shared `Parameter`s collected once; same goodness-of-fit methods, per charge. |
 
 Docs: `docs/user_friendly_api.md`. Notebooks: `16_user_friendly_quickstart.ipynb`, `17_b2kpipi_cp_user_friendly.ipynb`.
 

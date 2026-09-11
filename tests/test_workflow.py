@@ -1,7 +1,12 @@
+from types import SimpleNamespace
+
 import jax.numpy as jnp
+import numpy as np
+import pytest
 
 from dalitzplotfitter import (
     BackgroundSpec,
+    BinnedChi2Result,
     DecayChannel,
     DecayModel,
     FitSession,
@@ -9,7 +14,9 @@ from dalitzplotfitter import (
     NonResonant,
     Parameter,
     PhaseSpaceSample,
+    PointToPointResult,
     RealImag,
+    generate_signal_toy,
 )
 
 
@@ -170,3 +177,69 @@ def test_sessions_with_efficiency_or_veto_do_not_reuse_unweighted_template():
         assert jnp.allclose(session._cached_signal_density({'NR.x': 1.0}),
                             session.signal_pdf(data.as_dict(), {'NR.x': 1.0}),
                             atol=1e-12)
+
+
+def _toy_session(n_events=400, seed=7):
+    model = _model()
+    data = generate_signal_toy(model, n_events, seed=seed)
+    return FitSession(model, data)
+
+
+def _toy_result(values=None):
+    return SimpleNamespace(values=values or {"NR.x": 1.0}, fixed=None)
+
+
+def test_goodness_of_fit_projection_default_free_parameters_counts_only_floating():
+    session = _toy_session()
+    result = _toy_result()
+    gof = session.goodness_of_fit_projection(result, "s13", bins=10)
+    assert isinstance(gof, BinnedChi2Result)
+    assert gof.n_free_parameters == 1  # only "NR.x" is a floating Parameter
+    assert gof.n_bins <= 10
+    assert np.isfinite(gof.chi2)
+    assert 0.0 <= gof.p_value_min <= gof.p_value_max <= 1.0
+    assert np.isclose(np.sum(gof.observed), session.data.size)
+
+
+def test_goodness_of_fit_projection_honors_explicit_free_parameters():
+    session = _toy_session()
+    gof = session.goodness_of_fit_projection(
+        _toy_result(), "s13", bins=10, n_free_parameters=0
+    )
+    assert gof.n_free_parameters == 0
+    assert gof.dof_max - gof.dof_min == 0
+
+
+def test_goodness_of_fit_chi2_2d_matches_total_events():
+    session = _toy_session()
+    gof = session.goodness_of_fit_chi2(_toy_result(), bins=6)
+    assert isinstance(gof, BinnedChi2Result)
+    assert gof.pulls.ndim == 2
+    assert np.isclose(np.sum(gof.observed), session.data.size)
+
+
+def test_goodness_of_fit_chi2_square_dalitz_requires_mother_mass_and_masses():
+    session = _toy_session()
+
+    with pytest.raises(ValueError, match="square_dalitz"):
+        session.goodness_of_fit_chi2(_toy_result(), square_dalitz=True)
+
+
+def test_point_to_point_dissimilarity_returns_bounded_p_value():
+    session = _toy_session(n_events=300)
+    result = session.point_to_point_dissimilarity(
+        _toy_result(), mc_size=600, n_permutations=40
+    )
+    assert isinstance(result, PointToPointResult)
+    assert result.n_data == session.data.size
+    assert result.n_reference == 600
+    assert 0.0 <= result.p_value <= 1.0
+
+
+def test_point_to_point_dissimilarity_respects_max_total_events_guard():
+    session = _toy_session(n_events=300)
+
+    with pytest.raises(ValueError, match="max_total_events"):
+        session.point_to_point_dissimilarity(
+            _toy_result(), mc_size=10_000, max_total_events=1_000
+        )

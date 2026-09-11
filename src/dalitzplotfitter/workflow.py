@@ -11,6 +11,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import Mapping, Sequence
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -19,12 +20,25 @@ from dalitzplotfitter.background import BackgroundCategory
 from dalitzplotfitter.constraints import ConstrainedNLL
 from dalitzplotfitter.efficiency import UnityEfficiency
 from dalitzplotfitter.fit import Minimizer, Parameter
+from dalitzplotfitter.goodness_of_fit import (
+    BinnedChi2Result,
+    PointToPointResult,
+    chi2_from_histograms,
+)
+from dalitzplotfitter.goodness_of_fit import (
+    point_to_point_dissimilarity as _point_to_point_dissimilarity,
+)
 from dalitzplotfitter.integration import GridIntegrator
 from dalitzplotfitter.io import read_phase_space_sample
-from dalitzplotfitter.kinematics import PhaseSpaceSample
+from dalitzplotfitter.kinematics import (
+    PhaseSpaceSample,
+    fold_thetaprime,
+    invariants_to_square_dalitz,
+)
 from dalitzplotfitter.likelihood import MultiBackgroundNLL, UnbinnedNLL
 from dalitzplotfitter.pdf import SignalPDF
 from dalitzplotfitter.plotting import plot_binned_data
+from dalitzplotfitter.sampling import weighted_resample
 
 
 @dataclass(frozen=True)
@@ -732,6 +746,270 @@ class FitSession:
         ax.set_xlabel(label + (" [GeV$^2$]" if unit else ""))
         ax.legend()
         return ax
+
+    def _total_density(
+        self,
+        sample: PhaseSpaceSample,
+        values: Mapping[str, float],
+    ) -> jnp.ndarray:
+        """Fraction-weighted, unit-integral total fitted density f0(x).
+
+        Mirrors the extended/signal_fraction/plain branch structure of
+        ``_projection_components`` but returns *fractions* summing to one
+        (rather than absolute event-count scales), so the result integrates
+        to one over phase space -- what the point-to-point dissimilarity
+        test's ``f0`` requires. Deliberately does not reuse
+        ``_scaled_projection_weights``: that helper's normalization only
+        cancels correctly when ``sample`` is itself a representative
+        phase-space integration sample, which arbitrary points (data, or a
+        resampled replica) are not.
+        """
+
+        if self.extended:
+            signal_yield = float(_resolve(self.signal_yield, values))
+            bg_yields = [
+                float(_resolve(category.yield_, values))
+                for category in self.background_categories
+            ]
+            total = signal_yield + sum(bg_yields)
+            if total <= 0:
+                raise ValueError("extended total yield must be positive")
+            signal_fraction = signal_yield / total
+            bg_fractions = [yield_ / total for yield_ in bg_yields]
+        elif self.background_categories:
+            signal_fraction = float(_resolve(self.signal_fraction, values))
+            weights = np.asarray(
+                self.base_objective.background_weights(values), dtype=float
+            )
+            bg_fractions = list((1.0 - signal_fraction) * weights)
+        else:
+            signal_fraction = 1.0
+            bg_fractions = []
+
+        density = signal_fraction * self._projection_signal_density(sample, values)
+        for source, category, fraction in zip(
+            self.backgrounds, self.background_categories, bg_fractions
+        ):
+            if fraction == 0:
+                continue
+            if not isinstance(source, BackgroundSpec):
+                raise ValueError(
+                    "goodness-of-fit density requires a BackgroundSpec with an "
+                    "evaluable shape"
+                )
+            raw = jnp.asarray(source.shape(sample.as_dict()))
+            if self.veto is not None and source.apply_veto:
+                raw = raw * jnp.asarray(self.veto(sample.as_dict()))
+            density = density + fraction * (raw / category.normalization)
+        return density
+
+    def _default_free_parameters(self) -> int:
+        return sum(1 for parameter in self.parameters if not parameter.fixed)
+
+    def goodness_of_fit_projection(
+        self,
+        result,
+        variable: str = "s13",
+        *,
+        bins: int = 60,
+        range: tuple[float, float] | None = None,
+        folded: bool = False,
+        partner_variable: str | None = None,
+        fold_side: str = "low",
+        projection_size: int = 100_000,
+        projection_seed: int = 20260901,
+        n_free_parameters: int | None = None,
+    ) -> BinnedChi2Result:
+        """Binned Pearson chi2 goodness-of-fit test on a 1D projection.
+
+        Uses the same reweighted-MC-projection histogram as
+        ``plot_projection`` for the expected counts, and the same
+        ``folded``/``partner_variable``/``fold_side`` convention. See
+        :class:`~dalitzplotfitter.goodness_of_fit.BinnedChi2Result` for the
+        degrees-of-freedom caveat that applies here: the free parameters came
+        from an unbinned fit, not from minimizing this chi2.
+        """
+
+        if folded and partner_variable is None:
+            raise ValueError("folded=True requires partner_variable")
+        if fold_side not in ("low", "high"):
+            raise ValueError("fold_side must be 'low' or 'high'")
+        fold_fn = np.minimum if fold_side == "low" else np.maximum
+
+        def _folded_values(sample):
+            values_ = np.asarray(getattr(sample, variable))
+            if not folded:
+                return values_
+            partner_values = np.asarray(getattr(sample, partner_variable))
+            return fold_fn(values_, partner_values)
+
+        values = self.result_values(result)
+        data_values = _folded_values(self.data)
+        hist_range = range or (float(np.min(data_values)), float(np.max(data_values)))
+        edges = np.linspace(hist_range[0], hist_range[1], bins + 1)
+        observed, _ = np.histogram(data_values, bins=edges)
+
+        sample = self._get_projection_sample(projection_size, projection_seed)
+        expected = np.zeros(bins, dtype=float)
+        for _, component_sample, weights in self._projection_components(values, sample):
+            component_values = _folded_values(component_sample)
+            counts, _ = np.histogram(
+                component_values, bins=edges, weights=np.asarray(weights)
+            )
+            expected += counts
+
+        if n_free_parameters is None:
+            n_free_parameters = self._default_free_parameters()
+        return chi2_from_histograms(
+            observed, expected, n_free_parameters=n_free_parameters, edges=(edges,)
+        )
+
+    def goodness_of_fit_chi2(
+        self,
+        result,
+        x: str = "s13",
+        y: str = "s23",
+        *,
+        bins: int = 25,
+        range: tuple[tuple[float, float], tuple[float, float]] | None = None,
+        folded: bool = False,
+        square_dalitz: bool = False,
+        mother_mass: float | None = None,
+        masses: tuple[float, float, float] | None = None,
+        pair: tuple[int, int] = (0, 1),
+        projection_size: int = 200_000,
+        projection_seed: int = 20260901,
+        n_free_parameters: int | None = None,
+    ) -> BinnedChi2Result:
+        """Binned Pearson chi2 goodness-of-fit test on the Dalitz plane.
+
+        Uses the same reweighted-MC-projection histogram trick as
+        ``plot_projection``, in 2D, via ``np.histogram2d``.
+        ``square_dalitz=True`` bins in Laura++ ``(m', theta')`` coordinates
+        instead of raw ``(x, y)`` invariants (``mother_mass``/``masses`` are
+        then required, matching ``plot_square_dalitz``); ``folded=True``
+        folds onto the physically distinct half for two identical daughters,
+        matching ``plot_dalitz(folded=True)``/``plot_square_dalitz(folded=True)``.
+        """
+
+        if square_dalitz and (mother_mass is None or masses is None):
+            raise ValueError("square_dalitz=True requires mother_mass and masses")
+
+        def _coordinates(sample):
+            if square_dalitz:
+                data = sample.as_dict()
+                mp, tp = invariants_to_square_dalitz(
+                    data["s12"], data["s13"], data["s23"],
+                    mother_mass=mother_mass,
+                    masses=masses,
+                    pair=pair,
+                )
+                if folded:
+                    tp = fold_thetaprime(tp)
+                return np.asarray(mp), np.asarray(tp)
+            x_values = np.asarray(getattr(sample, x))
+            y_values = np.asarray(getattr(sample, y))
+            if folded:
+                x_values, y_values = (
+                    np.minimum(x_values, y_values),
+                    np.maximum(x_values, y_values),
+                )
+            return x_values, y_values
+
+        if range is not None:
+            hist_range = range
+        elif square_dalitz:
+            hist_range = ((0.0, 1.0), (0.0, 0.5) if folded else (0.0, 1.0))
+        else:
+            hist_range = None
+
+        values = self.result_values(result)
+        data_x, data_y = _coordinates(self.data)
+        observed, x_edges, y_edges = np.histogram2d(
+            data_x, data_y, bins=bins, range=hist_range
+        )
+
+        sample = self._get_projection_sample(projection_size, projection_seed)
+        expected = np.zeros_like(observed)
+        for _, component_sample, weights in self._projection_components(values, sample):
+            component_x, component_y = _coordinates(component_sample)
+            counts, _, _ = np.histogram2d(
+                component_x,
+                component_y,
+                bins=[x_edges, y_edges],
+                weights=np.asarray(weights),
+            )
+            expected += counts
+
+        if n_free_parameters is None:
+            n_free_parameters = self._default_free_parameters()
+        return chi2_from_histograms(
+            observed,
+            expected,
+            n_free_parameters=n_free_parameters,
+            edges=(x_edges, y_edges),
+        )
+
+    def point_to_point_dissimilarity(
+        self,
+        result,
+        *,
+        x: str = "s13",
+        y: str = "s23",
+        sigma_bar: float = 0.01,
+        mc_size: int | None = None,
+        n_permutations: int = 200,
+        seed: int = 20260901,
+        max_total_events: int = 5_000,
+        candidate_pool_size: int = 200_000,
+    ) -> PointToPointResult:
+        """Unbinned point-to-point dissimilarity goodness-of-fit test.
+
+        Draws an unweighted Monte Carlo replica from the fitted total density
+        (signal plus backgrounds, fraction-weighted) via
+        :func:`~dalitzplotfitter.sampling.weighted_resample`, matching the
+        requirement (Williams, arXiv:1006.3019) that the reference sample be
+        drawn from the fitted density ``f0``. See
+        :class:`~dalitzplotfitter.goodness_of_fit.PointToPointResult` and
+        ``docs/goodness_of_fit.md`` for the ``sigma_bar``/``max_total_events``
+        tuning notes; this test is O(n^2) in the pooled data+replica size, so
+        keep ``mc_size`` modest.
+        """
+
+        values = self.result_values(result)
+        n_data = self.data.size
+        if mc_size is None:
+            mc_size = min(10 * n_data, max(max_total_events - n_data, 1))
+
+        candidate = self._get_projection_sample(candidate_pool_size, seed)
+        candidate_density = self._total_density(candidate, values)
+        target_weights = candidate.weights * candidate_density
+        replica = weighted_resample(
+            jax.random.PRNGKey(seed), candidate, target_weights, mc_size
+        )
+
+        data_density = self._total_density(self.data, values)
+        replica_density = self._total_density(replica, values)
+        phase_space_area = float(jnp.mean(self.model.normalization_sample.weights))
+
+        data_xy = np.column_stack(
+            [np.asarray(getattr(self.data, x)), np.asarray(getattr(self.data, y))]
+        )
+        replica_xy = np.column_stack(
+            [np.asarray(getattr(replica, x)), np.asarray(getattr(replica, y))]
+        )
+
+        return _point_to_point_dissimilarity(
+            data_xy,
+            replica_xy,
+            np.asarray(data_density),
+            np.asarray(replica_density),
+            sigma_bar=sigma_bar,
+            phase_space_area=phase_space_area,
+            n_permutations=n_permutations,
+            seed=seed + 1,
+            max_total_events=max_total_events,
+        )
 
 
 __all__ = ["BackgroundSpec", "FitSession"]

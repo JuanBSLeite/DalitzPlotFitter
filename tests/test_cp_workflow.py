@@ -1,6 +1,11 @@
+from types import SimpleNamespace
+
 import jax.numpy as jnp
+import numpy as np
+import pytest
 
 from dalitzplotfitter import (
+    BinnedChi2Result,
     CPBackgroundSpec,
     CPFitSession,
     CPRealImag,
@@ -9,6 +14,8 @@ from dalitzplotfitter import (
     NonResonant,
     Parameter,
     PhaseSpaceSample,
+    PointToPointResult,
+    generate_signal_toy,
 )
 
 
@@ -93,3 +100,58 @@ def test_cp_projection_weights_preserve_joint_event_count():
     minus_components = session._projection_components(values, "minus")
     total = jnp.sum(jnp.asarray(plus_components[0][2])) + jnp.sum(jnp.asarray(minus_components[0][2]))
     assert jnp.allclose(total, session.plus_data.size + session.minus_data.size, rtol=1e-6)
+
+
+def _toy_cp_session(n_events=300, seed=11):
+    plus, minus = _models()
+    plus_data = generate_signal_toy(plus, n_events, seed=seed)
+    minus_data = generate_signal_toy(minus, n_events, seed=seed + 1)
+    return CPFitSession(plus, minus, plus_data, minus_data)
+
+
+def _toy_cp_result():
+    return SimpleNamespace(values={"NR.x": 1.0, "NR.dx": 0.1}, fixed=None)
+
+
+def test_cp_goodness_of_fit_projection_returns_both_charges_by_default():
+    session = _toy_cp_session()
+    result = _toy_cp_result()
+    gof = session.goodness_of_fit_projection(result, "s13", bins=8)
+    assert set(gof) == {"plus", "minus"}
+    for charge_result in gof.values():
+        assert isinstance(charge_result, BinnedChi2Result)
+        assert charge_result.n_free_parameters == 2
+        assert np.isfinite(charge_result.chi2)
+
+
+def test_cp_goodness_of_fit_projection_single_charge():
+    session = _toy_cp_session()
+    result = _toy_cp_result()
+    plus_only = session.goodness_of_fit_projection(result, "s13", bins=8, charge="plus")
+    assert isinstance(plus_only, BinnedChi2Result)
+    with pytest.raises(ValueError, match="charge"):
+        session.goodness_of_fit_projection(result, "s13", charge="neutral")
+
+
+def test_cp_goodness_of_fit_chi2_2d_returns_both_charges():
+    session = _toy_cp_session()
+    result = _toy_cp_result()
+    gof = session.goodness_of_fit_chi2(result, bins=5)
+    assert set(gof) == {"plus", "minus"}
+    assert gof["plus"].pulls.ndim == 2
+
+
+def test_cp_point_to_point_dissimilarity_requires_charge():
+    session = _toy_cp_session(n_events=200)
+    result = _toy_cp_result()
+    with pytest.raises(TypeError):
+        session.point_to_point_dissimilarity(result)
+    with pytest.raises(ValueError, match="charge"):
+        session.point_to_point_dissimilarity(result, charge="neutral")
+
+    plus_result = session.point_to_point_dissimilarity(
+        result, charge="plus", mc_size=400, n_permutations=30
+    )
+    assert isinstance(plus_result, PointToPointResult)
+    assert plus_result.n_data == session.plus_data.size
+    assert 0.0 <= plus_result.p_value <= 1.0

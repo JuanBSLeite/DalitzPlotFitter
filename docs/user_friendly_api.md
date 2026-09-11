@@ -264,9 +264,12 @@ Useful future additions are:
 2. direct `model.fit(data, ...)` shorthand backed by `FitSession`;
 3. automatic ROOT file/tree/histogram inspection;
 4. optional pandas-compatible result export;
-5. component-level amplitude projection overlays and standardized pull/residual panels.
+5. component-level amplitude projection overlays.
 
 These should continue to sit on top of the validated numerical core rather than duplicate it.
+Standardized pull/residual panels are covered by `FitSession`/`CPFitSession`'s
+`goodness_of_fit_projection`/`goodness_of_fit_chi2` plus `plot_pulls`; see
+`docs/goodness_of_fit.md`.
 
 ### Projection support and CP yields
 
