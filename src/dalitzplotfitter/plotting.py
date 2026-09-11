@@ -201,6 +201,24 @@ def plot_square_dalitz(
     return ax
 
 
+def _draw_pulls_1d(ax, edges, pulls):
+    """Draw a 1D pull bar plot with a shaded +-2 band onto an existing axes.
+
+    Shared by :func:`plot_pulls` and the ``show_pulls=True`` panel of
+    ``FitSession``/``CPFitSession.plot_projection``, so both draw pulls
+    identically.
+    """
+
+    edges = np.asarray(edges)
+    pulls = np.asarray(pulls)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    ax.axhspan(-2, 2, color="grey", alpha=0.2, zorder=0)
+    ax.bar(centers, pulls, width=np.diff(edges), color="steelblue", zorder=1)
+    ax.axhline(0.0, color="black", linewidth=1.0)
+    ax.set_ylabel(r"pull $(o-e)/\sqrt{e}$")
+    return ax
+
+
 def plot_pulls(result, *, ax=None):
     """Plot per-bin pulls from a ``BinnedChi2Result``.
 
@@ -221,11 +239,7 @@ def plot_pulls(result, *, ax=None):
     pulls = np.asarray(result.pulls)
     if pulls.ndim == 1:
         (edges,) = result.edges
-        centers = 0.5 * (edges[:-1] + edges[1:])
-        ax.axhspan(-2, 2, color="grey", alpha=0.2, zorder=0)
-        ax.bar(centers, pulls, width=np.diff(edges), color="steelblue", zorder=1)
-        ax.axhline(0.0, color="black", linewidth=1.0)
-        ax.set_ylabel(r"pull $(o-e)/\sqrt{e}$")
+        _draw_pulls_1d(ax, edges, pulls)
     elif pulls.ndim == 2:
         x_edges, y_edges = result.edges
         limit = float(np.nanmax(np.abs(pulls))) or 1.0

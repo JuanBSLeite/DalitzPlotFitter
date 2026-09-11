@@ -1,5 +1,8 @@
 from types import SimpleNamespace
 
+import matplotlib
+
+matplotlib.use("Agg")
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -243,3 +246,34 @@ def test_point_to_point_dissimilarity_respects_max_total_events_guard():
         session.point_to_point_dissimilarity(
             _toy_result(), mc_size=10_000, max_total_events=1_000
         )
+
+
+def test_plot_projection_show_pulls_returns_shared_axes_pair():
+    import matplotlib.pyplot as plt
+
+    session = _toy_session()
+    ax, ax_pulls = session.plot_projection(
+        _toy_result(), "s13", bins=10, show_pulls=True
+    )
+    assert ax.get_shared_x_axes().joined(ax, ax_pulls)
+    assert ax_pulls.get_xlabel()
+    plt.close("all")
+
+
+def test_plot_projection_default_return_unchanged_by_show_pulls_option():
+    import matplotlib.pyplot as plt
+
+    session = _toy_session()
+    ax = session.plot_projection(_toy_result(), "s13", bins=10)
+    assert not isinstance(ax, tuple)
+    plt.close("all")
+
+
+def test_plot_projection_show_pulls_rejects_explicit_ax():
+    import matplotlib.pyplot as plt
+
+    session = _toy_session()
+    _, ax = plt.subplots()
+    with pytest.raises(ValueError, match="show_pulls=True"):
+        session.plot_projection(_toy_result(), "s13", show_pulls=True, ax=ax)
+    plt.close("all")

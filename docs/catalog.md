@@ -10,7 +10,7 @@ not covered here (private helpers, submodule-only exports like the `Simultaneous
 `WeightedUnbinned` NLL variants in `dalitzplotfitter.likelihood`), read the module directly —
 this catalog only covers the public top-level surface.
 
-For a guided introduction, start with the [seven-part notebook course](../notebooks/TUTORIALS.md).
+For a guided introduction, start with the [nine-part notebook course](../notebooks/tutorials/TUTORIALS.md).
 The lessons explain the main fitting workflow and link to specialized examples below.
 
 ## Model construction
@@ -256,7 +256,9 @@ Docs: `docs/convolution_resolution.md`. Notebooks: `20_pdf_convolution_resolutio
 
 `FitSession`/`CPFitSession` expose these as `goodness_of_fit_projection`/`goodness_of_fit_chi2`/
 `point_to_point_dissimilarity` methods, reusing the same reweighted-MC-projection machinery as
-`plot_projection`. Docs: `docs/goodness_of_fit.md`.
+`plot_projection`. Docs: `docs/goodness_of_fit.md`. Notebooks:
+`notebooks/tutorials/tutorial_09_goodness_of_fit.ipynb`,
+`notebooks/data_analyses/12_b2kkk_cpvfit.ipynb` (real per-charge GOF section).
 
 ## Plotting
 

@@ -1,5 +1,8 @@
 from types import SimpleNamespace
 
+import matplotlib
+
+matplotlib.use("Agg")
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -155,3 +158,35 @@ def test_cp_point_to_point_dissimilarity_requires_charge():
     assert isinstance(plus_result, PointToPointResult)
     assert plus_result.n_data == session.plus_data.size
     assert 0.0 <= plus_result.p_value <= 1.0
+
+
+def test_cp_plot_projection_show_pulls_returns_2x2_grid():
+    import matplotlib.pyplot as plt
+
+    session = _toy_cp_session()
+    grid = session.plot_projection(
+        _toy_cp_result(), "s13", bins=10, show_pulls=True
+    )
+    assert grid.shape == (2, 2)
+    assert grid[0, 0].get_shared_x_axes().joined(grid[0, 0], grid[1, 0])
+    assert grid[0, 1].get_shared_x_axes().joined(grid[0, 1], grid[1, 1])
+    plt.close("all")
+
+
+def test_cp_plot_projection_default_return_unchanged_by_show_pulls_option():
+    import matplotlib.pyplot as plt
+
+    session = _toy_cp_session()
+    axes = session.plot_projection(_toy_cp_result(), "s13", bins=10)
+    assert axes.shape == (2,)
+    plt.close("all")
+
+
+def test_cp_plot_projection_show_pulls_rejects_explicit_axes():
+    import matplotlib.pyplot as plt
+
+    session = _toy_cp_session()
+    _, axes = plt.subplots(1, 2)
+    with pytest.raises(ValueError, match="show_pulls=True"):
+        session.plot_projection(_toy_cp_result(), "s13", show_pulls=True, axes=axes)
+    plt.close("all")

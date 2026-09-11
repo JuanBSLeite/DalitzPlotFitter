@@ -37,7 +37,7 @@ from dalitzplotfitter.kinematics import (
 )
 from dalitzplotfitter.likelihood import MultiBackgroundNLL, UnbinnedNLL
 from dalitzplotfitter.pdf import SignalPDF
-from dalitzplotfitter.plotting import plot_binned_data
+from dalitzplotfitter.plotting import _draw_pulls_1d, plot_binned_data
 from dalitzplotfitter.sampling import weighted_resample
 
 
@@ -658,6 +658,7 @@ class FitSession:
         bins: int = 60,
         range: tuple[float, float] | None = None,
         show_components: bool = True,
+        show_pulls: bool = False,
         log_scale: bool = False,
         projection_size: int = 100_000,
         projection_seed: int = 20260901,
@@ -685,6 +686,14 @@ class FitSession:
         the folded efficiency/background models, applied here to a 1D
         projection; call it twice, with ``fold_side="low"`` and ``"high"``, to
         get the usual pair of folded spectra.
+
+        ``show_pulls=True`` adds a ``(observed-expected)/sqrt(expected)`` panel
+        below the histogram, sharing the x axis (same convention as
+        :func:`~dalitzplotfitter.plotting.plot_pulls`, and the same binning
+        used here for the histogram itself -- not the independent binning
+        ``goodness_of_fit_projection`` would choose for an actual GOF test).
+        It builds its own two-row figure and therefore requires ``ax=None``;
+        the return value is then ``(ax, ax_pulls)`` instead of a single ``ax``.
         """
 
         import matplotlib.pyplot as plt
@@ -693,6 +702,10 @@ class FitSession:
             raise ValueError("folded=True requires partner_variable")
         if fold_side not in ("low", "high"):
             raise ValueError("fold_side must be 'low' or 'high'")
+        if show_pulls and ax is not None:
+            raise ValueError(
+                "show_pulls=True builds its own figure layout; pass ax=None"
+            )
         fold_fn = np.minimum if fold_side == "low" else np.maximum
 
         def _folded_values(sample):
@@ -709,10 +722,18 @@ class FitSession:
             float(np.max(data_values)),
         )
         edges = np.linspace(hist_range[0], hist_range[1], bins + 1)
+        ax_pulls = None
         if ax is None:
-            _, ax = plt.subplots(figsize=(7, 5))
+            if show_pulls:
+                _, (ax, ax_pulls) = plt.subplots(
+                    2, 1, figsize=(7, 6.5), sharex=True,
+                    gridspec_kw={"height_ratios": (3, 1)},
+                    constrained_layout=True,
+                )
+            else:
+                _, ax = plt.subplots(figsize=(7, 5))
         unit = r"GeV$^2$" if variable in ("s12", "s13", "s23") else ""
-        plot_binned_data(
+        _, observed, _, _ = plot_binned_data(
             data_values,
             bins=edges,
             ax=ax,
@@ -743,9 +764,21 @@ class FitSession:
         label = (
             rf"$s_{{\mathrm{{{fold_side}}}}}$" if folded else rf"${variable}$"
         )
-        ax.set_xlabel(label + (" [GeV$^2$]" if unit else ""))
+        axis_label = label + (" [GeV$^2$]" if unit else "")
         ax.legend()
-        return ax
+
+        if not show_pulls:
+            ax.set_xlabel(axis_label)
+            return ax
+
+        occupied = total > 0
+        pulls = np.full(bins, np.nan)
+        pulls[occupied] = (
+            (observed[occupied] - total[occupied]) / np.sqrt(total[occupied])
+        )
+        _draw_pulls_1d(ax_pulls, edges, pulls)
+        ax_pulls.set_xlabel(axis_label)
+        return ax, ax_pulls
 
     def _total_density(
         self,

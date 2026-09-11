@@ -12,6 +12,11 @@ GOF in isobar fits:
   `CPFitSession.point_to_point_dissimilarity`), an unbinned test with a permutation-test
   p-value.
 
+Notebooks: `notebooks/tutorials/tutorial_09_goodness_of_fit.ipynb` (self-contained walkthrough of
+both methods, including a deliberately wrong model to show what a rejected fit looks like) and
+`notebooks/data_analyses/12_b2kkk_cpvfit.ipynb` (a real per-charge GOF section on top of an actual
+CP fit, including the reduced-data-session pattern PPD needs on a large real sample).
+
 The low-level, physics-agnostic building blocks (`chi2_from_histograms`,
 `point_to_point_dissimilarity`, `BinnedChi2Result`, `PointToPointResult`) live in
 `dalitzplotfitter.goodness_of_fit` and consume plain arrays, not a session — use them directly
@@ -118,6 +123,13 @@ guard, lower `mc_size`, subsample `data` before constructing the session, or rai
 `max_total_events` deliberately if you have the memory to spare — a few thousand pooled events
 already means multiple dense float64 arrays of order 200 MB each.
 
+For a session already built on a large real dataset (hundreds of thousands of candidates,
+routine for a real analysis), rebuilding it from scratch just to subsample is unnecessary: since
+`FitSession`/`CPFitSession` are frozen dataclasses, `dataclasses.replace(session, data=subsample)`
+(or `plus_data=`/`minus_data=` for `CPFitSession`) gives a second session sharing the same model,
+backgrounds, efficiency and veto, with only the data swapped — exactly the pattern
+`notebooks/data_analyses/12_b2kkk_cpvfit.ipynb` uses for its PPD section.
+
 ## CP fits
 
 `CPFitSession` mirrors all three entry points per charge:
@@ -146,3 +158,23 @@ plot_pulls(session.goodness_of_fit_chi2(result, bins=25))
 `plot_pulls` dispatches on `result.pulls.ndim`: a 1D result draws a bar plot of
 `(observed-expected)/sqrt(expected)` against bin center with a shaded +-2 band; a 2D result draws
 a diverging `pcolormesh` centered at zero over `result.edges`.
+
+## Pulls directly on `plot_projection`
+
+For the common case of eyeballing one 1D projection together with its pulls, pass
+`show_pulls=True` to `plot_projection` itself instead of a separate `goodness_of_fit_projection`
+call:
+
+```python
+ax, ax_pulls = session.plot_projection(result, "s13", bins=40, show_pulls=True)
+axes_grid = cp_session.plot_projection(result, "s13", bins=40, show_pulls=True)  # (2, 2)
+```
+
+This adds a `(observed-expected)/sqrt(expected)` panel below the histogram, sharing its x axis
+(drawn with the same helper `plot_pulls` uses for the 1D case), using `plot_projection`'s own
+histogram binning -- not the independent binning `goodness_of_fit_projection` would choose for an
+actual GOF test; it is a quick visual diagnostic, not a substitute for the chi2/PPD numbers
+above. Because it needs two rows (one column per charge for `CPFitSession`), it builds its own
+figure and therefore requires `ax=None`/`axes=None`; the return value is then `(ax, ax_pulls)` for
+`FitSession` or the full 2x2 axes grid (row 0 histograms, row 1 pulls) for `CPFitSession`, instead
+of the usual single `ax`/length-2 `axes`.

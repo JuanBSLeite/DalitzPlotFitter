@@ -36,9 +36,10 @@ separate approximations. No remote data, GPU, or ROOT installation is required.
 | 6 | [A joint fit to both charges](tutorial_06_joint_cp_fit.ipynb) | CPRealImag, generate_cp_toy, CPFitSession |
 | 7 | [From ROOT events to a reproducible fit](tutorial_07_root_io.ipynb) | write_phase_space_sample, read_phase_space_sample, FitSession.from_root |
 | 8 | [Como usar o QMI](tutorial_08_qmi.ipynb) | QMI polar/cartesiano, interpolação, uso em um modelo de Dalitz |
-| 9 | [QMI S-wave isobar closure](tutorial_08_qmi_isobar_closure.ipynb) | QMI, magnitude/phase recovery, closure diagnostics |
-| 10 | [QMI Cartesian isobar closure](tutorial_09_qmi_cartesian_isobar_closure.ipynb) | Cartesian QMI nodes, coefficient recovery, fit validation |
-| 11 | [QMI2D Dalitz-field closure](tutorial_10_qmi2d_dalitz_closure.ipynb) | QMI2D, physical-bin masks, phase maps, two-dimensional closure |
+| 9 | [Goodness of fit](tutorial_09_goodness_of_fit.ipynb) | BinnedChi2Result, chi2 1D/2D, point_to_point_dissimilarity, plot_pulls |
+| 10 | [QMI S-wave isobar closure](tutorial_08_qmi_isobar_closure.ipynb) | QMI, magnitude/phase recovery, closure diagnostics |
+| 11 | [QMI Cartesian isobar closure](tutorial_09_qmi_cartesian_isobar_closure.ipynb) | Cartesian QMI nodes, coefficient recovery, fit validation |
+| 12 | [QMI2D Dalitz-field closure](tutorial_10_qmi2d_dalitz_closure.ipynb) | QMI2D, physical-bin masks, phase maps, two-dimensional closure |
 
 ## Continue with focused examples
 

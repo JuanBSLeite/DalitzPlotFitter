@@ -36,8 +36,10 @@ python benchmarks/benchmark_qmi_memory_speed.py
 ```
 
 CI (`.github/workflows/tests.yml`) runs `pytest tests` on Python 3.12, 3.13, and 3.14, plus a notebook
-sanity check that parses every `notebooks/*.ipynb` with `nbformat` and compiles (not executes)
-each code cell. `full-validation.yml` and `toy-benchmark.yml` are `workflow_dispatch`-only and
+sanity check that parses every notebook under `notebooks/tutorials/`, `notebooks/data_analyses/`
+and `notebooks/benchmark/` with `nbformat` and compiles (not executes) each code cell —
+`notebooks/Tests/` and `notebooks/genfit/` are scratch/informal work and not covered.
+`full-validation.yml` and `toy-benchmark.yml` are `workflow_dispatch`-only and
 not run on every push. There is no GPU CI; `docs/gpu_ubuntu_24_04.md` documents the manual
 WSL2/CUDA reference environment used for GPU validation.
 
@@ -186,7 +188,8 @@ Each subsystem also has one focused doc under `docs/` (`fitting.md`, `lineshapes
 `user_friendly_api.md`, `goodness_of_fit.md`). `docs/reviews/` contains dated, adversarial numeric-reproduction review
 write-ups (concrete inputs, reproduced numbers, "Applied fixes" sections) — this repo's working
 style is to reproduce a suspected discrepancy numerically before changing formulas, and to update
-the corresponding `docs/*.md` in the same change that fixes the code. `notebooks/` (root) are the
-tutorial/example set referenced by the docs and README; `notebooks/data_analyses/` holds
+the corresponding `docs/*.md` in the same change that fixes the code. `notebooks/tutorials/` are
+the tutorial/example set referenced by the docs and README (`notebooks/tutorials/TUTORIALS.md`);
+`notebooks/data_analyses/` holds
 in-progress physics analyses (not tutorials) that consume the same public API and can break
 silently when a lineshape or normalization convention changes underneath them.

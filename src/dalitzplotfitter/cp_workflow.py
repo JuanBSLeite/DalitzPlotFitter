@@ -30,7 +30,7 @@ from dalitzplotfitter.kinematics import (
 )
 from dalitzplotfitter.likelihood import CPJointNLL
 from dalitzplotfitter.likelihood.cp import _signal_yield_pair
-from dalitzplotfitter.plotting import plot_binned_data
+from dalitzplotfitter.plotting import _draw_pulls_1d, plot_binned_data
 from dalitzplotfitter.sampling import weighted_resample
 
 
@@ -351,7 +351,7 @@ class CPFitSession:
         )
         return plus if charge == "plus" else minus
 
-    def plot_projection(self, result, variable="s13", *, bins=60, range=None, show_components=True, log_scale=False, projection_size=250_000, projection_seed=20260901, folded=False, partner_variable=None, fold_side="low", axes=None):
+    def plot_projection(self, result, variable="s13", *, bins=60, range=None, show_components=True, show_pulls=False, log_scale=False, projection_size=250_000, projection_seed=20260901, folded=False, partner_variable=None, fold_side="low", axes=None):
         """Plot smooth B+/B- projections without histogramming quadrature nodes.
 
         Two weighted phase-space MC samples are used only for rendering. Their
@@ -364,12 +364,22 @@ class CPFitSession:
         subplot* (B+ and B- are never mixed); see
         ``FitSession.plot_projection`` for the identical-daughter convention
         this exploits.
+
+        ``show_pulls=True`` adds a ``(observed-expected)/sqrt(expected)`` panel
+        below each charge's histogram, sharing that column's x axis. It builds
+        its own 2x2 figure and therefore requires ``axes=None``; the return
+        value is then the full 2x2 axes grid (row 0 the histograms, row 1 the
+        pulls) instead of the usual length-2 list.
         """
         import matplotlib.pyplot as plt
         if folded and partner_variable is None:
             raise ValueError("folded=True requires partner_variable")
         if fold_side not in ("low", "high"):
             raise ValueError("fold_side must be 'low' or 'high'")
+        if show_pulls and axes is not None:
+            raise ValueError(
+                "show_pulls=True builds its own figure layout; pass axes=None"
+            )
         fold_fn = np.minimum if fold_side == "low" else np.maximum
 
         def _folded_values(sample):
@@ -387,18 +397,35 @@ class CPFitSession:
             raise ValueError("provide range when both charge datasets are empty")
         hist_range = range if range is not None else (float(np.min(combined)), float(np.max(combined)))
         edges = np.histogram_bin_edges(combined, bins=bins, range=hist_range)
+        grid = None
+        pulls_axes = (None, None)
         if axes is None:
-            _, axes = plt.subplots(1,2,figsize=(12,4.8),constrained_layout=True)
+            if show_pulls:
+                _, grid = plt.subplots(
+                    2, 2, figsize=(12, 7.2), sharex="col",
+                    gridspec_kw={"height_ratios": (3, 1)},
+                    constrained_layout=True,
+                )
+                axes, pulls_axes = grid[0], grid[1]
+            else:
+                _, axes = plt.subplots(1, 2, figsize=(12, 4.8), constrained_layout=True)
         plus_sample = self.plus_model.generate_phase_space(projection_size, seed=projection_seed)
         minus_sample = self.minus_model.generate_phase_space(projection_size, seed=projection_seed + 1)
         plus_components, minus_components = self._projection_components_pair(values, plus_sample, minus_sample)
         label = (
             rf"$s_{{\mathrm{{{fold_side}}}}}$" if folded else rf"${variable}$"
         )
-        for ax, charge, data, components in zip(axes, ("plus","minus"), (self.plus_data,self.minus_data), (plus_components,minus_components)):
+        for ax, ax_pulls, charge, data, components in zip(
+            axes, pulls_axes, ("plus", "minus"),
+            (self.plus_data, self.minus_data), (plus_components, minus_components),
+        ):
             dv = _folded_values(data)
             unit = r"GeV$^2$" if variable in ("s12","s13","s23") else ""
-            plot_binned_data(dv, bins=edges, ax=ax, label=f"B{'+' if charge=='plus' else '-'} data", unit=unit, log_scale=log_scale)
+            _, observed, _, _ = plot_binned_data(
+                dv, bins=edges, ax=ax,
+                label=f"B{'+' if charge=='plus' else '-'} data",
+                unit=unit, log_scale=log_scale,
+            )
             total = np.zeros(bins)
             for name, sample, weights in components:
                 cv = _folded_values(sample)
@@ -407,9 +434,19 @@ class CPFitSession:
                 if show_components:
                     ax.stairs(counts, edges, label=name)
             ax.stairs(total, edges, label="total fit", linewidth=2.0)
-            ax.set_xlabel(label + (" [GeV$^2$]" if unit else ""))
+            axis_label = label + (" [GeV$^2$]" if unit else "")
             ax.legend()
-        return axes
+            if ax_pulls is None:
+                ax.set_xlabel(axis_label)
+                continue
+            occupied = total > 0
+            pulls = np.full(bins, np.nan)
+            pulls[occupied] = (
+                (observed[occupied] - total[occupied]) / np.sqrt(total[occupied])
+            )
+            _draw_pulls_1d(ax_pulls, edges, pulls)
+            ax_pulls.set_xlabel(axis_label)
+        return grid if show_pulls else axes
 
     def _projection_signal_density(self, sample, values, charge):
         """Normalized per-charge signal density at arbitrary points.
