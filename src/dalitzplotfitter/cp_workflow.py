@@ -16,6 +16,7 @@ from dalitzplotfitter.fit import Minimizer, Parameter
 from dalitzplotfitter.io import read_phase_space_sample
 from dalitzplotfitter.kinematics import PhaseSpaceSample
 from dalitzplotfitter.likelihood import CPJointNLL
+from dalitzplotfitter.likelihood.cp import _signal_yield_pair
 from dalitzplotfitter.plotting import plot_binned_data
 
 
@@ -271,19 +272,29 @@ class CPFitSession:
         from dalitzplotfitter.workflow import _scaled_projection_weights
 
         total_events = self.plus_data.size + self.minus_data.size
-        signal_scale = float(_resolve(self.signal_yield, values)) if self.extended else (total_events * float(_resolve(self.signal_fraction, values)) if self.background_categories else float(total_events))
+        standalone = False
+        if self.extended:
+            plus_yield, minus_yield, standalone = _signal_yield_pair(self.signal_yield, values)
+            plus_yield, minus_yield = float(plus_yield), float(minus_yield)
+        elif self.background_categories:
+            plus_yield = minus_yield = total_events * float(_resolve(self.signal_fraction, values))
+        else:
+            plus_yield = minus_yield = float(total_events)
         plus_w, minus_w = np.zeros(plus_sample.size), np.zeros(minus_sample.size)
-        if signal_scale:
+        if plus_yield or minus_yield:
             _, integral_plus = self.plus_cache.evaluate(values)
             _, integral_minus = self.minus_cache.evaluate(values)
             norm = float(integral_plus + integral_minus)
             if not np.isfinite(norm) or norm <= 0:
                 raise ValueError("signal projection requires positive finite joint integral")
-            for sample, model, efficiency, veto, integral, target in (
-                (plus_sample, self.plus_model, self.plus_efficiency, self.plus_veto, integral_plus, plus_w),
-                (minus_sample, self.minus_model, self.minus_efficiency, self.minus_veto, integral_minus, minus_w),
+            for sample, model, efficiency, veto, integral, signal_yield_value, target in (
+                (plus_sample, self.plus_model, self.plus_efficiency, self.plus_veto, integral_plus, plus_yield, plus_w),
+                (minus_sample, self.minus_model, self.minus_efficiency, self.minus_veto, integral_minus, minus_yield, minus_w),
             ):
-                scale = signal_scale * float(integral) / norm
+                # A YieldAsymmetry's n_plus/n_minus are already literal per-charge
+                # counts (see YieldAsymmetry docstring); a shared yield still
+                # needs the amplitude-driven integral_q/norm split.
+                scale = signal_yield_value if standalone else signal_yield_value * float(integral) / norm
                 if scale:
                     density = _acceptance(efficiency, veto, sample.as_dict()) * model.intensity(sample.as_dict(), values)
                     target[:] = _scaled_projection_weights(sample, density, scale)

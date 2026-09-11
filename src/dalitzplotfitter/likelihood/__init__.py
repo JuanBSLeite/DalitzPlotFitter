@@ -1,6 +1,6 @@
 """Likelihood estimators."""
 
-from .cp import CPJointNLL
+from .cp import CPJointNLL, YieldAsymmetry
 from .mixture import MultiBackgroundNLL
 from .simultaneous import SimultaneousNLL
 from .unbinned import UnbinnedNLL
@@ -12,4 +12,5 @@ __all__ = [
     "SimultaneousNLL",
     "UnbinnedNLL",
     "WeightedUnbinnedNLL",
+    "YieldAsymmetry",
 ]

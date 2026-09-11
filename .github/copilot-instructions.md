@@ -137,6 +137,15 @@ asymmetry. `cp_workflow.py`'s projection helpers must preserve this — e.g.
 since adaptive/external MC samples for B+ and B- need not have equal size. See
 `docs/cp_coefficients.md`.
 
+`YieldAsymmetry` (`likelihood/cp.py`) is the one sanctioned escape hatch from this joint split: it
+replaces a plain `signal_yield` with independently fittable literal `N_plus`/`N_minus`, split from
+a total `N_s` via a raw counting yield asymmetry, for when the observable of interest is a
+production/detection-driven counting asymmetry rather than the amplitude-driven one. Each charge's
+isobar PDF is then normalized on its own (`|A_plus|^2 / I_plus`, `|A_minus|^2 / I_minus`) instead
+of jointly, so `N_plus`/`N_minus` are already standalone per-charge counts — `cp_workflow.py`'s
+signal-projection scaling must *not* reweight them by `integral_q / norm` the way a shared
+`signal_yield` is. See `docs/cp_coefficients.md`, "Yield-asymmetry parameterization".
+
 ### Folded Dalitz Plot / Square Dalitz Plot for identical particles
 
 For a channel with two identical final-state particles, `DecayChannel` detects them

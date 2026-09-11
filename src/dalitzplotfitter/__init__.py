@@ -79,7 +79,7 @@ from .kinematics import (
     square_dalitz_jacobian,
     square_dalitz_to_invariants,
 )
-from .likelihood import CPJointNLL, MultiBackgroundNLL
+from .likelihood import CPJointNLL, MultiBackgroundNLL, YieldAsymmetry
 from .pdf import SCFSignalPDF, SignalPDF
 from .plotting import binned_data, plot_binned_data, plot_dalitz, plot_square_dalitz
 from .resolution import (
@@ -137,4 +137,5 @@ __all__ = [
     "square_dalitz_background_from_root", "square_dalitz_efficiency_from_root", "square_dalitz_jacobian",
     "square_dalitz_to_invariants", "vetoed_signal_pdf", "weighted_resample",
     "write_cp_phase_space_sample", "write_phase_space_sample", "write_phase_space_samples",
+    "YieldAsymmetry",
 ]
