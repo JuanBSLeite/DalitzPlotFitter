@@ -57,6 +57,14 @@ fixed-width `Pole` convention.
 from Eqs. (17)--(21) of the paper and is explicitly zero outside
 `1.0 <= m(pi pi) <= 1.5 GeV`.
 
+The default `convention="paper"` uses the literal printed expression.
+`convention="laura"` instead follows the production factor in `s=m**2`
+and overall phase `i` in Laura++ 3.8 `LauRescatteringRes::amplitude`.
+The source denominators then have units GeV squared. The explicit mass window
+is retained; reproducing Laura++'s full support requires setting `mass_min`
+to the KK threshold. These conventions must be matched to the coefficients:
+a global phase of one component changes its interference with other components.
+
 ## Flatte
 
 `Flatte` follows the coupled two-channel Laura++ form

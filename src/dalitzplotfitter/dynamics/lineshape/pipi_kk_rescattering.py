@@ -16,6 +16,14 @@ class PipiKKRescattering:
     The shape follows Eqs. (17)--(21) of Phys. Rev. D 101, 012006.  It is
     defined only in the 1.0--1.5 GeV mass window used by the isobar fit and is
     zero outside that window.
+
+    ``convention='laura'`` uses the source factor in ``m**2`` and the
+    overall phase ``i`` of Laura++ 3.8 ``LauRescatteringRes::amplitude``.
+    The default ``'paper'`` retains the literal printed Eqs. (17)--(21).
+    In either convention the explicit mass window is retained; Laura++ itself
+    starts at the KK threshold, so set mass_min accordingly to reproduce it.
+    The delta_*_squared parameters denote the source denominators: they have
+    units GeV for 'paper' and GeV**2 (lambda**2) for 'laura'.
     """
 
     mass_min: float = 1.0
@@ -29,8 +37,11 @@ class PipiKKRescattering:
     m_f: float = 1.32
     m_s: float = 0.92
     c0: float = 1.3
+    convention: str = "paper"
 
     def __post_init__(self) -> None:
+        if self.convention not in {"paper", "laura"}:
+            raise ValueError("rescattering convention must be 'paper' or 'laura'")
         if self.mass_min >= self.mass_max:
             raise ValueError("PipiKKRescattering requires mass_min < mass_max")
         if self.delta_pipi_squared <= 0.0 or self.delta_kk_squared <= 0.0:
@@ -59,10 +70,13 @@ class PipiKKRescattering:
         ) * jnp.abs(k2) / k2_safe**2
         exp_2i_delta = (cot_delta + 1j) / (cot_delta - 1j)
         scattering = jnp.sqrt(jnp.maximum(1.0 - eta**2, 0.0)) * exp_2i_delta
-        source = 1.0 / (1.0 + m / self.delta_pipi_squared) / (
-            1.0 + m / self.delta_kk_squared
+        source_variable = s if self.convention == "laura" else m
+        source = 1.0 / (1.0 + source_variable / self.delta_pipi_squared) / (
+            1.0 + source_variable / self.delta_kk_squared
         )
         value = source * scattering
+        if self.convention == "laura":
+            value = 1j * value
         inside = (m >= self.mass_min) & (m <= self.mass_max)
         return jnp.where(inside, value, 0.0j)
 

@@ -60,6 +60,21 @@ def test_pipi_kk_rescattering_rejects_non_scalar_context():
         raise AssertionError("PipiKKRescattering accepted a non-scalar context")
 
 
+def test_rescattering_laura_complex_reference_values():
+    # Independent scalar evaluation of LauRescatteringRes::amplitude:
+    # delta=atan(1/cotdelta), tau=(cos(2delta), sin(2delta)),
+    # returned value=(-tauIm, tauRe)*NR1*NR2. Includes the phase crossing.
+    mass = jnp.asarray([1.0, 1.1, 1.32, 1.49])
+    expected = jnp.asarray([
+        -0.14615559493806848 + 0.014175425798470658j,
+        -0.10852898212231951 - 0.07046283953507726j,
+        -0.0437459779265945j,
+        0.004947864569887254 - 0.002740883023572237j,
+    ])
+    actual = PipiKKRescattering(convention="laura")(mass, _context())
+    assert jnp.allclose(actual, expected, rtol=1e-12, atol=1e-14)
+
+
 def test_rho_omega_mixing_returns_the_two_effective_terms():
     context = replace(
         _context(spin=1),
