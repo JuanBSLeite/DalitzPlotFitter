@@ -496,6 +496,10 @@ Gaussian external measurements can be added with `GaussianConstraint` and `Const
 
 ## Tutorial notebooks
 
+New users: follow the [seven-part tutorial course](notebooks/TUTORIALS.md), with
+self-contained English lessons from phase space and a first fit through normalization,
+acceptance, floating dynamics, CP fits and ROOT I/O. Each lesson includes exercises.
+
 The repository contains a progressive set of examples:
 
 - `notebooks/01_e791_toy_fit.ipynb`: E791 signal toy generation and fit;

@@ -10,6 +10,9 @@ not covered here (private helpers, submodule-only exports like the `Simultaneous
 `WeightedUnbinned` NLL variants in `dalitzplotfitter.likelihood`), read the module directly —
 this catalog only covers the public top-level surface.
 
+For a guided introduction, start with the [seven-part notebook course](../notebooks/TUTORIALS.md).
+The lessons explain the main fitting workflow and link to specialized examples below.
+
 ## Model construction
 
 | Name | Kind | What it does |
