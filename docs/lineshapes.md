@@ -345,3 +345,9 @@ J. Back et al., *Laura++: a Dalitz plot fitter*, Computer Physics Communications
 V. V. Anisovich and A. V. Sarantsev, *K-matrix analysis of the (IJ^PC = 00++)-wave in the mass region below 1900 MeV*, Eur. Phys. J. A 16 (2003) 229.
 
 LHCb Collaboration, *Amplitude analysis of the D_s+ -> pi- pi+ pi+ decay*, arXiv:2209.09840.
+
+LHCb Collaboration, *Amplitude analysis of the B+ -> pi+ pi+ pi- decay*, Phys. Rev. D 101,
+012006 (2020), arXiv:1909.05212. `SigmaPole`, `RhoOmegaMixing` and `PipiKKRescattering`
+reproduce this paper's isobar conventions; see `docs/reviews/paper_isobar_conventions.md` for the
+numeric reproduction against Laura++ and the published tables, including the remaining unresolved
+discrepancies.

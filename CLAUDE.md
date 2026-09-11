@@ -74,8 +74,9 @@ through the low-level classes directly; see `docs/user_friendly_api.md` "Design 
 
 `Resonance` composes a lineshape through the ordinary `lineshape(mass, context)` interface
 (`dynamics/lineshape/*.py`, one physics model per file: `relativistic_breit_wigner.py`,
-`gounaris_sakurai.py`, `flatte.py`, `pole.py`, `lass.py`, `kmatrix.py`, `qmi.py`,
-`rescattering2.py`) combined with an angular factor (`dynamics/angular.py`) and Blatt-Weisskopf
+`gounaris_sakurai.py`, `flatte.py`, `pole.py` (`Pole`, `SigmaPole`), `lass.py`, `kmatrix.py`,
+`qmi.py`, `rescattering2.py`, `pipi_kk_rescattering.py`, `rho_omega.py`) combined with an
+angular factor (`dynamics/angular.py`) and Blatt-Weisskopf
 barriers. `DalitzAmplitude` bypasses that isobar construction entirely for amplitudes that are
 intrinsically two-dimensional (`QMI2D`, `dynamics/qmi2d.py`), evaluated directly over
 `(s12, s13)`.
@@ -168,9 +169,15 @@ Each subsystem also has one focused doc under `docs/` (`fitting.md`, `lineshapes
 `square_dalitz.md`, `toy_generation.md`, `discriminants_and_constraints.md`,
 `convolution_resolution.md`, `dynamics_structure.md`, `performance.md`, `root_io.md`,
 `user_friendly_api.md`). `docs/reviews/` contains dated, adversarial numeric-reproduction review
-write-ups (concrete inputs, reproduced numbers, "Applied fixes" sections) — this repo's working
-style is to reproduce a suspected discrepancy numerically before changing formulas, and to update
-the corresponding `docs/*.md` in the same change that fixes the code. `notebooks/` (root) are the
-tutorial/example set referenced by the docs and README; `notebooks/data_analyses/` holds
-in-progress physics analyses (not tutorials) that consume the same public API and can break
-silently when a lineshape or normalization convention changes underneath them.
+write-ups (concrete inputs, reproduced numbers, "Applied fixes" sections, or — as in
+`paper_isobar_conventions.md` — an explicit "Remaining discrepancy" section when a reproduction
+is not yet closed) — this repo's working style is to reproduce a suspected discrepancy
+numerically before changing formulas, and to update the corresponding `docs/*.md` in the same
+change that fixes the code; an open "Remaining discrepancy" means the corresponding lineshape
+(`SigmaPole`, `RhoOmegaMixing`, `PipiKKRescattering`) is not yet validated to publication
+precision and should not be treated as certified. `notebooks/` (root) are the tutorial/example
+set referenced by the docs and README; `notebooks/data_analyses/` holds in-progress physics
+analyses (not tutorials) that consume the same public API and can break silently when a
+lineshape or normalization convention changes underneath them; `notebooks/benchmark/` holds
+numeric-reproduction benchmarks against a specific published paper/Laura++ configuration (e.g.
+`paper_isobar_benchmark.ipynb` for the LHCb `B -> 3pi` isobar model) rather than tutorials.

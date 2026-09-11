@@ -43,7 +43,10 @@ Each is passed as `Resonance(..., lineshape=...)`; all implement `lineshape(mass
 |---|---|---|
 | `RelativisticBreitWigner` | class | Standard relativistic Breit-Wigner with running width and Blatt-Weisskopf barrier factor. |
 | `Pole` | class | Simple fixed-width Breit-Wigner pole, `1/(m - m0 - i*Gamma0/2)` (Laura++ `BW`). |
+| `SigmaPole` | class | LHCb 3pi-isobar `f0(500)` pole, `1/((pole_mass - i*pole_width)**2 - m**2)`; distinct from `Pole`'s convention. |
 | `GounarisSakurai` | class | Gounaris-Sakurai lineshape for rho-like vector states. |
+| `RhoOmegaMixing` | class | Coherent rho-omega mixing (LHCb 3pi-isobar Eq. 15); `component="rho"`/`"omega"` selects one of the two effective split terms. |
+| `PipiKKRescattering` | class | LHCb 3pi-isobar phenomenological pi-pi to K-Kbar S-wave (Eqs. 17-21), zero outside `1.0-1.5 GeV`; `convention="paper"` (default) or `"laura"`. |
 | `Flatte` | class | Coupled two-channel Flatte lineshape (generic; construct channel masses directly). |
 | `BaBarFlatte` | class | Flatte form as parameterized in the BaBar `B± -> K± pi∓ pi±` analysis (arXiv:0803.4451). |
 | `LASS` | class | Effective-range + `K0*(1430)` coherent S-wave form for `K pi`. |
@@ -51,7 +54,12 @@ Each is passed as `Resonance(..., lineshape=...)`; all implement `lineshape(mass
 | `QMI` | class | Quasi-model-independent S-wave specified at fixed mass knots; `interpolation=` selects `linear`/`cubic`/`hermite`/`natural`, polar or Cartesian knot parameters. |
 | `Rescattering2` | class | Port of Laura++ `LauRescattering2Res`: two-region Chebyshev pi-pi/KK rescattering S-wave, zero below the `2*m_K` threshold. |
 
-Docs: `docs/lineshapes.md` (formulas + references). Notebooks: `notebooks/data_analyses/22_rescattering2_toy.ipynb` (Rescattering2 diagnostics).
+Docs: `docs/lineshapes.md` (formulas + references). Notebooks: `notebooks/data_analyses/22_rescattering2_toy.ipynb`
+(Rescattering2 diagnostics), `notebooks/benchmark/paper_isobar_benchmark.ipynb` and
+`notebooks/benchmark/paper_isobar_benchmark_squaredp_01.ipynb` (`SigmaPole`/`RhoOmegaMixing`/
+`PipiKKRescattering` reproduction of the LHCb `B -> 3pi` isobar model, Phys. Rev. D 101, 012006).
+`docs/reviews/paper_isobar_conventions.md` documents the numeric reproduction, the confirmed
+angular-orientation/ACP fixes, and the remaining unresolved discrepancies in that benchmark.
 
 ## Angular models
 
