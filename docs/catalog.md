@@ -307,6 +307,6 @@ Docs: `docs/user_friendly_api.md`. Notebooks: `16_user_friendly_quickstart.ipynb
 
 | Name | Kind | What it does |
 |---|---|---|
-| `enable_x64` | function | Enable (default) or disable JAX 64-bit floating-point precision. Call this before any numerical work. |
+| `enable_x64` | function | Enable or disable JAX 64-bit floating-point precision. Importing `dalitzplotfitter` already calls this with `enabled=True` unless `JAX_ENABLE_X64` was set explicitly first; call `enable_x64(False)` directly only to opt back into an explicit, unvalidated float32 experiment. |
 
 Docs: `README.md` "Installation", `docs/fitting.md`.

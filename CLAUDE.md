@@ -45,9 +45,13 @@ and `notebooks/benchmark/` with `nbformat` and compiles (not executes) each code
 not run on every push. There is no GPU CI; `docs/gpu_ubuntu_24_04.md` documents the manual
 WSL2/CUDA reference environment used for GPU validation.
 
-Always `enable_x64()` before numerical work (`from dalitzplotfitter import enable_x64`) — the
-project deliberately runs float64/complex128 for amplitude-analysis stability, and this is not
-the JAX default.
+Importing `dalitzplotfitter` enables JAX 64-bit precision automatically (unless
+`JAX_ENABLE_X64` was already set in the environment, which stays authoritative) — the project
+deliberately runs float64/complex128 for amplitude-analysis stability, and this is not JAX's own
+default. `enable_x64(False)` (`from dalitzplotfitter import enable_x64`) remains available to opt
+back into float32 for an explicit, validated experiment; nothing in the numerical path is expected
+to be correct or to converge reliably (Minuit's EDM-based convergence check in particular) under
+float32.
 
 ## Architecture
 

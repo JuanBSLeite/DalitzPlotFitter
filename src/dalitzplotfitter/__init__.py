@@ -7,6 +7,16 @@ import os as _os
 
 _os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 
+from . import config as _config
+
+# The project deliberately runs float64/complex128 throughout the numerical
+# pipeline for amplitude-analysis stability; this is not JAX's own default.
+# Enable it on import so callers don't need a separate enable_x64() call before
+# any numerical work. An explicit JAX_ENABLE_X64 set before import is left
+# authoritative; enable_x64(False) remains available to opt back out.
+if _os.environ.get("JAX_ENABLE_X64") is None:
+    _config.enable_x64()
+
 from .amplitude import (
     AmplitudeComponent,
     CoherentAmplitudeModel,
