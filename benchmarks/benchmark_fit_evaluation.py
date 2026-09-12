@@ -205,7 +205,7 @@ def main() -> None:
     )
 
     minimizer = session.minimizer()
-    free, names, fcn, grad = minimizer._backend()
+    free, names, fcn, grad, _ = minimizer._backend()
     point = _parameter_point(session)
     vector = [point[name] for name in names]
 

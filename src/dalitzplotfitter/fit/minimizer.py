@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import warnings
+import weakref
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-import weakref
+from time import perf_counter
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
 from .parameters import Parameter
-
 
 # ``FitSession.fit()`` constructs a new Minimizer for each call. The objective
 # object itself is cached by the session, so use its identity to retain the JAX
@@ -81,6 +82,12 @@ class Minimizer:
     project default remains strategy 2 with HESSE enabled; that path keeps the
     established two-MIGRAD refinement before HESSE. Strategies 0 and 1 use one
     MIGRAD pass, which is useful for faster preliminary fits of large models.
+
+    ``hessian="jax"`` supplies automatic second derivatives to Minuit, including
+    its internal HESSE calls during MIGRAD. The default ``"numerical"`` keeps
+    Minuit's finite differences. JAX Hessians compile lazily and use sequential
+    Hessian-vector products without batching over all events and all parameters
+    at once. Second-order differentiability is required.
     """
 
     def __init__(
@@ -91,6 +98,7 @@ class Minimizer:
         errordef: float = 0.5,
         tolerance: float = 1e-4,
         verbose: int = 0,
+        hessian: str = "numerical",
     ):
         if errordef <= 0:
             raise ValueError("errordef must be positive")
@@ -98,11 +106,14 @@ class Minimizer:
             raise ValueError("tolerance must be positive")
         if isinstance(verbose, bool) or not isinstance(verbose, int) or verbose < 0:
             raise ValueError("verbose must be a non-negative integer")
+        if hessian not in ("numerical", "jax"):
+            raise ValueError("hessian must be 'numerical' or 'jax'")
         self.objective = objective
         self.parameters = tuple(parameters)
         self.errordef = float(errordef)
         self.tolerance = float(tolerance)
         self.verbose = int(verbose)
+        self.hessian = hessian
         self._backend_cache = None
 
     def _log(self, message: str) -> None:
@@ -150,8 +161,8 @@ class Minimizer:
         if shared is not None:
             # Only compiled callbacks are reusable. Defaults, limits and steps
             # belong to this Minimizer, not the instance that compiled them.
-            _, names, fcn, grad = shared
-            self._backend_cache = (free, names, fcn, grad)
+            _, names, fcn, grad, hessian = shared
+            self._backend_cache = (free, names, fcn, grad, hessian)
             return self._backend_cache
 
         fixed = {
@@ -178,7 +189,9 @@ class Minimizer:
             def vector_objective(vector):
                 objective = objective_ref()
                 if objective is None:
-                    raise RuntimeError("fit objective was released before JAX evaluation")
+                    raise RuntimeError(
+                        "fit objective was released before JAX evaluation"
+                    )
                 mapping = dict(fixed)
                 mapping.update({name: vector[i] for i, name in enumerate(names)})
                 return objective(mapping)
@@ -215,7 +228,38 @@ class Minimizer:
             _, gradient = evaluate(values)
             return gradient
 
-        backend = (free, names, fcn, grad)
+        @jax.jit
+        def hessian_program(vector):
+            # Differentiate the gradient in forward mode, not the original
+            # custom_vjp objective. QMI's gradient has already expanded its
+            # grouped reductions; this preserves them in second derivatives.
+            # Reverse-over-reverse instead reintroduces highly contended FP64
+            # scatter-adds on GPU when differentiating the saved knot gathers.
+            # Reuse one linearization and compute one column at a time to
+            # avoid an event-by-parameter batch of intermediate arrays.
+            _, pushforward = jax.linearize(jax.grad(vector_objective), vector)
+            return jax.lax.map(
+                pushforward,
+                jnp.eye(len(names), dtype=vector.dtype),
+            ).T
+
+        hessian_point = None
+        hessian_value = None
+
+        def hessian(*values):
+            nonlocal hessian_point, hessian_value
+            point = np.asarray(values, dtype=float)
+            if hessian_point is None or not np.array_equal(point, hessian_point):
+                matrix = np.asarray(
+                    jax.device_get(hessian_program(jnp.asarray(point))), dtype=float
+                )
+                # Minuit expects a symmetric matrix in external coordinates.
+                # Its own transformations handle parameter bounds and errordef.
+                hessian_value = 0.5 * (matrix + matrix.T)
+                hessian_point = point.copy()
+            return hessian_value
+
+        backend = (free, names, fcn, grad, hessian)
         self._backend_cache = backend
         if objective_ref is not None:
             _SHARED_BACKENDS[shared_key] = (objective_ref, backend)
@@ -258,7 +302,11 @@ class Minimizer:
 
     @staticmethod
     def _validate_strategy(strategy: int) -> int:
-        if isinstance(strategy, bool) or not isinstance(strategy, int) or strategy not in (0, 1, 2):
+        if (
+            isinstance(strategy, bool)
+            or not isinstance(strategy, int)
+            or strategy not in (0, 1, 2)
+        ):
             raise ValueError("strategy must be one of 0, 1 or 2")
         return int(strategy)
 
@@ -275,10 +323,13 @@ class Minimizer:
         if relative_floor <= 0:
             raise ValueError("relative_floor must be positive")
 
-        free, names, fcn, grad = self._backend()
+        free, names, fcn, grad, _ = self._backend()
         supplied = self._validate_start_values(values)
         point = np.asarray(
-            [float(supplied.get(parameter.name, parameter.value)) for parameter in free],
+            [
+                float(supplied.get(parameter.name, parameter.value))
+                for parameter in free
+            ],
             dtype=float,
         )
 
@@ -333,6 +384,7 @@ class Minimizer:
         names,
         fcn,
         grad,
+        hessian_callback,
         *,
         start_values: Mapping[str, float] | None,
         strategy: int,
@@ -348,7 +400,23 @@ class Minimizer:
         start = tuple(
             float(supplied.get(parameter.name, parameter.value)) for parameter in free
         )
-        minuit = Minuit(fcn, *start, name=names, grad=grad)
+        derivatives = {}
+        if self.hessian == "jax":
+            derivatives = {
+                "hessian": hessian_callback,
+                "g2": lambda *values: np.diag(hessian_callback(*values)),
+            }
+        # iminuit 2.32 normally derives G2 from the Hessian, but its negative-
+        # curvature recovery can still call the separate G2 callback. Without
+        # it, non-convex starting points raise "NoneType is not callable".
+        # Both callbacks reuse the same cached matrix; silence only the
+        # misleading warning about supplying both, not numerical warnings.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="hessian overrides g2, passing g2 has no effect",
+                module=r"iminuit\.minuit",
+            )
+            minuit = Minuit(fcn, *start, name=names, grad=grad, **derivatives)
         minuit.errordef = self.errordef
         minuit.tol = self.tolerance
         minuit.strategy = strategy
@@ -358,13 +426,26 @@ class Minimizer:
                 minuit.limits[parameter.name] = parameter.bounds
             if parameter.step is not None:
                 minuit.errors[parameter.name] = parameter.step
+
+        def stage(label, method, **kwargs):
+            self._log(f"{label} started")
+            started = perf_counter()
+            nfcn, ngrad = minuit.nfcn, minuit.ngrad
+            nhessian = minuit.nhessian
+            method(ncall=ncall, **kwargs)
+            self._log(
+                f"{label} finished in {perf_counter() - started:.3f} s: "
+                f"nfcn=+{minuit.nfcn - nfcn}, ngrad=+{minuit.ngrad - ngrad}, "
+                f"nhessian=+{minuit.nhessian - nhessian}"
+            )
+
         if simplex:
-            minuit.simplex(ncall=ncall)
-        minuit.migrad(ncall=ncall, use_simplex=False)
+            stage("SIMPLEX", minuit.simplex)
+        stage("MIGRAD 1", minuit.migrad, use_simplex=False)
         if strategy == 2:
-            minuit.migrad(ncall=ncall, use_simplex=False)
+            stage("MIGRAD 2", minuit.migrad, use_simplex=False)
         if hesse:
-            minuit.hesse(ncall=ncall)
+            stage("HESSE", minuit.hesse)
         return minuit
 
     def fit(
@@ -387,17 +468,18 @@ class Minimizer:
         strategy = self._validate_strategy(strategy)
         if not isinstance(hesse, bool):
             raise ValueError("hesse must be a boolean")
-        free, names, fcn, grad = self._backend()
+        free, names, fcn, grad, hessian_callback = self._backend()
         self._log(
             f"single fit with {len(free)} free parameters "
             f"(simplex={simplex}, strategy={strategy}, hesse={hesse}, "
-            f"ncall={ncall}, tolerance={self.tolerance})"
+            f"hessian={self.hessian}, ncall={ncall}, tolerance={self.tolerance})"
         )
         result = self._run(
             free,
             names,
             fcn,
             grad,
+            hessian_callback,
             start_values=start_values,
             strategy=strategy,
             hesse=hesse,
@@ -449,11 +531,13 @@ class Minimizer:
             raise ValueError("n_starts must be at least 1")
         strategy = self._validate_strategy(strategy)
 
-        free, names, fcn, grad = self._backend()
+        free, names, fcn, grad, hessian_callback = self._backend()
         rng = np.random.default_rng(seed)
         starts: list[dict[str, float]] = []
         if include_default:
-            starts.append({parameter.name: float(parameter.value) for parameter in free})
+            starts.append(
+                {parameter.name: float(parameter.value) for parameter in free}
+            )
         while len(starts) < n_starts:
             starts.append(
                 {
@@ -474,6 +558,7 @@ class Minimizer:
                 names,
                 fcn,
                 grad,
+                hessian_callback,
                 start_values=start,
                 strategy=strategy,
                 hesse=False,
@@ -489,7 +574,9 @@ class Minimizer:
             if bool(result.valid) and np.isfinite(float(result.fval))
         )
         if not valid_indices:
-            raise RuntimeError("No valid finite minimum was found across the multistart scan")
+            raise RuntimeError(
+                "No valid finite minimum was found across the multistart scan"
+            )
 
         best_index = min(valid_indices, key=lambda index: float(results[index].fval))
         preliminary = results[best_index]
@@ -503,6 +590,7 @@ class Minimizer:
             names,
             fcn,
             grad,
+            hessian_callback,
             start_values=best_values,
             strategy=2,
             hesse=True,

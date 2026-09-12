@@ -30,7 +30,7 @@ from dalitzplotfitter.kinematics import (
 )
 from dalitzplotfitter.likelihood import CPJointNLL
 from dalitzplotfitter.likelihood.cp import _signal_yield_pair
-from dalitzplotfitter.observables import delta_method_covariance
+from dalitzplotfitter.observables.errors import _covariance_matrix
 from dalitzplotfitter.plotting import _draw_pulls_1d, plot_binned_data
 from dalitzplotfitter.sampling import weighted_resample
 
@@ -229,11 +229,19 @@ class CPFitSession:
             unique[p.name] = p
         return tuple(unique.values())
 
-    def minimizer(self, *, tolerance=1e-4, verbose=0):
-        return Minimizer(self.objective, self.parameters, tolerance=tolerance, verbose=verbose)
+    def minimizer(self, *, tolerance=1e-4, verbose=0, hessian="numerical"):
+        return Minimizer(
+            self.objective, self.parameters,
+            tolerance=tolerance, verbose=verbose, hessian=hessian,
+        )
 
-    def fit(self, start_values=None, *, simplex=False, ncall=None, strategy=2, hesse=True, tolerance=1e-4, verbose=0):
-        return self.minimizer(tolerance=tolerance, verbose=verbose).fit(
+    def fit(
+        self, start_values=None, *, simplex=False, ncall=None, strategy=2,
+        hesse=True, tolerance=1e-4, verbose=0, hessian="numerical",
+    ):
+        return self.minimizer(
+            tolerance=tolerance, verbose=verbose, hessian=hessian,
+        ).fit(
             start_values=start_values,
             simplex=simplex,
             ncall=ncall,
@@ -241,8 +249,13 @@ class CPFitSession:
             hesse=hesse,
         )
 
-    def fit_multistart(self, n_starts=20, *, seed=None, include_default=False, simplex=False, strategy=1, tolerance=1e-4, verbose=0):
-        return self.minimizer(tolerance=tolerance, verbose=verbose).fit_multistart(
+    def fit_multistart(
+        self, n_starts=20, *, seed=None, include_default=False, simplex=False,
+        strategy=1, tolerance=1e-4, verbose=0, hessian="numerical",
+    ):
+        return self.minimizer(
+            tolerance=tolerance, verbose=verbose, hessian=hessian,
+        ).fit_multistart(
             n_starts=n_starts,
             seed=seed,
             include_default=include_default,
@@ -291,12 +304,15 @@ class CPFitSession:
             if not parameter.fixed
         })
 
-        def joint_fractions(values):
-            return jnp.concatenate([plus_cache.fit_fractions(values), minus_cache.fit_fractions(values)])
-
-        covariance = np.asarray(
-            delta_method_covariance(joint_fractions, values, parameter_names, result.covariance)
-        )
+        # Differentiate each charge's integration graph only for its own rows.
+        # Stack columns in the SAME union-of-parameters order, then propagate
+        # the joint covariance once, including every cross-charge term.
+        jacobian = jnp.concatenate([
+            self.plus_model._fraction_jacobian(plus_cache, values, parameter_names),
+            self.minus_model._fraction_jacobian(minus_cache, values, parameter_names),
+        ])
+        parameter_covariance = _covariance_matrix(result.covariance, parameter_names)
+        covariance = np.asarray(jacobian @ parameter_covariance @ jacobian.T)
         n = len(plus_names)
         variance_plus = np.clip(np.diag(covariance)[:n], 0.0, None)
         variance_minus = np.clip(np.diag(covariance)[n:], 0.0, None)

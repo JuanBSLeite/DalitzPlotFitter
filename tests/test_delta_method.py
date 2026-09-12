@@ -241,3 +241,122 @@ def test_cp_fit_session_fit_fraction_errors_uses_joint_covariance():
         assert errors["plus"][name] == pytest.approx(np.sqrt(variance_plus[i]), rel=1e-4)
         assert errors["minus"][name] == pytest.approx(np.sqrt(variance_minus[i]), rel=1e-4)
         assert errors["mean"][name] == pytest.approx(np.sqrt(variance_mean[i]), rel=1e-4)
+
+
+@pytest.mark.parametrize("acceptance_weighted", [False, True])
+@pytest.mark.parametrize("normalize_components", [False, True])
+def test_qmi_cp_fraction_errors_preserve_full_integral_and_cross_covariance(
+    acceptance_weighted, normalize_components,
+):
+    from types import SimpleNamespace
+
+    import jax
+
+    from dalitzplotfitter import QMI, delta_method_jacobian
+
+    magnitudes = tuple(
+        Parameter.dynamics(f"S.mag{i}", 1.0 + 0.1*i, owner="S", fixed=i == 0)
+        for i in range(4)
+    )
+    phases = tuple(
+        Parameter.dynamics(f"S.phase{i}", 0.2*i, owner="S", fixed=i == 0)
+        for i in range(4)
+    )
+    cp = CPRealImag(*(
+        Parameter.coefficient(f"S.{name}", value, owner="S")
+        for name, value in zip(
+            ("x", "y", "dx", "dy"), (0.8, 0.3, 0.1, -0.05), strict=True
+        )
+    ))
+    lineshape = QMI((0.28, 0.6, 1.0, 1.75), magnitudes, phases,
+                    interpolation="hermite")
+
+    def make_model(charge):
+        return DecayModel(
+            DecayChannel("D+", ("pi-", "pi+", "pi+")),
+            [
+                NonResonant(RealImag(1.0, 0.0), name="NR"),
+                Resonance("S", (0, 1), cp.for_charge(charge),
+                          lineshape=lineshape, mass=1.0, width=0.1, spin=0),
+            ],
+            normalize_components=normalize_components,
+            normalization_resolution=12,
+        )
+
+    plus, minus = make_model(+1), make_model(-1)
+    data = plus.generate_phase_space(40, seed=127)
+    def plus_eff(d):
+        return 0.6 + 0.05*d['s12']
+
+    def minus_eff(d):
+        return 0.7 + 0.03*d['s13']
+    session = CPFitSession(plus, minus, data, data).with_efficiency(plus_eff, minus_eff)
+    values = {p.name: p.value for p in session.parameters}
+    names = sorted(p.name for p in session.parameters if not p.fixed)
+    rng = np.random.default_rng(78)
+    a = rng.normal(size=(len(names), len(names)))
+    covariance = 0.001*(a @ a.T + np.eye(len(names)))
+    # Deliberately reverse storage order to check covariance-name alignment.
+    result = SimpleNamespace(
+        values=values,
+        covariance=FakeCovariance(names[::-1], covariance[::-1, ::-1]),
+    )
+    errors = session.fit_fraction_errors(
+        result, acceptance_weighted=acceptance_weighted
+    )
+
+    # Independent reference: full integration sample on BOTH cache sides,
+    # including non-uniform efficiency and dynamic component normalization.
+    caches = []
+    for model, efficiency in ((plus, plus_eff), (minus, minus_eff)):
+        sample = model.normalization_sample
+        caches.append(model.prepare_cache(
+            sample, normalization_sample=sample,
+            efficiency_normalization=efficiency(sample.as_dict())
+            if acceptance_weighted else None,
+        ))
+
+    @jax.jit
+    def fractions(v):
+        return jnp.concatenate([cache.fit_fractions(v) for cache in caches])
+
+    reference_jacobian = _finite_difference_jacobian(fractions, values, names)
+    jacobian = np.asarray(delta_method_jacobian(fractions, values, names))
+    np.testing.assert_allclose(jacobian, reference_jacobian, rtol=2e-5, atol=1e-8)
+    ff_cov = reference_jacobian @ covariance @ reference_jacobian.T
+    for i, component in enumerate(("NR", "S")):
+        expected = {
+            "plus": np.sqrt(ff_cov[i, i]),
+            "minus": np.sqrt(ff_cov[i+2, i+2]),
+            "mean": np.sqrt(0.25*(ff_cov[i, i] + ff_cov[i+2, i+2]
+                                   + 2*ff_cov[i, i+2])),
+        }
+        for charge, sigma in expected.items():
+            assert errors[charge][component] == pytest.approx(sigma, rel=2e-5)
+
+
+def test_fraction_error_kernel_reads_new_values_efficiency_and_integration_weights():
+    from dataclasses import replace
+
+    model = _swave_model()
+    sample = model.normalization_sample
+    names = ("rho.x", "NR.y")
+    covariance = np.array([[0.02, 0.005], [0.005, 0.01]])
+    for shift in (0.0, 0.2):
+        values = {p.name: p.value for p in model.parameters}
+        values["rho.x"] += shift
+        # Not differentiated, but must still be read from the current point.
+        values["rho.y"] -= shift
+        varied_sample = replace(sample, weights=sample.weights*(1 + shift*sample.s12))
+        efficiency = 0.6 + (0.02 + shift)*sample.s13
+        actual = model.fit_fraction_errors(
+            values, covariance, names,
+            normalization_sample=varied_sample, efficiency=efficiency,
+        )
+        cache = model.prepare_cache(
+            varied_sample, normalization_sample=varied_sample,
+            efficiency_normalization=efficiency,
+        )
+        jacobian = _finite_difference_jacobian(cache.fit_fractions, values, names)
+        expected = np.sqrt(np.diag(jacobian @ covariance @ jacobian.T))
+        np.testing.assert_allclose(list(actual.values()), expected, rtol=2e-5)

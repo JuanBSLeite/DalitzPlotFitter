@@ -452,12 +452,14 @@ class FitSession:
         *,
         tolerance: float = 1e-4,
         verbose: int = 0,
+        hessian: str = "numerical",
     ) -> Minimizer:
         return Minimizer(
             self.objective,
             self.parameters,
             tolerance=tolerance,
             verbose=verbose,
+            hessian=hessian,
         )
 
     def fit(
@@ -470,13 +472,16 @@ class FitSession:
         hesse: bool = True,
         tolerance: float = 1e-4,
         verbose: int = 0,
+        hessian: str = "numerical",
     ):
         """Fit with ``ncall`` as an approximate limit per optimizer stage.
 
         The limit applies separately to SIMPLEX, each MIGRAD call and HESSE,
         not to the whole fit. Strategy 2 runs MIGRAD twice.
         """
-        return self.minimizer(tolerance=tolerance, verbose=verbose).fit(
+        return self.minimizer(
+            tolerance=tolerance, verbose=verbose, hessian=hessian
+        ).fit(
             start_values=start_values,
             simplex=simplex,
             ncall=ncall,
@@ -494,8 +499,11 @@ class FitSession:
         strategy: int = 1,
         tolerance: float = 1e-4,
         verbose: int = 0,
+        hessian: str = "numerical",
     ):
-        return self.minimizer(tolerance=tolerance, verbose=verbose).fit_multistart(
+        return self.minimizer(
+            tolerance=tolerance, verbose=verbose, hessian=hessian
+        ).fit_multistart(
             n_starts=n_starts,
             seed=seed,
             include_default=include_default,

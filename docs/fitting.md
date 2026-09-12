@@ -165,6 +165,46 @@ gradient_check = minimizer.check_gradient(
 
 This should be used when introducing a new dynamical parameter or lineshape.
 
+## Slow HESSE in large fits
+
+`MnHesse: Using analytical gradient but a numerical Hessian calculator` means
+Minuit received the JAX gradient but is estimating second derivatives with finite
+differences. With many free QMI knots this requires quadratically many objective
+evaluations. Strategies 1 and 2 may invoke HESSE inside MIGRAD, so `hesse=False`
+only skips the final explicit HESSE call.
+
+With iminuit >= 2.32, automatic second derivatives can be selected explicitly:
+
+```python
+result = session.fit(strategy=1, hessian="jax", hesse=True, verbose=1)
+# Also supported by CPFitSession and both session.fit_multistart() methods.
+# Low-level API:
+minimizer = Minimizer(nll, parameters, hessian="jax", verbose=1)
+```
+
+`hessian="numerical"` remains the library default. `"jax"` also supplies the
+Hessian during MIGRAD; Minuit still handles bounds, covariance inversion and the
+`errordef` scaling. It requires an objective differentiable twice. The backend
+linearizes the gradient and evaluates Hessian-vector products sequentially,
+supporting QMI's custom VJPs without an
+event-by-parameter batch of intermediate derivatives. This reduces repeated
+likelihood probes but does not guarantee a faster fit: second-order JIT
+compilation and retained intermediate arrays can be expensive. Compilation is
+lazy and reused across fits of the same session. `verbose=1` reports times and
+function/gradient counts for each SIMPLEX, MIGRAD and final HESSE stage; stage
+times include any first-use compilation.
+
+The separate `Analytical calculator ... numerical ... g2 ...` warning compares
+gradients. Near a minimum, cancellation in differences of large NLL values can
+make this comparison unreliable. It does not by itself establish that automatic
+gradients are wrong. Use `check_gradient()` at an interior parameter point with
+several step sizes (for example `1e-4`, `1e-5`, `1e-6`), inspect absolute errors,
+and ensure x64 is enabled. Automatic Hessians do not repair an incorrect custom
+gradient, a nonsmooth objective, or an unidentified fit direction.
+
+Upstream references: [iminuit derivatives and strategies](https://scikit-hep.org/iminuit/reference.html),
+[Minuit HESSE implementation](https://root.cern.ch/doc/master/MnHesse_8cxx_source.html).
+
 ## RealImag coefficients
 
 The supported complex coefficient parameterization is
@@ -315,7 +355,8 @@ since that one differentiates a plain NumPy closed-form expression outside
 JAX. `fit_fraction_errors` instead differentiates
 `PreparedAmplitudeCache.fit_fractions` -- a pure JAX function of the full
 parameter mapping, exactly like the objective itself -- with reverse-mode
-autodiff (`dalitzplotfitter.observables.delta_method_jacobian`), giving `J`
+autodiff (the same VJP construction as
+`dalitzplotfitter.observables.delta_method_jacobian`), giving `J`
 to floating-point precision with no step-size tuning and no truncation
 error. Reverse mode is also the efficient *direction* here: a fit fraction
 vector has far fewer entries (one per component) than a QMI-heavy model has
@@ -341,6 +382,15 @@ memory bounded to one row's cost regardless of output count, trading it for
 worthwhile whenever outputs are few and each backward pass is heavy, as
 here.
 
+The built-in fit-fraction wrappers compile their sequential VJP loop with
+`jax.lax.map`. Each model retains the executable for its parameter layout;
+normalization arrays and current parameter values are passed as runtime inputs,
+so later calls reuse compilation while reading fresh values, integration weights
+and efficiencies. The executable does not retain the large integration arrays.
+The fraction cache prepares just one event on its unused data side, while keeping
+the **entire normalization sample** and its weights. The general-purpose
+`delta_method_jacobian` helper retains its eager Python loop.
+
 ```python
 errors = model.fit_fraction_errors(fit_values, result.covariance)
 ```
@@ -352,7 +402,7 @@ acceptance-weighted `PreparedAmplitudeCache` `print_fit_fractions()` would
 (`efficiency=...` selects the convention), differentiates its
 `fit_fractions(values)` with respect to every non-fixed parameter by default,
 and propagates `result.covariance` through that Jacobian. `result.covariance`
-can be passed directly: `delta_method_covariance` looks it up by parameter
+can be passed directly: the same helper as `delta_method_covariance` looks it up by parameter
 name (`covariance[a, b]`) rather than assuming a particular positional order,
 so which parameters happen to be free/fixed, or in what order Minuit stores
 them, does not matter -- see "Pitfall" below for why that name lookup is
@@ -365,8 +415,8 @@ share almost every fit parameter (every `CPRealImag` coefficient, every
 dynamics parameter -- a QMI knot or a `GaussianConstraint`-anchored mass is
 literally the same `Parameter` object for both charges), so `FF_plus` and
 `FF_minus` are correlated, and that correlation matters for anything derived
-from both of them together. The joint version instead stacks both charges'
-fraction vectors into one function and differentiates it once:
+from both of them together. The joint Jacobian is mathematically equivalent to
+stacking both charges' fraction vectors and differentiating them together:
 
 ```python
 def joint_fractions(values):
@@ -376,8 +426,11 @@ J = delta_method_jacobian(joint_fractions, values, parameter_names)   # shape (2
 full_covariance = J @ covariance_matrix @ J.T                         # shape (2n, 2n)
 ```
 
-one `delta_method_jacobian` call over the *union* of both models' free
-parameter names, giving a single `(2n, m)` Jacobian whose top half is sensitivities of the `n`
+The built-in implementation evaluates each charge's Jacobian in its own
+reusable compiled program, always using the same *union* of both models' free
+parameter names. Stacking those rows gives the same `(2n, m)` Jacobian without
+propagating zero cotangents through the other charge's integration graph. Its
+top half is sensitivities of the `n`
 B+ fractions and bottom half of the `n` B- fractions to the *same* `m`
 parameters. `J @ C @ J.T` then gives the full `(2n, 2n)` covariance in one
 step: its top-left and bottom-right `n x n` blocks are `Var(FF_plus)` and

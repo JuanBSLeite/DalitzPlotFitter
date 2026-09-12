@@ -170,7 +170,7 @@ def main() -> None:
     # hashing, which is both unrepresentative of a real fit and fails when the
     # session contains mappings.
     minimizer = session.minimizer()
-    free, names, fcn, grad = minimizer._backend()
+    free, names, fcn, grad, _ = minimizer._backend()
     point = np.asarray([parameter.value for parameter in free], dtype=float)
     qmi_phase_index = names.index("S_QMI.phase[8]")
 
