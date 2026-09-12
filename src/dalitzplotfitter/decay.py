@@ -383,7 +383,7 @@ class DecayModel:
         normalization_order_m23: int | None = None,
         normalization_narrow_width: float = 0.020,
         normalization_narrow_window: float = 5.0,
-        normalization_binning_factor: float = 100.0,
+        normalization_binning_factor: float = 30.0, #default Laura++ value is 100.0, but this is too high
         normalization_sample: PhaseSpaceSample | None = None,
         normalization_chunk_size: int = DEFAULT_NORMALIZATION_CHUNK_SIZE,
     ) -> None:
