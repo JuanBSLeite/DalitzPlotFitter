@@ -30,6 +30,7 @@ from dalitzplotfitter.kinematics import (
 )
 from dalitzplotfitter.likelihood import CPJointNLL
 from dalitzplotfitter.likelihood.cp import _signal_yield_pair
+from dalitzplotfitter.observables import delta_method_covariance
 from dalitzplotfitter.plotting import _draw_pulls_1d, plot_binned_data
 from dalitzplotfitter.sampling import weighted_resample
 
@@ -261,6 +262,52 @@ class CPFitSession:
         pplus, pminus = self.base_objective.charge_probabilities(values)
         print(f"predicted charge fractions: B+={float(pplus):.6f}  B-={float(pminus):.6f}")
         return values
+
+    def fit_fraction_errors(self, result, *, acceptance_weighted=False):
+        """Delta-method standard errors for print_fit_fractions()'s central values.
+
+        Propagates the *joint* postfit covariance through both charges' fit
+        fractions in a single Jacobian, not two independent ones -- plus_model
+        and minus_model share almost every fit parameter (every CPRealImag
+        coefficient and every dynamics parameter), so their fit fractions are
+        correlated. That correlation is exactly what "mean" below needs:
+        Var(mean) = 0.25*(Var(plus)+Var(minus)+2*Cov(plus,minus)), not a naive
+        quadrature sum of the two charges' errors (see docs/cp_coefficients.md
+        on why B+/B- are not independently normalized here). See
+        dalitzplotfitter.observables.delta_method_errors for the propagation
+        itself.
+        """
+        values = self.result_values(result)
+        plus_cache = self.plus_model._fraction_cache(None, self.plus_efficiency if acceptance_weighted else None)
+        minus_cache = self.minus_model._fraction_cache(None, self.minus_efficiency if acceptance_weighted else None)
+        plus_names = [component.name for component in plus_cache.components]
+        minus_names = [component.name for component in minus_cache.components]
+        if plus_names != minus_names:
+            raise ValueError("plus_model and minus_model must declare the same components in the same order")
+
+        parameter_names = sorted({
+            parameter.name
+            for parameter in (*self.plus_model.parameters, *self.minus_model.parameters)
+            if not parameter.fixed
+        })
+
+        def joint_fractions(values):
+            return jnp.concatenate([plus_cache.fit_fractions(values), minus_cache.fit_fractions(values)])
+
+        covariance = np.asarray(
+            delta_method_covariance(joint_fractions, values, parameter_names, result.covariance)
+        )
+        n = len(plus_names)
+        variance_plus = np.clip(np.diag(covariance)[:n], 0.0, None)
+        variance_minus = np.clip(np.diag(covariance)[n:], 0.0, None)
+        cross = np.diag(covariance[:n, n:])
+        variance_mean = np.clip(0.25 * (variance_plus + variance_minus + 2.0 * cross), 0.0, None)
+
+        return {
+            "plus": dict(zip(plus_names, (float(v) for v in np.sqrt(variance_plus)))),
+            "minus": dict(zip(minus_names, (float(v) for v in np.sqrt(variance_minus)))),
+            "mean": dict(zip(plus_names, (float(v) for v in np.sqrt(variance_mean)))),
+        }
 
     def print_fit_fractions(self, result, *, acceptance_weighted=False, include_interference=False, precision=3):
         values = self.result_values(result)

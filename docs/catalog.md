@@ -245,6 +245,26 @@ Docs: `docs/discriminants_and_constraints.md`. Notebooks: `10_b2kpipi_discrimina
 
 Docs: `docs/convolution_resolution.md`. Notebooks: `20_pdf_convolution_resolution.ipynb`.
 
+## Delta-method error propagation
+
+| Name | Kind | What it does |
+|---|---|---|
+| `delta_method_jacobian` | function | Exact reverse-mode-autodiff Jacobian of a JAX-differentiable observable with respect to named fit parameters, at a given parameter point (one `jax.vjp` linearization plus a per-output-row loop, not `jax.jacrev`'s batched sweep -- see `docs/fitting.md` for why). |
+| `delta_method_covariance` | function | Propagate a postfit covariance (e.g. `result.covariance` from `Minimizer.fit`) through that Jacobian: `J @ C @ J.T`. |
+| `delta_method_errors` | function | Standard errors only: `sqrt(diag(delta_method_covariance(...)))`. |
+
+General-purpose linear (Gaussian) error propagation for any JAX-differentiable
+quantity derived from postfit parameter values -- not just fit fractions,
+though `DecayModel.fit_fraction_errors`/`FitSession.fit_fraction_errors`/
+`CPFitSession.fit_fraction_errors` are the built-in convenience wrappers for
+that specific case (`CPFitSession`'s propagates the *joint* B+/B- covariance
+in one Jacobian, since the two charges share almost every fit parameter, and
+returns the correct cross-term-aware error for the mean fraction too). This
+is the same linear approximation implicit in Minuit's own HESSE errors, and
+can accept either a Minuit-style name-indexable covariance or a plain dense
+array already ordered like the requested parameter names. Docs:
+`docs/fitting.md` ("Fit fractions"), `docs/cp_coefficients.md`.
+
 ## Goodness of fit
 
 | Name | Kind | What it does |

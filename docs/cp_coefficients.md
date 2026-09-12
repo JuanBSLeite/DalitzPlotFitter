@@ -86,6 +86,19 @@ treated as having zero covariance. Consequently, components fitted with
 coefficient `A_CP` and CP phase difference, while their common magnitude and
 phase can still carry uncertainty from `x` and `y`.
 
+`dalitzplotfitter.observables.delta_method_covariance`/`delta_method_errors`
+implement exactly this `Cov(f) = J Cov(x) J^T` propagation as a reusable
+library function, with `J` computed by exact autodiff (`jax.jacrev`) rather
+than a hand-rolled finite-difference Jacobian, for any JAX-differentiable
+postfit quantity -- not only the Cartesian-to-polar CP observables above.
+`CPFitSession.fit_fraction_errors` is the built-in wrapper for fit fractions;
+it propagates the *joint* B+/B- covariance in one Jacobian rather than two
+independent ones (`plus_model`/`minus_model` share almost every fit
+parameter here), which is what makes its `"mean"` entry's cross-term-aware
+error correct rather than a naive quadrature sum. See `docs/fitting.md`
+("Fit fraction errors") and `docs/catalog.md` ("Delta-method error
+propagation").
+
 ## Efficiency and background mixtures
 
 `CPJointNLL` also supports efficiency-weighted signal and background while preserving the same joint charge normalization.

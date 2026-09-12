@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, fields, is_dataclass
 from itertools import permutations
 from typing import Literal
@@ -18,6 +18,7 @@ from dalitzplotfitter.amplitude import (
 )
 from dalitzplotfitter.amplitude.components import coefficient_value
 from dalitzplotfitter.amplitude.cache import DEFAULT_NORMALIZATION_CHUNK_SIZE
+from dalitzplotfitter.observables import delta_method_errors
 from dalitzplotfitter.dynamics import (
     CovariantAngular,
     RelativisticBreitWigner,
@@ -1110,3 +1111,44 @@ class DecayModel:
                         f"{100.0 * fraction:16.{precision}f}"
                     )
         return result
+
+    def fit_fraction_errors(
+        self,
+        fit_values,
+        covariance,
+        parameter_names: Sequence[str] | None = None,
+        *,
+        normalization_sample: PhaseSpaceSample | None = None,
+        efficiency=None,
+    ) -> dict[str, float]:
+        """Delta-method standard errors for ``fit_fractions()``.
+
+        ``fit_values`` are the postfit parameter values (e.g. from
+        ``FitSession.result_values``/``CPFitSession.result_values``);
+        entries missing from it fall back to each ``Parameter``'s own
+        declared value, exactly like ``fit_fractions()``/
+        ``print_fit_fractions()``. ``covariance`` is a postfit covariance
+        matrix -- typically an ``iminuit`` ``Minuit.covariance`` (e.g.
+        ``result.covariance`` from ``Minimizer.fit``) -- restricted
+        internally to ``parameter_names``, which defaults to every
+        non-fixed parameter in ``self.parameters``. ``normalization_sample``
+        and ``efficiency`` select the same physical-vs-acceptance-weighted
+        convention as ``fit_fractions()``.
+
+        This is a linear (Gaussian) error-propagation approximation, exactly
+        the one implicit in Minuit's own HESSE errors; see
+        ``dalitzplotfitter.observables.delta_method_errors``.
+        """
+        if parameter_names is None:
+            parameter_names = tuple(
+                parameter.name for parameter in self.parameters if not parameter.fixed
+            )
+        values = {
+            parameter.name: parameter.resolve(fit_values) for parameter in self.parameters
+        }
+        cache = self._fraction_cache(normalization_sample, efficiency)
+        errors = delta_method_errors(cache.fit_fractions, values, parameter_names, covariance)
+        return {
+            component.name: float(errors[index])
+            for index, component in enumerate(cache.components)
+        }

@@ -276,3 +276,177 @@ By default this reports physical fractions. Pass the same efficiency callable
 used in the likelihood through `efficiency=...` to report acceptance-weighted
 fractions. The returned dictionary stores fractions as numbers rather than
 percentages; the printed table uses percentages.
+
+### Fit fraction errors (delta method)
+
+`fit_fractions()`/`print_fit_fractions()` only report central values --
+`FF_i = Re(conj(c_i) M_ii c_i) / (c^dagger M c)`, a nonlinear function of the
+coefficient vector `c` and the Hermitian normalization matrix `M_ij =
+integral conj(F_i) F_j dPhi` (see "Normalization: the central invariant" in
+`CLAUDE.md`). `M` itself is a function of every floating `DYNAMICS`
+parameter, not just the coefficients: a component's mass, width, or (for
+`QMI`) every knot magnitude/phase all change `M_ii`/`M_ij` and therefore
+every fit fraction, including other components' fractions through the shared
+denominator `c^dagger M c`. `fit_fraction_errors` reports the standard error
+on this nonlinear function via the delta method, the standard first-order
+error-propagation technique also implicit in Minuit's own HESSE parameter
+errors: expand `f(theta)` (here the vector of fit fractions) to first order
+around the postfit point `theta_hat`,
+
+```text
+f(theta) ~= f(theta_hat) + J (theta - theta_hat),   J = df/dtheta |_theta_hat
+Cov(f)   ~= J Cov(theta_hat) J^T
+```
+
+and take `sigma(f_i) = sqrt(Cov(f)_ii)`. `Cov(theta_hat)` is Minuit's postfit
+covariance (`result.covariance` after HESSE, from `Minimizer.fit`) -- the
+same curvature-based, locally-Gaussian estimate already used for every plain
+parameter's `sigma` printed elsewhere in this document. Propagating it
+through fit fractions this way is therefore no less (and no more) justified
+than trusting those parameter errors themselves; see "Caveats" below for when
+that stops being a good approximation.
+
+**How the Jacobian is computed.** Earlier revisions of this kind of
+propagation (and the still-common approach elsewhere in the field) estimate
+`J` by finite differences: nudge each parameter by a small step, recompute
+`f`, and take a symmetric difference quotient -- exactly what
+`docs/cp_coefficients.md`'s hand-rolled CP-observable Jacobian still does,
+since that one differentiates a plain NumPy closed-form expression outside
+JAX. `fit_fraction_errors` instead differentiates
+`PreparedAmplitudeCache.fit_fractions` -- a pure JAX function of the full
+parameter mapping, exactly like the objective itself -- with reverse-mode
+autodiff (`dalitzplotfitter.observables.delta_method_jacobian`), giving `J`
+to floating-point precision with no step-size tuning and no truncation
+error. Reverse mode is also the efficient *direction* here: a fit fraction
+vector has far fewer entries (one per component) than a QMI-heavy model has
+free parameters -- `13_b2kkk_cpvfit_qmi.ipynb`'s S_QMI alone contributes on
+the order of a hundred floating knot magnitudes/phases -- so the cost scales
+with the output count, not with how many parameters float.
+
+That said, `delta_method_jacobian` does *not* use `jax.jacrev`'s default
+`vmap`-batched sweep over every output row at once: it takes one
+`jax.vjp` linearization pass, then loops one cotangent-basis row through the
+resulting backward function per output, in an ordinary Python loop. For a
+handful of outputs this is a minor difference in *speed* -- but it is not a
+minor difference in *memory*. `fit_fractions`'s reverse pass touches the
+normalization-matrix computation for every floating dynamics parameter (a
+QMI knot, in `13_b2kkk_cpvfit_qmi.ipynb`), which is comparatively heavy
+because it is built from the full normalization sample; `vmap`-batching
+that backward pass across every output row at once multiplies an already
+sizeable per-row intermediate by the output count *simultaneously*, which
+was enough to exhaust GPU memory outright for that notebook's joint B+/B-
+Jacobian (16 outputs) before the loop replaced it. The loop keeps peak
+memory bounded to one row's cost regardless of output count, trading it for
+`len(output)` sequential backward passes instead of one vectorized one --
+worthwhile whenever outputs are few and each backward pass is heavy, as
+here.
+
+```python
+errors = model.fit_fraction_errors(fit_values, result.covariance)
+```
+
+Internally this resolves `fit_values` against every `Parameter` in
+`model.parameters` (so a partial dict falls back to each parameter's own
+declared value, exactly like `fit_fractions()`), builds the same physical- or
+acceptance-weighted `PreparedAmplitudeCache` `print_fit_fractions()` would
+(`efficiency=...` selects the convention), differentiates its
+`fit_fractions(values)` with respect to every non-fixed parameter by default,
+and propagates `result.covariance` through that Jacobian. `result.covariance`
+can be passed directly: `delta_method_covariance` looks it up by parameter
+name (`covariance[a, b]`) rather than assuming a particular positional order,
+so which parameters happen to be free/fixed, or in what order Minuit stores
+them, does not matter -- see "Pitfall" below for why that name lookup is
+mandatory, not just convenient. `FitSession` exposes the same call as
+`session.fit_fraction_errors(result)`.
+
+**The CP joint case.** `CPFitSession.fit_fraction_errors(result)` does not
+call the single-model version twice. `plus_model`/`minus_model` typically
+share almost every fit parameter (every `CPRealImag` coefficient, every
+dynamics parameter -- a QMI knot or a `GaussianConstraint`-anchored mass is
+literally the same `Parameter` object for both charges), so `FF_plus` and
+`FF_minus` are correlated, and that correlation matters for anything derived
+from both of them together. The joint version instead stacks both charges'
+fraction vectors into one function and differentiates it once:
+
+```python
+def joint_fractions(values):
+    return jnp.concatenate([plus_cache.fit_fractions(values), minus_cache.fit_fractions(values)])
+
+J = delta_method_jacobian(joint_fractions, values, parameter_names)   # shape (2n, m)
+full_covariance = J @ covariance_matrix @ J.T                         # shape (2n, 2n)
+```
+
+one `delta_method_jacobian` call over the *union* of both models' free
+parameter names, giving a single `(2n, m)` Jacobian whose top half is sensitivities of the `n`
+B+ fractions and bottom half of the `n` B- fractions to the *same* `m`
+parameters. `J @ C @ J.T` then gives the full `(2n, 2n)` covariance in one
+step: its top-left and bottom-right `n x n` blocks are `Var(FF_plus)` and
+`Var(FF_minus)` (what `errors["plus"]`/`errors["minus"]` report), and its
+off-diagonal block's diagonal is `Cov(FF_plus_i, FF_minus_i)` for each
+matching component `i`. That cross term is exactly what makes
+`errors["mean"]` more than guesswork:
+
+```text
+FF_mean = 0.5*(FF_plus + FF_minus)
+Var(FF_mean) = 0.25*(Var(FF_plus) + Var(FF_minus) + 2*Cov(FF_plus, FF_minus))
+```
+
+```python
+errors = session.fit_fraction_errors(result)
+errors["plus"]["rho0_770"]   # sigma(FF_plus) for one component
+errors["minus"]["rho0_770"]  # sigma(FF_minus)
+errors["mean"]["rho0_770"]   # sigma(FF_mean), including Cov(FF_plus, FF_minus)
+```
+
+Skipping the cross term (i.e. treating the two charges as independent and
+adding their variances in quadrature) would silently overstate or understate
+`sigma(FF_mean)` whenever `Cov(FF_plus, FF_minus)` is non-negligible -- which
+it generally is here, precisely because the two charges share parameters
+(see `docs/cp_coefficients.md`, "Derived-observable uncertainties").
+
+**Pitfall: covariance ordering.** `delta_method_covariance`'s internal
+`_covariance_matrix` helper always tries name-pair indexing
+(`covariance[a, b]` for every `a, b` in the requested parameter names)
+*before* ever treating `covariance` as a plain positionally-ordered array,
+and only falls back to the latter if name indexing itself raises. This is
+deliberate, not defensive boilerplate: an early version tried the array
+interpretation first whenever `covariance`'s own shape matched
+`(len(names), len(names))`, reasoning that a same-size object was "probably
+already a dense matrix ordered like `names`". That reasoning breaks silently
+for exactly the common case of requesting *every* free parameter, because
+`iminuit`'s `Matrix` is itself array-convertible (`jnp.asarray(covariance)`
+succeeds) *and* commonly has that exact same total dimension -- so the shape
+check would "accidentally" pass and the code would use Minuit's own internal
+parameter order instead of the caller's `parameter_names` order. The bug is
+subtle to notice from symptoms alone: each fraction's *own* variance
+(`v^T C v` for a single row `v` of `J`) is unaffected by a self-consistent
+wrong permutation of `C`, so `errors["plus"]`/`errors["minus"]` still came
+out correct -- only the *cross*-covariance between two different rows (e.g.
+`Cov(FF_plus, FF_minus)`, or `Cov` between two different components) was
+silently wrong. `tests/test_delta_method.py` has a regression test for this
+exact scenario.
+
+**Caveats.** This is a linear (Gaussian) approximation, not an exact
+propagation:
+
+- It is only as good as `Cov(theta_hat)` itself -- if HESSE did not run, did
+  not converge, or `result.valid` is `False`, treat the propagated errors
+  with the same skepticism as the raw parameter errors they are built from.
+- It can understate the true uncertainty where `f(theta)` is strongly
+  nonlinear near `theta_hat`, or where a fraction sits close to its hard
+  lower bound of zero (a Gaussian is symmetric; a fraction is not, once its
+  uncertainty band would otherwise cross zero). MINOS-style asymmetric scans
+  or toy/bootstrap refits are the more robust (and far more expensive)
+  alternative in that regime.
+- Gaussian-constrained parameters (`GaussianConstraint`, e.g.
+  `rho0_1450`/`rho0_1700`/`phi1020`/`chic0` mass and width in
+  `13_b2kkk_cpvfit_qmi.ipynb`) need no special handling: the constraint is
+  part of the NLL that HESSE differentiates, so its effect on
+  `Cov(theta_hat)` -- and hence on every propagated fit-fraction error -- is
+  already included automatically, whether or not that parameter is fixed.
+
+`dalitzplotfitter.observables.delta_method_errors`/`delta_method_covariance`
+are general-purpose: they work for any JAX-differentiable postfit quantity,
+not just fit fractions (interference fractions, the CP-observable table in
+`docs/cp_coefficients.md`, or any custom derived observable) -- see
+`docs/catalog.md` ("Delta-method error propagation").

@@ -543,6 +543,24 @@ class FitSession:
             precision=precision,
         )
 
+    def fit_fraction_errors(
+        self,
+        result,
+        *,
+        acceptance_weighted: bool = False,
+    ) -> dict[str, float]:
+        """Delta-method standard errors for print_fit_fractions()'s central values.
+
+        See ``DecayModel.fit_fraction_errors`` and
+        ``dalitzplotfitter.observables.delta_method_errors`` for the
+        propagation itself.
+        """
+        return self.model.fit_fraction_errors(
+            self.result_values(result),
+            result.covariance,
+            efficiency=self.efficiency if acceptance_weighted else None,
+        )
+
     def report(
         self,
         result,

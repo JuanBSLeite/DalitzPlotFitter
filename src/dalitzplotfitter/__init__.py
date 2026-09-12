@@ -86,6 +86,7 @@ from .kinematics import (
     square_dalitz_to_invariants,
 )
 from .likelihood import CPJointNLL, MultiBackgroundNLL, YieldAsymmetry
+from .observables import delta_method_covariance, delta_method_errors, delta_method_jacobian
 from .pdf import SCFSignalPDF, SignalPDF
 from .plotting import (
     binned_data,
@@ -140,7 +141,9 @@ __all__ = [
     "SquareDalitzSCFMap", "ToyBackground", "VetoMap", "VetoedDensity", "ZemachP", "ZemachPstar",
     "Zemach_P", "Zemach_Pstar",
     "boost_to_rest_frame", "binned_data", "chi2_from_histograms", "covariant_kinematics",
-    "covariant_kinematics_from_invariants", "dalitz_s13_limits", "enable_x64",
+    "covariant_kinematics_from_invariants", "dalitz_s13_limits",
+    "delta_method_covariance", "delta_method_errors", "delta_method_jacobian",
+    "enable_x64",
     "fold_thetaprime",
     "generate_cp_toy", "generate_signal_toy", "generate_toy", "histogram_background_from_root",
     "histogram_efficiency_from_root", "invariants_to_square_dalitz", "physical_bin_mask",
