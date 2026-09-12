@@ -956,6 +956,51 @@ class PreparedAmplitudeCache:
             self.normalization_matrix(fit_values),
         )
 
+    def _fraction_jacobian_arrays(self):
+        """Dynamic kernel inputs; no fitted-event arrays are needed."""
+        return (
+            self.normalization_data, self.normalization_weights,
+            self.normalization_components, self.normalization_matrix_fixed,
+            self.efficiency_normalization, self.component_scales,
+        )
+
+    def _build_fraction_jacobian_kernel(self, parameter_names):
+        """Compile reusable sequential VJP rows without retaining sample arrays."""
+        components = self.components
+        parameters = self.parameters
+        normalize = self.normalize_components
+        fixed, dynamic = self._component_partitions()
+        names = tuple(parameter_names)
+
+        @jax.jit
+        def kernel(values, arrays):
+            data, weights, columns, matrix, efficiency, scales = arrays
+            cache = PreparedAmplitudeCache(
+                components=components, parameters=parameters,
+                data=data, normalization_data=data,
+                normalization_weights=weights,
+                data_components=jnp.empty((0, 0)),
+                normalization_components=columns,
+                normalization_matrix_fixed=matrix,
+                efficiency_normalization=efficiency,
+                component_scales=scales, normalize_components=normalize,
+                fixed_component_indices=fixed, dynamic_component_indices=dynamic,
+            )
+
+            def fractions(vector):
+                patched = dict(values)
+                patched.update(zip(names, vector, strict=True))
+                return cache.fit_fractions(patched)
+
+            vector = jnp.asarray([values[name] for name in names], dtype=float)
+            output, pullback = jax.vjp(fractions, vector)
+            return jax.lax.map(
+                lambda row: pullback(row)[0],
+                jnp.eye(output.size, dtype=output.dtype),
+            )
+
+        return kernel
+
     def interference_fractions(self, fit_values: Mapping[str, object]) -> Array:
         return matrix_interference_fractions(
             self.coefficient_vector(fit_values),

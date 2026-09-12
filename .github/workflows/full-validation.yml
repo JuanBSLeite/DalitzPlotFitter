@@ -26,7 +26,15 @@ jobs:
           from pathlib import Path
           import nbformat
 
-          for path in sorted(Path("notebooks").glob("*.ipynb")):
+          # The curated notebook set lives in these three subdirectories (see
+          # CLAUDE.md); notebooks/Tests/ and notebooks/genfit/ are scratch/
+          # informal work not covered by this check.
+          paths = [
+              path
+              for directory in ("tutorials", "data_analyses", "benchmark")
+              for path in sorted((Path("notebooks") / directory).glob("*.ipynb"))
+          ]
+          for path in paths:
               with path.open(encoding="utf-8") as handle:
                   notebook = nbformat.read(handle, as_version=4)
               nbformat.validate(notebook)

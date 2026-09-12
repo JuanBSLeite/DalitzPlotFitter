@@ -15,7 +15,7 @@ from dalitzplotfitter import (
     enable_x64,
 )
 from dalitzplotfitter.amplitude import AmplitudeComponent, PreparedAmplitudeCache
-from dalitzplotfitter.likelihood import CPJointNLL
+from dalitzplotfitter.likelihood import CPJointNLL, YieldAsymmetry
 
 enable_x64()
 
@@ -135,6 +135,32 @@ def test_cp_sessions_reuse_normalization_and_fit_charge_asymmetry():
     np.testing.assert_allclose(
         check.jax_gradient, check.finite_difference_gradient, rtol=1e-6, atol=1e-7
     )
+
+
+def test_cp_session_extended_yield_asymmetry_recovers_raw_counts():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    plus = DecayModel(
+        channel, [NonResonant(RealImag(1.0, 0.0))],
+        normalization_method="square-dalitz", normalization_resolution=12,
+    )
+    minus = DecayModel(
+        channel, [NonResonant(RealImag(1.0, 0.0))],
+        normalization_method="square-dalitz", normalization_resolution=12,
+    )
+    plus_data = plus.generate_phase_space(700, seed=11)
+    minus_data = minus.generate_phase_space(300, seed=12)
+    n_s = Parameter("n_s", 900.0, bounds=(1.0, 5000.0))
+    a_cp = Parameter("a_cp_yield", 0.0, bounds=(-0.99, 0.99))
+    signal_yield = YieldAsymmetry(n_s, a_cp)
+    session = CPFitSession(plus, minus, plus_data, minus_data, extended=True, signal_yield=signal_yield)
+    result = session.fit()
+    assert result.valid
+    expected_n_s = 1000.0
+    expected_a = (300.0 - 700.0) / 1000.0
+    assert abs(result.values["n_s"] - expected_n_s) < 1e-3
+    assert abs(result.values["a_cp_yield"] - expected_a) < 1e-6
+    check = session.minimizer().check_gradient(session.result_values(result), print_table=False)
+    np.testing.assert_allclose(check.jax_gradient, check.finite_difference_gradient, rtol=1e-6, atol=1e-7)
 
 
 def test_legacy_yield_and_zero_total_density_are_invalid():

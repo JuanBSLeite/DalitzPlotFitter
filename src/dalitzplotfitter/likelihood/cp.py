@@ -20,6 +20,70 @@ def _resolve(value: object, parameters: Parameters):
     return resolver(parameters) if resolver is not None else value
 
 
+def _signal_yield_pair(value: object, parameters: Parameters) -> tuple[Array, Array, bool]:
+    """Resolve an extended-fit signal yield into ``(n_plus, n_minus, standalone)``.
+
+    ``value`` is either a plain number/``Parameter`` shared by both charges
+    (the historical behaviour: ``standalone=False``, the same value multiplies
+    the *jointly*-normalized ``signal_plus``/``signal_minus`` shapes, so the
+    charge split comes entirely from the amplitude's own interference), or a
+    ``YieldAsymmetry`` (``standalone=True``): ``n_plus``/``n_minus`` are then
+    literal expected per-charge counts that must multiply *standalone*
+    (per-charge) normalized shapes instead, since a jointly-normalized shape
+    would silently reintroduce the amplitude's own charge split on top of the
+    independently-fitted one.
+    """
+    if isinstance(value, YieldAsymmetry):
+        return jnp.asarray(value.plus(parameters)), jnp.asarray(value.minus(parameters)), True
+    shared = jnp.asarray(_resolve(value, parameters))
+    return shared, shared, False
+
+
+@dataclass(frozen=True)
+class YieldAsymmetry:
+    """Total extended-fit signal yield split into a charge asymmetry.
+
+    ``total`` (``N_s``) and ``asymmetry`` (the yield asymmetry, distinct from
+    the coefficient-level ``A_CP`` of ``CPRealImag``) parameterize
+
+    ``N_plus  = N_s (1 - asymmetry) / 2``
+    ``N_minus = N_s (1 + asymmetry) / 2``,
+
+    so ``N_plus + N_minus == N_s`` for any value of ``asymmetry``. ``N_plus``
+    and ``N_minus`` are literal expected event counts for each charge:
+    passing a ``YieldAsymmetry`` to ``CPJointNLL.signal_yield`` makes each
+    charge's signal density its own independently-normalized isobar PDF,
+    ``p_q(phi) = |A_q(phi)|^2 / I_q``, scaled by that charge's own yield. The
+    two amplitudes ``A_plus``/``A_minus`` are still coherent sums of all
+    interfering components, so the *shape* of direct CP violation within
+    each charge's own Dalitz plot is unaffected; what changes is that the
+    *relative rate* between charges is now set directly by ``asymmetry``
+    instead of by the amplitude's own ``I_plus``/``I_minus`` (see
+    ``docs/cp_coefficients.md``'s "central invariant" discussion of
+    ``CPJointNLL``'s default joint normalization, which this deliberately
+    departs from). Passing a plain number/``Parameter`` as
+    ``CPJointNLL.signal_yield`` instead of a ``YieldAsymmetry`` keeps the
+    historical shared-yield behaviour exactly, where the charge split comes
+    entirely from ``I_plus``/``I_minus``.
+
+    ``total`` and ``asymmetry`` may be ordinary numbers or fit ``Parameter``
+    objects.
+    """
+
+    total: object
+    asymmetry: object = 0.0
+
+    @property
+    def parameters(self) -> tuple[object, ...]:
+        return tuple(value for value in (self.total, self.asymmetry) if hasattr(value, "resolve"))
+
+    def plus(self, parameters: Parameters) -> Array:
+        return 0.5 * jnp.asarray(_resolve(self.total, parameters)) * (1.0 - jnp.asarray(_resolve(self.asymmetry, parameters)))
+
+    def minus(self, parameters: Parameters) -> Array:
+        return 0.5 * jnp.asarray(_resolve(self.total, parameters)) * (1.0 + jnp.asarray(_resolve(self.asymmetry, parameters)))
+
+
 @dataclass(frozen=True)
 class CPJointNLL:
     """Unbinned likelihood over the joint ``(Dalitz, charge)`` sample space.
@@ -31,6 +95,11 @@ class CPJointNLL:
     Arbitrary named background categories can be supplied through
     ``background_categories``.  Each category is also normalized jointly over
     charge.  The legacy single-background arguments remain supported.
+
+    In extended mode, ``signal_yield`` may be a plain number/``Parameter``
+    (shared ``N_sig`` for both charges, the historical behaviour) or a
+    ``YieldAsymmetry`` instance parameterizing independent ``N_plus``/
+    ``N_minus`` through a total yield and a yield asymmetry.
     """
 
     plus_cache: PreparedAmplitudeCache
@@ -132,9 +201,15 @@ class CPJointNLL:
             valid = jnp.isfinite(resolved) & (resolved >= 0)
             return valid if upper is None else valid & (resolved <= upper)
 
+        def valid_yield_pair(value):
+            n_plus, n_minus, _ = _signal_yield_pair(value, parameters)
+            if n_plus.ndim != 0 or n_minus.ndim != 0:
+                raise ValueError("CP yields and fractions must be scalars")
+            return jnp.isfinite(n_plus) & (n_plus >= 0) & jnp.isfinite(n_minus) & (n_minus >= 0)
+
         valid = jnp.asarray(True)
         if self.extended:
-            valid = valid & valid_scalar(self.signal_yield)
+            valid = valid & valid_yield_pair(self.signal_yield)
             if self.has_legacy_background:
                 valid = valid & valid_scalar(self.background_yield)
             for category in self.background_categories:
@@ -204,11 +279,16 @@ class CPJointNLL:
         return (signal_plus, signal_minus), None
 
     def densities(self, parameters: Parameters) -> tuple[Array, Array]:
-        signal_plus, signal_minus, _, _ = self._signal_densities(parameters)
+        signal_plus, signal_minus, integral_plus, integral_minus = self._signal_densities(parameters)
         if self.extended:
-            n_signal = jnp.asarray(_resolve(self.signal_yield, parameters))
-            total_plus = n_signal * signal_plus
-            total_minus = n_signal * signal_minus
+            n_plus, n_minus, standalone = _signal_yield_pair(self.signal_yield, parameters)
+            if standalone:
+                total_integral = integral_plus + integral_minus
+                total_plus = n_plus * signal_plus * total_integral / integral_plus
+                total_minus = n_minus * signal_minus * total_integral / integral_minus
+            else:
+                total_plus = n_plus * signal_plus
+                total_minus = n_minus * signal_minus
             if self.background_categories:
                 for category in self.background_categories:
                     n_background = jnp.asarray(_resolve(category.yield_, parameters))
@@ -237,7 +317,10 @@ class CPJointNLL:
     def expected_events(self, parameters: Parameters) -> Array:
         if not self.extended:
             raise RuntimeError("expected_events is only defined in extended mode")
-        total = jnp.asarray(_resolve(self.signal_yield, parameters))
+        if isinstance(self.signal_yield, YieldAsymmetry):
+            total = jnp.asarray(_resolve(self.signal_yield.total, parameters))
+        else:
+            total = jnp.asarray(_resolve(self.signal_yield, parameters))
         if self.background_categories:
             for category in self.background_categories:
                 total = total + jnp.asarray(_resolve(category.yield_, parameters))
@@ -268,13 +351,36 @@ class CPJointNLL:
         signal_total = integral_plus + integral_minus
         signal_plus = integral_plus / signal_total
         signal_minus = integral_minus / signal_total
+        if self.extended and isinstance(self.signal_yield, YieldAsymmetry):
+            # A YieldAsymmetry's n_plus/n_minus already are the expected
+            # per-charge signal counts; unlike the shared-yield branch below,
+            # they must not be reweighted by the amplitude-driven
+            # signal_plus/signal_minus fractions (see YieldAsymmetry).
+            numerator_plus = jnp.asarray(self.signal_yield.plus(parameters))
+            numerator_minus = jnp.asarray(self.signal_yield.minus(parameters))
+            total_yield = numerator_plus + numerator_minus
+            if self.background_categories:
+                for category in self.background_categories:
+                    n_background = jnp.asarray(_resolve(category.yield_, parameters))
+                    numerator_plus = numerator_plus + n_background * category.plus_probability
+                    numerator_minus = numerator_minus + n_background * category.minus_probability
+                    total_yield = total_yield + n_background
+            elif self.has_legacy_background:
+                n_background = jnp.asarray(_resolve(self.background_yield, parameters))
+                bplus = jnp.asarray(self.plus_background_normalization)
+                bminus = jnp.asarray(self.minus_background_normalization)
+                btotal = bplus + bminus
+                numerator_plus = numerator_plus + n_background * bplus / btotal
+                numerator_minus = numerator_minus + n_background * bminus / btotal
+                total_yield = total_yield + n_background
+            return numerator_plus / total_yield, numerator_minus / total_yield
         if not self.has_background:
             return signal_plus, signal_minus
         if self.extended:
             n_signal = jnp.asarray(_resolve(self.signal_yield, parameters))
             numerator_plus = n_signal * signal_plus
             numerator_minus = n_signal * signal_minus
-            total_yield = n_signal
+            total_yield = numerator_plus + numerator_minus
             if self.background_categories:
                 for category in self.background_categories:
                     n_background = jnp.asarray(_resolve(category.yield_, parameters))
@@ -307,4 +413,4 @@ class CPJointNLL:
         return f_signal * signal_plus + (1.0 - f_signal) * background_plus, f_signal * signal_minus + (1.0 - f_signal) * background_minus
 
 
-__all__ = ["CPJointNLL"]
+__all__ = ["CPJointNLL", "YieldAsymmetry"]

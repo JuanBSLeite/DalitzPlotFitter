@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, fields, is_dataclass
 from itertools import permutations
 from typing import Literal
@@ -18,6 +18,7 @@ from dalitzplotfitter.amplitude import (
 )
 from dalitzplotfitter.amplitude.components import coefficient_value
 from dalitzplotfitter.amplitude.cache import DEFAULT_NORMALIZATION_CHUNK_SIZE
+from dalitzplotfitter.observables.errors import _covariance_matrix
 from dalitzplotfitter.dynamics import (
     CovariantAngular,
     RelativisticBreitWigner,
@@ -368,6 +369,7 @@ class DecayModel:
     _compact_prepare_kernels: dict[tuple[bool, bool], object]
     _compact_data_kernels: dict[bool, object]
     _fixed_normalization_templates: dict[bool, tuple[object, object]]
+    _fraction_jacobian_kernels: dict[tuple, object]
 
     def __init__(
         self,
@@ -383,7 +385,7 @@ class DecayModel:
         normalization_order_m23: int | None = None,
         normalization_narrow_width: float = 0.020,
         normalization_narrow_window: float = 5.0,
-        normalization_binning_factor: float = 100.0,
+        normalization_binning_factor: float = 30.0, #default Laura++ value is 100.0, but this is too high
         normalization_sample: PhaseSpaceSample | None = None,
         normalization_chunk_size: int = DEFAULT_NORMALIZATION_CHUNK_SIZE,
     ) -> None:
@@ -446,6 +448,7 @@ class DecayModel:
         object.__setattr__(self, "_compact_prepare_kernels", {})
         object.__setattr__(self, "_compact_data_kernels", {})
         object.__setattr__(self, "_fixed_normalization_templates", {})
+        object.__setattr__(self, "_fraction_jacobian_kernels", {})
         if not self.components:
             raise ValueError("DecayModel requires at least one amplitude component")
         names = [component.name for component in self.components]
@@ -1032,8 +1035,13 @@ class DecayModel:
                 raise ValueError(
                     "efficiency must return one value per normalization point"
                 )
+        # Fit fractions use only the normalization matrix. The cache API also
+        # prepares data amplitudes, so supply just one real event on that side
+        # instead of duplicating the entire integration sample's preparation.
+        # Keep the full normalization sample and its integration weights intact.
+        data_sample = sample.take(jnp.arange(min(sample.size, 1), dtype=jnp.int32))
         return self.prepare_cache(
-            sample,
+            data_sample,
             normalization_sample=sample,
             efficiency_normalization=efficiency_values,
         )
@@ -1110,3 +1118,56 @@ class DecayModel:
                         f"{100.0 * fraction:16.{precision}f}"
                     )
         return result
+
+    def fit_fraction_errors(
+        self,
+        fit_values,
+        covariance,
+        parameter_names: Sequence[str] | None = None,
+        *,
+        normalization_sample: PhaseSpaceSample | None = None,
+        efficiency=None,
+    ) -> dict[str, float]:
+        """Delta-method standard errors for ``fit_fractions()``.
+
+        ``fit_values`` are the postfit parameter values (e.g. from
+        ``FitSession.result_values``/``CPFitSession.result_values``);
+        entries missing from it fall back to each ``Parameter``'s own
+        declared value, exactly like ``fit_fractions()``/
+        ``print_fit_fractions()``. ``covariance`` is a postfit covariance
+        matrix -- typically an ``iminuit`` ``Minuit.covariance`` (e.g.
+        ``result.covariance`` from ``Minimizer.fit``) -- restricted
+        internally to ``parameter_names``, which defaults to every
+        non-fixed parameter in ``self.parameters``. ``normalization_sample``
+        and ``efficiency`` select the same physical-vs-acceptance-weighted
+        convention as ``fit_fractions()``.
+
+        This is a linear (Gaussian) error-propagation approximation, exactly
+        the one implicit in Minuit's own HESSE errors; see
+        ``dalitzplotfitter.observables.delta_method_errors``.
+        """
+        if parameter_names is None:
+            parameter_names = tuple(
+                parameter.name for parameter in self.parameters if not parameter.fixed
+            )
+        values = {
+            parameter.name: parameter.resolve(fit_values) for parameter in self.parameters
+        }
+        cache = self._fraction_cache(normalization_sample, efficiency)
+        jacobian = self._fraction_jacobian(cache, values, parameter_names)
+        matrix = _covariance_matrix(covariance, parameter_names)
+        variance = jnp.diag(jacobian @ matrix @ jacobian.T)
+        errors = jnp.sqrt(jnp.clip(variance, 0.0))
+        return {
+            component.name: float(errors[index])
+            for index, component in enumerate(cache.components)
+        }
+
+    def _fraction_jacobian(self, cache, values, parameter_names):
+        names = tuple(parameter_names)
+        key = (names, cache.normalize_components, cache._component_partitions())
+        kernel = self._fraction_jacobian_kernels.get(key)
+        if kernel is None:
+            kernel = cache._build_fraction_jacobian_kernel(names)
+            self._fraction_jacobian_kernels[key] = kernel
+        return kernel(values, cache._fraction_jacobian_arrays())

@@ -66,7 +66,114 @@ The shared lookup stores only a weak reference to the objective. A completed fit
 
 The Minuit value and gradient callbacks also share the last evaluated parameter point, so requesting the value and gradient at the same point causes only one JAX device evaluation and one device-to-host transfer.
 
+`Minimizer(..., hessian="jax")` (or `session.fit(hessian="jax")`) adds a separately
+compiled automatic Hessian for both MIGRAD and HESSE. It uses forward-over-reverse
+AD: `jax.linearize(jax.grad(objective), point)` followed by sequential
+Hessian-vector products, including through QMI's custom VJPs. It caches the last
+Hessian independently of the value/gradient point. Both compiled programs are
+shared across minimizers of the same live objective and fixed-parameter layout.
+No Hessian program runs or compiles on the default `hessian="numerical"` path.
+The JAX path supplies a diagonal callback too: iminuit 2.32's negative-curvature
+recovery can call it even when a full Hessian is supplied.
+
+The differentiation direction matters on GPU. Applying reverse mode again to
+the QMI gradient reintroduces scatter-adds through the saved knot gathers,
+including highly contended FP64 updates. The grouped first-derivative VJP alone
+does not prevent this. Linearizing the **gradient** in forward mode preserves its
+grouped reductions. An isolated prepared linear-QMI graph (49 knots, 10,000
+events) contained 16 scatter operations with reverse-over-reverse and none with
+the current forward-over-reverse implementation. Columns are still evaluated
+sequentially to bound intermediate memory. See
+[`jax.linearize`](https://docs.jax.dev/en/latest/_autosummary/jax.linearize.html).
+
+Run `python benchmarks/benchmark_hesse.py --model qmi --events 5000 --repeats 3`
+to compare numerical and automatic HESSE. The benchmark reports cold and warm
+times separately and changes each evaluation point to bypass the host cache.
+It evaluates curvature at initial model parameters on phase-space data, **not**
+at a fitted minimum; covariance flags are reported and timings do not establish
+fit convergence or physics precision. Large samples still require substantial
+second-order work and memory, so measure on the device used for the analysis.
+With `verbose=1`, full fits report elapsed time and call counts for each optimizer
+stage, including first-use JIT and any internal HESSE work within MIGRAD.
+
+### GPU Hessian validation (2026-09-12)
+
+The corrected backend passed all 29 `tests/test_minimizer.py` tests on a GeForce
+RTX 3050 Ti Laptop GPU (4 GB), using Python 3.14, JAX 0.11.1, iminuit 2.32.0,
+CUDA 13 and NVIDIA driver 595.91.07. Runs required `JAX_PLATFORMS=cuda`, enabled
+x64, disabled preallocation, and explicitly checked `jax.default_backend()`;
+there was no CPU fallback.
+
+The `13_b2kkk_cpvfit_qmi` model was also checked with its 49 knots, 125 free
+parameters and 1,037,441 adaptive Gauss-Legendre normalization points per charge
+(nominal resolution 20, with narrow-resonance refinement). On 500/450 generated
+phase-space events, the Hessian took 15.77 s on its first call, including JIT, and
+2.442–2.443 s on three subsequent changed-point calls. Against central differences
+of the JAX gradient (`step=1e-5`), the relative Frobenius-norm difference was
+`3.03e-8`. Peak live JAX allocations were 711,382,016 bytes; the allocator pool
+peaked at 1,075,838,976 bytes (these exclude some CUDA/runtime overhead).
+
+A second run used 179,188/162,598 generated events (341,786 total), keeping the
+same 125 free parameters and normalization grids. The first Hessian took 22.27 s;
+three subsequent changed-point evaluations took 3.572, 3.596 and 3.596 s. The
+relative Frobenius-norm difference against gradient finite differences was
+`1.72e-8`. Peak live JAX allocations were 975,183,104 bytes and the allocator pool
+peaked at 2,149,580,800 bytes. No out-of-memory error occurred. Timings include
+device synchronization and transfer of the resulting matrix to NumPy.
+
+Both checks retained the notebook's yield-asymmetry convention and mass/width
+constraints, but used generated events without measured efficiency/background
+maps. They validate derivatives and GPU execution, not the fitted data result.
+The previous reverse-over-reverse implementation was interrupted before its
+first GPU Hessian returned; its earlier CPU-only timing is not a measurement of
+the corrected implementation.
+
 The established strategy-2 refinement is intentionally retained: refined fits still run the existing two MIGRAD passes followed by HESSE. Removing the second pass changed convergence/precision in the regression suite. It should therefore only be reconsidered as an explicit fast-fit mode after dedicated closure studies.
+
+### Fit-fraction uncertainties
+
+`DecayModel.fit_fraction_errors` and the session wrappers use a compiled,
+sequential reverse-mode Jacobian specialized to the model's parameter layout.
+Normalization arrays, efficiencies and current parameter values are runtime
+inputs, so the same executable can serve later parameter points and integration
+samples without retaining their arrays. The fraction cache prepares just one
+event on its unused data side; the full integration sample and weight convention
+are unchanged. First-use compilation still costs time.
+
+For CP fits, the two charges' Jacobian rows are computed separately in the same
+union-of-parameter-names order, then stacked before evaluating `J @ C @ J.T`.
+This avoids zero-cotangent work through the opposite charge while preserving
+the cross-charge covariance needed for the mean fraction's error. The generic
+`delta_method_jacobian` helper remains available with its eager row loop.
+
+GPU comparison on the RTX 3050 Ti described above used the notebook-13 model
+(125 free parameters, 16 charge/component fractions, 1,037,441 normalization
+points per charge), physical fractions at the model starting values, and a
+synthetic positive-definite covariance:
+
+| Measurement | Previous eager implementation | Compiled fraction kernels |
+| --- | ---: | ---: |
+| First full uncertainty call, including preparation and JIT | 14.83 s | 15.06 s |
+| Second full uncertainty call | 4.89 s | 1.19 s |
+| Jacobian portion of the second call | 3.69 s | 0.097 s |
+| Peak live JAX array allocation | 1.398 GB | 0.661 GB |
+
+These are two calls in each of two fresh GPU processes, after constructing the
+normalization grids. The benefit is primarily repeated evaluation and lower
+memory use, not a faster first call. The largest absolute difference in standard
+errors was `1.73e-18`; the Jacobian relative Frobenius-norm difference was
+`3.00e-16`. Runtime/driver memory is additional to the JAX allocation numbers.
+This comparison does not replace evaluating the actual fitted covariance and
+measured efficiency maps. Tests also cover efficiency-weighted fractions,
+floating QMI knots, component normalization, covariance ordering and
+changed values/weights/efficiencies on a reused executable.
+
+For a reproducible single-charge comparison, run each method in a fresh process:
+
+```bash
+XLA_PYTHON_CLIENT_PREALLOCATE=false python benchmarks/benchmark_fit_fraction_errors.py --method eager --require-gpu
+XLA_PYTHON_CLIENT_PREALLOCATE=false python benchmarks/benchmark_fit_fraction_errors.py --method prepared --require-gpu
+```
 
 ### Hazard: mismatched parameter lists between cache and `Minimizer`
 

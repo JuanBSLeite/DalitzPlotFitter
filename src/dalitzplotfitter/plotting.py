@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
-from matplotlib.colors import LogNorm
 import numpy as np
+from matplotlib.colors import LogNorm
 
 from dalitzplotfitter.kinematics import fold_thetaprime, invariants_to_square_dalitz
 
@@ -201,9 +201,67 @@ def plot_square_dalitz(
     return ax
 
 
+def _draw_pulls_1d(ax, edges, pulls):
+    """Draw a 1D pull bar plot with a shaded +-2 band onto an existing axes.
+
+    Shared by :func:`plot_pulls` and the ``show_pulls=True`` panel of
+    ``FitSession``/``CPFitSession.plot_projection``, so both draw pulls
+    identically.
+    """
+
+    edges = np.asarray(edges)
+    pulls = np.asarray(pulls)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    ax.axhspan(-2, 2, color="grey", alpha=0.2, zorder=0)
+    ax.bar(centers, pulls, width=np.diff(edges), color="steelblue", zorder=1)
+    ax.axhline(0.0, color="black", linewidth=1.0)
+    ax.set_ylabel(r"pull $(o-e)/\sqrt{e}$")
+    return ax
+
+
+def plot_pulls(result, *, ax=None):
+    """Plot per-bin pulls from a ``BinnedChi2Result``.
+
+    ``result`` is the return value of
+    :func:`~dalitzplotfitter.goodness_of_fit.chi2_from_histograms` or of a
+    session's ``goodness_of_fit_projection``/``goodness_of_fit_chi2``.
+
+    Dispatches on ``result.pulls.ndim``: a 1D result draws a bar/stem plot of
+    ``(observed-expected)/sqrt(expected)`` against bin center with a shaded
+    +-2 reference band; a 2D result draws a diverging ``pcolormesh`` centered
+    at 0 over ``result.edges``. Bins dropped by
+    :func:`~dalitzplotfitter.goodness_of_fit.chi2_from_histograms` (zero
+    expected count) show as ``nan`` and are left blank.
+    """
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(7, 5))
+    pulls = np.asarray(result.pulls)
+    if pulls.ndim == 1:
+        (edges,) = result.edges
+        _draw_pulls_1d(ax, edges, pulls)
+    elif pulls.ndim == 2:
+        x_edges, y_edges = result.edges
+        limit = float(np.nanmax(np.abs(pulls))) or 1.0
+        mesh = ax.pcolormesh(
+            x_edges,
+            y_edges,
+            pulls.T,
+            cmap="RdBu_r",
+            vmin=-limit,
+            vmax=limit,
+            shading="flat",
+        )
+        ax.figure.colorbar(mesh, ax=ax, label=r"pull $(o-e)/\sqrt{e}$")
+    else:
+        raise ValueError("result.pulls must be 1D or 2D")
+    return ax
+
+
 __all__ = [
     "binned_data",
     "plot_binned_data",
     "plot_dalitz",
+    "plot_pulls",
     "plot_square_dalitz",
 ]

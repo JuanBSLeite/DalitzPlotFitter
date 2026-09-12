@@ -86,6 +86,19 @@ treated as having zero covariance. Consequently, components fitted with
 coefficient `A_CP` and CP phase difference, while their common magnitude and
 phase can still carry uncertainty from `x` and `y`.
 
+`dalitzplotfitter.observables.delta_method_covariance`/`delta_method_errors`
+implement exactly this `Cov(f) = J Cov(x) J^T` propagation as a reusable
+library function, with `J` computed by exact autodiff (`jax.jacrev`) rather
+than a hand-rolled finite-difference Jacobian, for any JAX-differentiable
+postfit quantity -- not only the Cartesian-to-polar CP observables above.
+`CPFitSession.fit_fraction_errors` is the built-in wrapper for fit fractions;
+it propagates the *joint* B+/B- covariance in one Jacobian rather than two
+independent ones (`plus_model`/`minus_model` share almost every fit
+parameter here), which is what makes its `"mean"` entry's cross-term-aware
+error correct rather than a naive quadrature sum. See `docs/fitting.md`
+("Fit fraction errors") and `docs/catalog.md` ("Delta-method error
+propagation").
+
 ## Efficiency and background mixtures
 
 `CPJointNLL` also supports efficiency-weighted signal and background while preserving the same joint charge normalization.
@@ -194,6 +207,66 @@ nll.expected_events(values)
 Signal-only extended fits are also supported by setting `extended=True` and supplying only `signal_yield`.
 
 The non-extended and extended parameterizations are deliberately mutually exclusive: a fit must use either `signal_fraction` or explicit yields, never both.
+
+### Yield-asymmetry parameterization (`YieldAsymmetry`)
+
+By default `signal_yield` is one number/`Parameter` shared by both charges, so
+`S_plus`/`S_minus` above (each normalized jointly, `S_plus + S_minus`
+integrating to one) alone determine how `N_sig` splits between `N_plus` and
+`N_minus` — through the amplitude's own `I_plus`/`I_minus`. This is the
+"central invariant" joint-normalization behavior and gives the fit
+sensitivity to CP violation through Dalitz-plot interference.
+
+`YieldAsymmetry(total, asymmetry)` is a drop-in replacement for `signal_yield`
+that instead makes `N_plus`/`N_minus` independently fittable literal event
+counts:
+
+```text
+N_plus  = N_s (1 - A_yield) / 2
+N_minus = N_s (1 + A_yield) / 2,
+```
+
+so `N_plus + N_minus == N_s` for any `A_yield`. `A_yield` (the yield
+asymmetry) is unrelated to `CPRealImag`'s coefficient-level `A_CP` discussed
+above — the two are independent observables and should not be conflated when
+naming fit parameters. Passing `YieldAsymmetry` changes the extended signal
+model to
+
+```text
+lambda(phi,+) = N_plus  p_plus(phi)  + N_bkg B_plus(phi)
+lambda(phi,-) = N_minus p_minus(phi) + N_bkg B_minus(phi),
+
+p_plus(phi)  = |A_plus(phi)|^2  / I_plus
+p_minus(phi) = |A_minus(phi)|^2 / I_minus,
+```
+
+i.e. each charge's isobar PDF is normalized *on its own*, not jointly. Each
+`A_q(phi)` is still the full coherent sum of interfering components, so the
+CP-violating *shape* within each charge's own Dalitz plot is preserved;
+`A_yield` instead controls the *relative rate* between charges directly,
+overriding whatever split `I_plus`/`I_minus` alone would predict. Use this
+when the observable of interest is a raw/counting CP asymmetry (e.g. one
+contaminated by production or detection asymmetries the amplitude model does
+not capture) rather than the interference-driven asymmetry `CPJointNLL`
+gives by default. `nll.expected_events(values)` still returns `N_s` exactly
+(plus any background yields), and `nll.charge_probabilities(values)` returns
+`N_plus/N_s`, `N_minus/N_s` (diluted by background, as usual, when
+backgrounds are present).
+
+```python
+from dalitzplotfitter import Parameter
+from dalitzplotfitter.likelihood import YieldAsymmetry
+
+signal_yield = YieldAsymmetry(
+    Parameter("n_signal", 5000.0),
+    Parameter("a_cp_yield", 0.0),
+)
+nll = CPJointNLL(plus_cache, minus_cache, extended=True, signal_yield=signal_yield)
+```
+
+`total` and `asymmetry` may be ordinary numbers or `Parameter` objects, and
+`CPFitSession(..., signal_yield=signal_yield)` collects their `Parameter`s
+the same way it collects a plain `signal_yield` `Parameter`.
 
 ## B± -> K± pi+ pi- tutorial convention
 

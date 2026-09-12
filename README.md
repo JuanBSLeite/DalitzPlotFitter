@@ -64,9 +64,9 @@ basic flow.
 
 ## Where to go next
 
-- [`notebooks/TUTORIALS.md`](notebooks/TUTORIALS.md) — a self-contained, seven-part course, from
-  phase space and a first fit through normalization, acceptance, floating dynamics, CP fits and
-  ROOT I/O. Start here.
+- [`notebooks/tutorials/TUTORIALS.md`](notebooks/tutorials/TUTORIALS.md) — a self-contained,
+  nine-part course, from phase space and a first fit through normalization, acceptance, floating
+  dynamics, CP fits, ROOT I/O, QMI and goodness of fit. Start here.
 - [`docs/catalog.md`](docs/catalog.md) — one line per public class/function, with a pointer to
   the doc or notebook that covers it in depth. Use it to answer "does something already do X" or
   "where is X" before searching the source.
@@ -92,12 +92,14 @@ python -m pip install -e ".[dev]"
 pytest
 ```
 
-Double precision must be enabled once before any numerical work, since the project deliberately
-runs `float64`/`complex128` rather than JAX's default:
+The project deliberately runs `float64`/`complex128` rather than JAX's own default, for
+amplitude-analysis stability. `import dalitzplotfitter` already enables double precision
+automatically, so no separate call is needed for normal use:
 
 ```python
-from dalitzplotfitter import enable_x64
-enable_x64()
+from dalitzplotfitter import enable_x64  # only needed to opt back out
+
+enable_x64(False)  # explicit, unvalidated float32 experiment
 ```
 
 ## Physics references

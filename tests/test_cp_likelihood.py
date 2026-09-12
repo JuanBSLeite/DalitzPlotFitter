@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from dalitzplotfitter import RealImag, enable_x64
 from dalitzplotfitter.amplitude import AmplitudeComponent, PreparedAmplitudeCache
 from dalitzplotfitter.fit import Parameter
-from dalitzplotfitter.likelihood import CPJointNLL
+from dalitzplotfitter.likelihood import CPJointNLL, YieldAsymmetry
 
 
 enable_x64()
@@ -128,6 +128,72 @@ def test_cp_joint_extended_signal_background_uses_yields():
     expected_plus = (90.0 * signal_plus + 10.0 * (2.0 / 3.0)) / 100.0
     assert jnp.allclose(p_plus, expected_plus)
     assert jnp.allclose(p_plus + p_minus, 1.0, rtol=1e-12, atol=1e-12)
+
+
+def test_cp_joint_extended_yield_asymmetry_uses_standalone_normalized_shapes():
+    plus = _cache(StaticAmplitude([1.0 + 0.0j]), RealImag(1.0, 0.0), 2, [1.0])
+    minus = _cache(StaticAmplitude([2.0 + 0.0j]), RealImag(1.0, 0.0), 1, [1.0])
+    total = Parameter("n_s", 100.0)
+    asymmetry = Parameter("a_cp", 0.2)
+    signal_yield = YieldAsymmetry(total, asymmetry)
+    nll = CPJointNLL(plus, minus, extended=True, signal_yield=signal_yield)
+    values = {"n_s": 100.0, "a_cp": 0.2}
+    n_plus, n_minus = 40.0, 60.0  # 100*(1-0.2)/2, 100*(1+0.2)/2
+
+    # Each charge's PDF is normalized on its own (intensity_q / integral_q),
+    # not by the joint integral_plus + integral_minus used for a shared yield.
+    intensity_plus, integral_plus = plus.evaluate({})
+    intensity_minus, integral_minus = minus.evaluate({})
+    p_plus, p_minus = intensity_plus / integral_plus, intensity_minus / integral_minus
+
+    ep, em = nll.densities(values)
+    assert jnp.allclose(ep, n_plus * p_plus, rtol=1e-12, atol=1e-12)
+    assert jnp.allclose(em, n_minus * p_minus, rtol=1e-12, atol=1e-12)
+    expected_nll = 100.0 - jnp.sum(jnp.log(ep)) - jnp.sum(jnp.log(em))
+    assert jnp.allclose(nll(values), expected_nll, rtol=1e-12, atol=1e-12)
+    assert jnp.allclose(nll.expected_events(values), 100.0)
+
+    p_plus_frac, p_minus_frac = nll.charge_probabilities(values)
+    assert jnp.allclose(p_plus_frac, n_plus / 100.0)
+    assert jnp.allclose(p_minus_frac, n_minus / 100.0)
+    assert jnp.allclose(p_plus_frac + p_minus_frac, 1.0, rtol=1e-12, atol=1e-12)
+
+
+def test_cp_joint_extended_yield_asymmetry_overrides_amplitude_charge_split():
+    # The amplitude alone predicts I_plus=1, I_minus=4, i.e. P(+) = 1/5 under
+    # the shared-yield (jointly-normalized) convention.
+    plus = _cache(StaticAmplitude([1.0 + 0.0j]), RealImag(1.0, 0.0), 1, [1.0])
+    minus = _cache(StaticAmplitude([2.0 + 0.0j]), RealImag(1.0, 0.0), 1, [1.0])
+    shared = CPJointNLL(plus, minus, extended=True, signal_yield=Parameter("n_shared", 10.0))
+    shared_plus, shared_minus = shared.charge_probabilities({"n_shared": 10.0})
+    assert jnp.allclose(shared_plus, 0.2, rtol=1e-12, atol=1e-12)
+    assert jnp.allclose(shared_minus, 0.8, rtol=1e-12, atol=1e-12)
+
+    # A YieldAsymmetry with asymmetry=0 instead forces an even 50/50 split,
+    # regardless of what the amplitude's own interference would predict.
+    asymmetric = CPJointNLL(plus, minus, extended=True, signal_yield=YieldAsymmetry(Parameter("n_s", 10.0), 0.0))
+    a_plus, a_minus = asymmetric.charge_probabilities({"n_s": 10.0})
+    assert jnp.allclose(a_plus, 0.5, rtol=1e-12, atol=1e-12)
+    assert jnp.allclose(a_minus, 0.5, rtol=1e-12, atol=1e-12)
+
+
+def test_yield_asymmetry_rejects_out_of_range_asymmetry():
+    plus = _cache(StaticAmplitude([1.0 + 0.0j]), RealImag(1.0, 0.0), 1, [1.0])
+    minus = _cache(StaticAmplitude([1.0 + 0.0j]), RealImag(1.0, 0.0), 1, [1.0])
+    signal_yield = YieldAsymmetry(Parameter("n_s", 10.0), Parameter("a_cp", 0.0))
+    nll = CPJointNLL(plus, minus, extended=True, signal_yield=signal_yield)
+    # |a_cp| > 1 drives one charge's yield negative; the JAX-traced physical
+    # domain check must catch this at call time, matching how out-of-range
+    # yields/fractions are rejected elsewhere in extended mode.
+    values = {"n_s": 10.0, "a_cp": 1.5}
+    assert bool(jnp.isinf(nll(values)))
+
+    try:
+        CPJointNLL(plus, minus, extended=True, signal_yield=YieldAsymmetry(Parameter("n_s", 10.0), Parameter("a_cp", 1.5)))
+    except ValueError as exc:
+        assert "physical" in str(exc)
+    else:
+        raise AssertionError("out-of-range default asymmetry should fail construction")
 
 
 def test_cp_joint_nll_rejects_inconsistent_modes():

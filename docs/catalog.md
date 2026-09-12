@@ -10,7 +10,7 @@ not covered here (private helpers, submodule-only exports like the `Simultaneous
 `WeightedUnbinned` NLL variants in `dalitzplotfitter.likelihood`), read the module directly —
 this catalog only covers the public top-level surface.
 
-For a guided introduction, start with the [seven-part notebook course](../notebooks/TUTORIALS.md).
+For a guided introduction, start with the [nine-part notebook course](../notebooks/tutorials/TUTORIALS.md).
 The lessons explain the main fitting workflow and link to specialized examples below.
 
 ## Model construction
@@ -143,6 +143,7 @@ These are what `FitSession`/`CPFitSession` compose automatically; use them direc
 | `SCFSignalPDF` | class | Signal PDF including correctly-reconstructed *and* self-cross-feed (SCF) migrated events. |
 | `MultiBackgroundNLL` | class | Unbinned NLL: signal plus an arbitrary number of named background categories (non-CP). |
 | `CPJointNLL` | class | Unbinned NLL for simultaneous B+/B- fits with one joint `(Dalitz, charge)` normalization — charge is part of the sample space, not fit independently per charge. |
+| `YieldAsymmetry` | class | Extended-fit `signal_yield` replacement splitting a total `N_s` into independent `N_plus`/`N_minus` via a yield asymmetry, overriding `CPJointNLL`'s default amplitude-driven charge split. |
 
 Docs: `docs/fitting.md`, `docs/cp_coefficients.md`, `docs/backgrounds_and_vetoes.md`, `docs/scf.md`, `docs/performance.md`.
 
@@ -244,6 +245,41 @@ Docs: `docs/discriminants_and_constraints.md`. Notebooks: `10_b2kpipi_discrimina
 
 Docs: `docs/convolution_resolution.md`. Notebooks: `20_pdf_convolution_resolution.ipynb`.
 
+## Delta-method error propagation
+
+| Name | Kind | What it does |
+|---|---|---|
+| `delta_method_jacobian` | function | Exact reverse-mode-autodiff Jacobian of a JAX-differentiable observable with respect to named fit parameters, at a given parameter point (one `jax.vjp` linearization plus a per-output-row loop, not `jax.jacrev`'s batched sweep -- see `docs/fitting.md` for why). |
+| `delta_method_covariance` | function | Propagate a postfit covariance (e.g. `result.covariance` from `Minimizer.fit`) through that Jacobian: `J @ C @ J.T`. |
+| `delta_method_errors` | function | Standard errors only: `sqrt(diag(delta_method_covariance(...)))`. |
+
+General-purpose linear (Gaussian) error propagation for any JAX-differentiable
+quantity derived from postfit parameter values -- not just fit fractions,
+though `DecayModel.fit_fraction_errors`/`FitSession.fit_fraction_errors`/
+`CPFitSession.fit_fraction_errors` are the built-in convenience wrappers for
+that specific case (`CPFitSession`'s propagates the *joint* B+/B- covariance
+in one Jacobian, since the two charges share almost every fit parameter, and
+returns the correct cross-term-aware error for the mean fraction too). This
+is the same linear approximation implicit in Minuit's own HESSE errors, and
+can accept either a Minuit-style name-indexable covariance or a plain dense
+array already ordered like the requested parameter names. Docs:
+`docs/fitting.md` ("Fit fractions"), `docs/cp_coefficients.md`.
+
+## Goodness of fit
+
+| Name | Kind | What it does |
+|---|---|---|
+| `BinnedChi2Result` | class | Binned Pearson chi2 result: chi2, dof bounds, p-value bounds, per-bin pulls and edges. |
+| `chi2_from_histograms` | function | Low-level binned Pearson chi2 test between observed/expected count arrays (1D or 2D). |
+| `PointToPointResult` | class | Point-to-point dissimilarity (PPD) result: statistic, permutation-test p-value. |
+| `point_to_point_dissimilarity` | function | Low-level unbinned PPD test (Williams, arXiv:1006.3019) between plain coordinate/density arrays. |
+
+`FitSession`/`CPFitSession` expose these as `goodness_of_fit_projection`/`goodness_of_fit_chi2`/
+`point_to_point_dissimilarity` methods, reusing the same reweighted-MC-projection machinery as
+`plot_projection`. Docs: `docs/goodness_of_fit.md`. Notebooks:
+`notebooks/tutorials/tutorial_09_goodness_of_fit.ipynb`,
+`notebooks/data_analyses/12_b2kkk_cpvfit.ipynb` (real per-charge GOF section).
+
 ## Plotting
 
 | Name | Kind | What it does |
@@ -252,8 +288,9 @@ Docs: `docs/convolution_resolution.md`. Notebooks: `20_pdf_convolution_resolutio
 | `plot_square_dalitz` | function | Plot a 2D Square-Dalitz histogram from ordinary invariant coordinates. |
 | `plot_binned_data` | function | Plot 1D data as black points with statistical error bars. |
 | `binned_data` | function | Return bin centers, counts, uncertainties and edges without plotting (for custom figures). |
+| `plot_pulls` | function | Plot per-bin pulls from a `BinnedChi2Result` (1D bar plot or 2D diverging heatmap). |
 
-Docs: `docs/user_friendly_api.md` ("Automatic projections", "Plot helpers").
+Docs: `docs/user_friendly_api.md` ("Automatic projections", "Plot helpers"), `docs/goodness_of_fit.md`.
 
 ## High-level sessions
 
@@ -261,8 +298,8 @@ Composition layers over everything above; see `docs/user_friendly_api.md` "Desig
 
 | Name | Kind | What it does |
 |---|---|---|
-| `FitSession` | class | Compose PDF + likelihood + backgrounds + constraints + minimizer for one sample in a few lines; `fit()`, `report()`, `plot_projection()`, `.from_root(...)`. |
-| `CPFitSession` | class | Same composition for simultaneous B+/B- fits over `CPJointNLL`; shared `Parameter`s collected once. |
+| `FitSession` | class | Compose PDF + likelihood + backgrounds + constraints + minimizer for one sample in a few lines; `fit()`, `report()`, `plot_projection()`, `goodness_of_fit_projection()`/`goodness_of_fit_chi2()`/`point_to_point_dissimilarity()`, `.from_root(...)`. |
+| `CPFitSession` | class | Same composition for simultaneous B+/B- fits over `CPJointNLL`; shared `Parameter`s collected once; same goodness-of-fit methods, per charge. |
 
 Docs: `docs/user_friendly_api.md`. Notebooks: `16_user_friendly_quickstart.ipynb`, `17_b2kpipi_cp_user_friendly.ipynb`.
 
@@ -270,6 +307,6 @@ Docs: `docs/user_friendly_api.md`. Notebooks: `16_user_friendly_quickstart.ipynb
 
 | Name | Kind | What it does |
 |---|---|---|
-| `enable_x64` | function | Enable (default) or disable JAX 64-bit floating-point precision. Call this before any numerical work. |
+| `enable_x64` | function | Enable or disable JAX 64-bit floating-point precision. Importing `dalitzplotfitter` already calls this with `enabled=True` unless `JAX_ENABLE_X64` was set explicitly first; call `enable_x64(False)` directly only to opt back into an explicit, unvalidated float32 experiment. |
 
 Docs: `README.md` "Installation", `docs/fitting.md`.
