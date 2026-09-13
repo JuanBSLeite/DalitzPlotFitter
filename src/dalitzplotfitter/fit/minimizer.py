@@ -455,6 +455,13 @@ class Minimizer:
             stage("MIGRAD 2", minuit.migrad, use_simplex=False)
         if hesse:
             stage("HESSE", minuit.hesse)
+        # Near the EDM boundary, numerical line-search noise can leave a
+        # perfectly finite minimum marked invalid by a tiny margin. Give
+        # MIGRAD one polishing pass before exposing that status to callers.
+        if not bool(minuit.valid):
+            stage("MIGRAD polish", minuit.migrad, use_simplex=False)
+            if hesse:
+                stage("HESSE polish", minuit.hesse)
         if np.isfinite(best_fval) and float(minuit.fval) > best_fval:
             self._log("restoring the best accepted Minuit stage because a later "
                       "stage worsened the NLL")
