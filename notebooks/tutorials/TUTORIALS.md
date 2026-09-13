@@ -39,7 +39,7 @@ separate approximations. No remote data, GPU, or ROOT installation is required.
 | 9 | [Goodness of fit](tutorial_09_goodness_of_fit.ipynb) | BinnedChi2Result, chi2 1D/2D, point_to_point_dissimilarity, plot_pulls |
 | 10 | [QMI S-wave isobar closure](tutorial_08_qmi_isobar_closure.ipynb) | QMI, magnitude/phase recovery, closure diagnostics |
 | 11 | [QMI Cartesian isobar closure](tutorial_09_qmi_cartesian_isobar_closure.ipynb) | Cartesian QMI nodes, coefficient recovery, fit validation |
-| 12 | [QMI2D Dalitz-field closure](tutorial_10_qmi2d_dalitz_closure.ipynb) | QMI2D, physical-bin masks, phase maps, two-dimensional closure |
+| 12 | [QMI2D: campo de Dalitz e ajuste de toy](tutorial_10_qmi2d_dalitz_closure.ipynb) | QMI2D, DalitzAmplitude, máscara física, folding, interpolação e ajuste de magnitude/fase |
 
 ## Continue with focused examples
 

@@ -448,6 +448,20 @@ class Minimizer:
                 f"nhessian=+{minuit.nhessian - nhessian}"
             )
 
+        # Near the EDM boundary, numerical line-search noise can leave a
+        # perfectly finite minimum marked invalid by a tiny margin. Give
+        # MIGRAD one polishing pass before exposing that status to callers.
+        # This must run *after* the best-fval restore below: restoring an
+        # earlier stage's point can itself leave the fit invalid, and a
+        # polish attempted only before the restore would be silently undone
+        # by it, re-exposing the same invalid status the polish was meant to
+        # fix.
+        def polish_if_invalid():
+            if not bool(minuit.valid):
+                stage("MIGRAD polish", minuit.migrad, use_simplex=False)
+                if hesse:
+                    stage("HESSE polish", minuit.hesse)
+
         if simplex:
             stage("SIMPLEX", minuit.simplex)
         stage("MIGRAD 1", minuit.migrad, use_simplex=False)
@@ -455,20 +469,14 @@ class Minimizer:
             stage("MIGRAD 2", minuit.migrad, use_simplex=False)
         if hesse:
             stage("HESSE", minuit.hesse)
-        # Near the EDM boundary, numerical line-search noise can leave a
-        # perfectly finite minimum marked invalid by a tiny margin. Give
-        # MIGRAD one polishing pass before exposing that status to callers.
-        if not bool(minuit.valid):
-            stage("MIGRAD polish", minuit.migrad, use_simplex=False)
-            if hesse:
-                stage("HESSE polish", minuit.hesse)
         if np.isfinite(best_fval) and float(minuit.fval) > best_fval:
             self._log("restoring the best accepted Minuit stage because a later "
                       "stage worsened the NLL")
             for name, value in best_values.items():
                 minuit.values[name] = value
             if hesse:
-                minuit.hesse(ncall=ncall)
+                stage("HESSE (restored)", minuit.hesse)
+        polish_if_invalid()
         return minuit
 
     def fit(
