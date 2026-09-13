@@ -13,6 +13,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .parameters import Parameter
+from .nesterov import minimize as nesterov_minimize
 
 # ``FitSession.fit()`` constructs a new Minimizer for each call. The objective
 # object itself is cached by the session, so use its identity to retain the JAX
@@ -427,12 +428,20 @@ class Minimizer:
             if parameter.step is not None:
                 minuit.errors[parameter.name] = parameter.step
 
+        best_fval = float("inf")
+        best_values = {name: float(minuit.values[name]) for name in names}
+
         def stage(label, method, **kwargs):
+            nonlocal best_fval, best_values
             self._log(f"{label} started")
             started = perf_counter()
             nfcn, ngrad = minuit.nfcn, minuit.ngrad
             nhessian = minuit.nhessian
             method(ncall=ncall, **kwargs)
+            nonlocal_best = float(minuit.fval)
+            if np.isfinite(nonlocal_best) and nonlocal_best < best_fval:
+                best_fval = nonlocal_best
+                best_values = {name: float(minuit.values[name]) for name in names}
             self._log(
                 f"{label} finished in {perf_counter() - started:.3f} s: "
                 f"nfcn=+{minuit.nfcn - nfcn}, ngrad=+{minuit.ngrad - ngrad}, "
@@ -446,6 +455,13 @@ class Minimizer:
             stage("MIGRAD 2", minuit.migrad, use_simplex=False)
         if hesse:
             stage("HESSE", minuit.hesse)
+        if np.isfinite(best_fval) and float(minuit.fval) > best_fval:
+            self._log("restoring the best accepted Minuit stage because a later "
+                      "stage worsened the NLL")
+            for name, value in best_values.items():
+                minuit.values[name] = value
+            if hesse:
+                minuit.hesse(ncall=ncall)
         return minuit
 
     def fit(
@@ -456,22 +472,44 @@ class Minimizer:
         ncall: int | None = None,
         strategy: int = 2,
         hesse: bool = True,
+        method: str = "minuit",
+        nesterov_max_iter: int = 1000,
+        nesterov_gtol: float = 1e-4,
     ):
-        """Fit with an approximate call limit per minimization stage.
+        """Fit with Minuit or a Nesterov prefit.
 
         ``ncall`` is passed to SIMPLEX (if requested), each MIGRAD call and
         HESSE (if requested). It is not a total budget for the complete fit;
         strategy 2 performs two MIGRAD calls. Minuit can exceed a stage's
-        approximate limit while completing an iteration.
+        approximate limit while completing an iteration. ``method="nesterov"``
+        returns the fast Nesterov endpoint; ``method="nesterov-minuit"`` uses
+        it as the starting point for the ordinary strategy-1/2 Minuit fit.
+        Invalid or worsened Minuit continuations are rejected.
         """
         ncall = self._validate_ncall(ncall)
         strategy = self._validate_strategy(strategy)
+        if method not in ("minuit", "nesterov", "nesterov-minuit"):
+            raise ValueError("method must be 'minuit', 'nesterov' or 'nesterov-minuit'")
+        if method != "minuit" and strategy not in (1, 2):
+            raise ValueError("Nesterov methods support strategy 1 or 2")
         if not isinstance(hesse, bool):
             raise ValueError("hesse must be a boolean")
+        self._validate_start_values(start_values)
+        prefit = None
+        if method in ("nesterov", "nesterov-minuit"):
+            prefit = nesterov_minimize(
+                self.objective, self.parameters, start_values=start_values,
+                max_iter=nesterov_max_iter, gtol=nesterov_gtol, verbose=self.verbose,
+            )
+            self._log(f"Nesterov prefit finished: status={prefit.status} "
+                      f"NLL={prefit.fval:.9f} nfcn={prefit.nfcn}")
+            if method == "nesterov":
+                return prefit
+            start_values = prefit.values
         free, names, fcn, grad, hessian_callback = self._backend()
         self._log(
             f"single fit with {len(free)} free parameters "
-            f"(simplex={simplex}, strategy={strategy}, hesse={hesse}, "
+            f"(method={method}, simplex={simplex}, strategy={strategy}, hesse={hesse}, "
             f"hessian={self.hessian}, ncall={ncall}, tolerance={self.tolerance})"
         )
         result = self._run(
@@ -486,6 +524,12 @@ class Minimizer:
             simplex=simplex,
             ncall=ncall,
         )
+        if (prefit is not None and
+                (not bool(result.valid) or not np.isfinite(float(result.fval)) or
+                 float(result.fval) > float(prefit.fval))):
+            self._log("MIGRAD produced an invalid or worsened continuation; "
+                      "returning the Nesterov endpoint")
+            return prefit
         self._log(f"single fit finished: {self._summary(result)}")
         return result
 

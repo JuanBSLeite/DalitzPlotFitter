@@ -66,7 +66,7 @@ PhaseSpaceSample (data or generated)
   -> optional efficiency/veto/SCF/backgrounds/discriminating-variable PDFs/1D convolution
   -> optional Gaussian constraints
   -> FitSession / CPFitSession (optional convenience layer)
-  -> JAX NLL + automatic gradient -> Minimizer (iminuit)
+  -> JAX NLL + automatic gradient -> Minimizer (Nesterov prefit and/or iminuit)
 ```
 
 ### Two API layers, by design
@@ -75,6 +75,13 @@ PhaseSpaceSample (data or generated)
 low-level public classes (`SignalPDF`, `PreparedAmplitudeCache`, `MultiBackgroundNLL`,
 `CPJointNLL`, `Minimizer`) — they do not replace them. Advanced/validation work should still go
 through the low-level classes directly; see `docs/user_friendly_api.md` "Design principle".
+
+`Minimizer.fit(method="nesterov")` provides a projected, parameter-scaled
+Nesterov first-order fit. `method="nesterov-minuit"` runs that prefit before
+the existing Minuit strategy 1/2 stages. Invalid or worsened MIGRAD results
+are rejected, and a later stage cannot replace an earlier stage with a higher
+NLL. Nesterov-only results have no covariance and must not be used for
+uncertainty reporting without a separate Hessian calculation.
 
 ### One-dimensional lineshapes vs. full 2D Dalitz amplitudes
 

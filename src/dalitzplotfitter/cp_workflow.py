@@ -238,6 +238,7 @@ class CPFitSession:
     def fit(
         self, start_values=None, *, simplex=False, ncall=None, strategy=2,
         hesse=True, tolerance=1e-4, verbose=0, hessian="numerical",
+        method="minuit", nesterov_max_iter=1000, nesterov_gtol=1e-4,
     ):
         return self.minimizer(
             tolerance=tolerance, verbose=verbose, hessian=hessian,
@@ -247,6 +248,9 @@ class CPFitSession:
             ncall=ncall,
             strategy=strategy,
             hesse=hesse,
+            method=method,
+            nesterov_max_iter=nesterov_max_iter,
+            nesterov_gtol=nesterov_gtol,
         )
 
     def fit_multistart(
