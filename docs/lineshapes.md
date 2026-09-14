@@ -65,6 +65,20 @@ is retained; reproducing Laura++'s full support requires setting `mass_min`
 to the KK threshold. These conventions must be matched to the coefficients:
 a global phase of one component changes its interference with other components.
 
+`convention="laura"` reproduces `LauRescatteringRes::amplitude` to float64
+precision against a literal line-by-line port, including its `eta0=1`
+override below the KK threshold and above `m_prime` and its behaviour at the
+single point `m == 2*kaon_mass` where the C++ itself divides by zero (this
+returns the well-defined two-sided-limit zero there instead of propagating a
+NaN); see `docs/reviews/20260914_pipi_kk_rescattering.md`. This is inactive
+at the default `mass_min=1.0`/`mass_max=m_prime=1.5` window, so it only
+matters when `mass_min`/`mass_max` are widened. Laura++'s own
+`LauRescatteringRes` constructor defaults are `lambdaPiPi=1.0`,
+`lambdaKK=2.8` (i.e. `delta_kk_squared=7.84`); `PipiKKRescattering`'s class
+default `delta_kk_squared=1.0` is not meant to reproduce that value, only to
+give the unit test a neutral reference point -- pass the actual analysis's
+`lambdaPiPi`/`lambdaKK` explicitly.
+
 ## Flatte
 
 `Flatte` follows the coupled two-channel Laura++ form
