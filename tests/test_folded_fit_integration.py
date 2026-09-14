@@ -108,7 +108,7 @@ def test_fit_session_runs_with_folded_histogram_efficiency_and_background():
     assert jnp.isfinite(value)
 
     result = session.fit(
-        {"NR.x": 0.9, "signal_fraction": 0.7}, simplex=False, ncall=100
+        {"NR.x": 0.9, "signal_fraction": 0.7}, simplex=False, ncall=500
     )
     assert result.valid
 

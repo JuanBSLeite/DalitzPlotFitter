@@ -24,6 +24,24 @@ class PipiKKRescattering:
     starts at the KK threshold, so set mass_min accordingly to reproduce it.
     The delta_*_squared parameters denote the source denominators: they have
     units GeV for 'paper' and GeV**2 (lambda**2) for 'laura'.
+
+    Within the default 1.0--1.5 GeV window this reproduces
+    ``LauRescatteringRes::amplitude`` (Laura++ 3.8) to float64 precision
+    (checked against a literal line-by-line port, see
+    ``docs/reviews/20260914_pipi_kk_rescattering.md``). ``convention='laura'``
+    additionally reproduces two of its behaviours that only matter outside
+    that window and are therefore invisible at the defaults: the eta0=1
+    override below the 2*kaon_mass threshold and above ``m_prime`` (Laura++
+    forces the inelasticity to zero there rather than trusting the continued
+    formula), and safe handling of the eta0/cot(delta0) denominators that
+    vanish exactly at ``m == 2*kaon_mass`` (Laura++'s own C++ produces NaN at
+    that single point via ``0.0 * cos(NaN)``; this returns the well-defined
+    zero that the formula's two-sided limit gives instead -- a deliberate,
+    justified deviation at one measure-zero point, not a physics difference).
+    The ``'paper'`` convention keeps the same safe denominators (avoiding the
+    NaN is not convention-specific) but does not apply the eta0=1 override,
+    since that is a Laura++ implementation choice absent from the printed
+    equations.
     """
 
     mass_min: float = 1.0
@@ -56,18 +74,27 @@ class PipiKKRescattering:
         s = m**2
         s_safe = jnp.maximum(s, tiny)
         m_safe = jnp.maximum(m, tiny)
-        k2_squared = jnp.maximum(0.25 * s - self.kaon_mass**2, 0.0)
-        k2 = jnp.sqrt(k2_squared)
-        k2_safe = jnp.maximum(k2, tiny)
+
+        # Laura++'s raw (signed) k2^2 = (s - 4*kaon_mass^2)/4 -- kept
+        # unclamped, like LauRescatteringRes::amplitude's k2Square_s, so eta
+        # uses the same continued value Laura does; k2_abs is |k2^2|**0.5,
+        # matching its k2Abs_s (always real, even below threshold).
+        k2_squared_signed = 0.25 * s - self.kaon_mass**2
+        k2_abs = jnp.sqrt(jnp.abs(k2_squared_signed))
+        # Guarded only to avoid an exact 0/0 at m == 2*kaon_mass (k2_abs is
+        # also 0 there, so this never changes a nonzero result).
+        k2_denominator = jnp.where(k2_squared_signed == 0.0, tiny, k2_squared_signed)
 
         eta = 1.0 - (
-            self.epsilon1 * k2 / m_safe
-            + self.epsilon2 * k2**2 / s_safe
+            self.epsilon1 * k2_abs / m_safe
+            + self.epsilon2 * k2_squared_signed / s_safe
         ) * (self.m_prime**2 - s_safe) / s_safe
+        if self.convention == "laura":
+            below_threshold_or_above_mprime = (m < 2.0 * self.kaon_mass) | (m > self.m_prime)
+            eta = jnp.where(below_threshold_or_above_mprime, 1.0, eta)
         cot_delta = self.c0 * (
-            (s_safe - self.m_s**2) * (self.m_f**2 - s_safe)
-            / (self.m_f**2 * m_safe)
-        ) * jnp.abs(k2) / k2_safe**2
+            (s_safe - self.m_s**2) * (self.m_f**2 - s_safe) * k2_abs
+        ) / (self.m_f**2 * m_safe * k2_denominator)
         exp_2i_delta = (cot_delta + 1j) / (cot_delta - 1j)
         scattering = jnp.sqrt(jnp.maximum(1.0 - eta**2, 0.0)) * exp_2i_delta
         source_variable = s if self.convention == "laura" else m

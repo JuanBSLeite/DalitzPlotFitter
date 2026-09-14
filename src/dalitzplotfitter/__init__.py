@@ -61,7 +61,7 @@ from .dynamics import (
     ZemachPstar,
     physical_bin_mask,
 )
-from .fit import Minimizer, MultiStartResult, Parameter, ParameterKind
+from .fit import Minimizer, MultiStartResult, NesterovResult, Parameter, ParameterKind
 from .goodness_of_fit import (
     BinnedChi2Result,
     PointToPointResult,
@@ -143,7 +143,7 @@ __all__ = [
     "DecayChannel", "DecayModel", "Exponential1D", "FactorizedDensity", "FitSession",
     "Flatte", "FunctionalVeto", "Gaussian1D", "GaussianConstraint", "GaussianResolution1D",
     "GooFitLegacyAngular", "GounarisSakurai", "Histogram1D", "KMatrix", "LASS", "LineshapeIntensity1D", "DalitzGaussLegendreGrid",
-    "MassWindowVeto", "Minimizer", "MultiBackgroundNLL", "MultiStartResult", "NonResonant",
+    "MassWindowVeto", "Minimizer", "MultiBackgroundNLL", "MultiStartResult", "NesterovResult", "NonResonant",
     "Parameter", "ParameterKind", "PhaseSpaceMC", "PhaseSpaceSample", "Pole", "PointToPointResult",
     "PreparedAmplitudeCache", "PreparedInverseToyGenerator", "PipiKKRescattering", "QMI", "QMI2D", "RealImag", "RelativisticBreitWigner", "RhoOmegaMixing", "Rescattering2", "SigmaPole",
     "Resonance", "ResonanceAmplitude", "ResonanceContext", "SCFSignalPDF", "SignalPDF",

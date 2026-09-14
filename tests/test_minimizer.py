@@ -39,6 +39,30 @@ def test_minimizer_exposes_strategy_and_optional_hesse():
     assert math.isclose(float(result.values["x"]), 1.5, abs_tol=2e-5)
 
 
+def test_minimizer_can_run_nesterov_as_a_prefit_or_standalone():
+    parameters = (
+        Parameter("x", -2.0, bounds=(-5.0, 5.0), step=0.1),
+        Parameter("y", 2.0, bounds=(-5.0, 5.0), step=0.1),
+    )
+
+    def objective(values):
+        return (values["x"] - 1.5) ** 2 + (values["y"] + 0.75) ** 2
+
+    standalone = Minimizer(objective, parameters).fit(
+        method="nesterov", strategy=1, nesterov_max_iter=300,
+    )
+    assert standalone.optimizer == "nesterov"
+    assert standalone.fval < 1e-6
+    assert math.isclose(float(standalone.values["x"]), 1.5, abs_tol=6e-4)
+
+    refined = Minimizer(objective, parameters).fit(
+        method="nesterov-minuit", strategy=2, hesse=True,
+        nesterov_max_iter=50,
+    )
+    assert float(refined.fval) < 1e-10
+    assert math.isclose(float(refined.values["y"]), -0.75, abs_tol=1e-6)
+
+
 @pytest.mark.parametrize("strategy", [-1, 3, True, 1.5])
 def test_minimizer_rejects_invalid_strategy(strategy):
     parameter = Parameter("x", 0.0)

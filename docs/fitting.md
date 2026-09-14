@@ -1,6 +1,45 @@
 # Fitting and statistical validation
 
-DalitzPlotFitter uses `iminuit` for minimization while JAX evaluates the objective and automatic gradient.
+DalitzPlotFitter uses JAX to evaluate the objective and automatic gradient. `iminuit`
+remains the default minimizer, and a projected Nesterov prefit is available for
+large amplitude fits that benefit from a fast first pass.
+
+## Nesterov prefit and Minuit continuation
+
+`Minimizer.fit()` and both high-level fit sessions accept `method="nesterov"`
+or `method="nesterov-minuit"`:
+
+```python
+result = session.fit(
+    method="nesterov-minuit",
+    strategy=2,
+    hesse=True,
+    nesterov_max_iter=1000,
+)
+```
+
+`method="nesterov"` returns a `NesterovResult` with the fitted `values`, NLL,
+status, and iteration history. It does not provide a covariance matrix. The
+`nesterov-minuit` mode uses those values as the starting point for the ordinary
+Minuit fit; `strategy=1` and `strategy=2` retain their usual meaning of one or
+two MIGRAD stages. Nesterov methods accept strategies 1 and 2 only.
+
+The existing `verbose` levels are shared by both optimizers: 0 is silent, 1
+prints stage summaries, 2 prints periodic Nesterov progress, and 3 prints it
+more frequently while also increasing Minuit's output level. Values above 3
+are accepted for more detailed diagnostic output.
+
+The Nesterov stage uses parameter-step scaling, box projection for declared
+bounds, backtracking, and restart after a failed extrapolation. It is a
+nonconvex heuristic here: the convex (O(1/k^2)) guarantee does not apply to
+the amplitude likelihood, and the result is not a global-minimum guarantee.
+
+The Minuit continuation is checked against the Nesterov endpoint. An invalid,
+non-finite, or higher-NLL continuation is rejected and the Nesterov result is
+returned. Within Minuit, the best finite stage is restored if a later MIGRAD
+stage worsens the NLL. This prevents an unstable continuation from becoming
+the reported fit, but it does not turn a non-converged Nesterov endpoint into
+a valid statistical minimum; inspect `result.valid`, NLL, EDM, and covariance.
 
 ## NLL and Minuit convention
 

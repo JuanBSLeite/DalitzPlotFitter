@@ -473,6 +473,9 @@ class FitSession:
         tolerance: float = 1e-4,
         verbose: int = 0,
         hessian: str = "numerical",
+        method: str = "minuit",
+        nesterov_max_iter: int = 1000,
+        nesterov_gtol: float = 1e-4,
     ):
         """Fit with ``ncall`` as an approximate limit per optimizer stage.
 
@@ -487,6 +490,9 @@ class FitSession:
             ncall=ncall,
             strategy=strategy,
             hesse=hesse,
+            method=method,
+            nesterov_max_iter=nesterov_max_iter,
+            nesterov_gtol=nesterov_gtol,
         )
 
     def fit_multistart(
