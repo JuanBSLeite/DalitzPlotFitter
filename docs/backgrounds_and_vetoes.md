@@ -151,6 +151,24 @@ vetoed_background = VetoedDensity(background, veto)
 
 The background normalization must then be computed from `vetoed_background` on the normalization sample. This ensures signal, every background category, generated toys and fitted data all use exactly the same accepted Dalitz region.
 
+## Importing Square-Dalitz histogram densities
+
+`SquareDalitzHistogramBackground` returns piecewise-constant bin values at
+the transformed coordinates. It does not infer the density measure or
+interpolate between bin centres. If an external histogram represents a
+density `h(mprime, thetaprime)` in Square-Dalitz area, convert it to the
+invariant-mass measure used by the signal likelihood:
+`b(s13, s23) = h(mprime, thetaprime) / square_dalitz_jacobian(...)`.
+Normalizing the unconverted shape cannot repair the position-dependent
+distortion. An efficiency is dimensionless and does not receive this factor.
+
+Match the external interpolation setting as well, and normalize the converted
+background after vetoes. In CP fits with a prescribed background counting
+asymmetry, normalize each charge separately before applying its charge scale;
+otherwise the integrals of the two shapes also change the yield split.
+See the [Laura CP comparison audit](reviews/laura_cpvfit_415489.md) for a
+reproduced example and analysis-specific adapters.
+
 ## Folded Dalitz Plot / Square Dalitz Plot efficiency and background
 
 For a channel with two identical final-state particles, `DecayChannel`
