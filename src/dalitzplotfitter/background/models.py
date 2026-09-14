@@ -8,6 +8,8 @@ from typing import Callable
 import jax.numpy as jnp
 from jax import Array
 
+from dalitzplotfitter.histogram import interpolate_2d
+
 
 def _validate_histogram_edges(edges: Array, label: str) -> Array:
     edges = jnp.asarray(edges)
@@ -48,6 +50,7 @@ class HistogramBackground:
     x_variable: str = "s12"
     y_variable: str = "s13"
     folded: bool = False
+    interpolation: str = "none"
 
     def __post_init__(self) -> None:
         x_edges = _validate_histogram_edges(self.x_edges, "x")
@@ -68,6 +71,8 @@ class HistogramBackground:
                 "silently clamp whichever value is smaller/larger to the "
                 "narrower grid's boundary"
             )
+        if self.interpolation not in {"none", "linear", "spline"}:
+            raise ValueError("interpolation must be 'none', 'linear' or 'spline'")
         object.__setattr__(self, "x_edges", x_edges)
         object.__setattr__(self, "y_edges", y_edges)
         object.__setattr__(self, "values", values)
@@ -77,15 +82,48 @@ class HistogramBackground:
         y = jnp.asarray(data[self.y_variable])
         if self.folded:
             x, y = jnp.minimum(x, y), jnp.maximum(x, y)
-        ix = jnp.searchsorted(self.x_edges, x, side="right") - 1
-        iy = jnp.searchsorted(self.y_edges, y, side="right") - 1
-        in_range = (
-            (ix >= 0)
-            & (ix < self.values.shape[0])
-            & (iy >= 0)
-            & (iy < self.values.shape[1])
+        # Cubic interpolation can overshoot below zero; the reference PDF
+        # clamps such values before evaluating the likelihood.
+        return jnp.maximum(interpolate_2d(x, y, self.x_edges, self.y_edges, self.values, self.interpolation), 0.0)
+
+    def with_charge_asymmetry(self, normalization_sample, *, charge: int,
+                              asymmetry: float = 0.0, veto=None):
+        return charge_scaled_background(
+            self, normalization_sample, charge=charge,
+            asymmetry=asymmetry, veto=veto,
         )
-        safe_ix = jnp.clip(ix, 0, self.values.shape[0] - 1)
-        safe_iy = jnp.clip(iy, 0, self.values.shape[1] - 1)
-        values = self.values[safe_ix, safe_iy]
-        return jnp.where(in_range, values, 0.0)
+
+
+@dataclass(frozen=True)
+class ChargeScaledBackground:
+    """Background shape with a prescribed B+/B- counting asymmetry.
+
+    The wrapped shape is normalized on ``normalization_sample`` after
+    ``veto`` and then multiplied by ``1 - charge * asymmetry``. This is the
+    Laura++ convention for fixed background yields. ``generation_value`` is
+    forwarded so Square-Dalitz backgrounds retain their separate raw-height
+    generation path.
+    """
+
+    shape: object
+    scale: float
+
+    def __call__(self, data: dict[str, Array]) -> Array:
+        return self.scale * jnp.asarray(self.shape(data))
+
+    def generation_value(self, data: dict[str, Array]) -> Array:
+        evaluator = getattr(self.shape, "generation_value", self.shape)
+        return self.scale * jnp.asarray(evaluator(data))
+
+
+def charge_scaled_background(shape, normalization_sample, *, veto=None,
+                             asymmetry: float = 0.0, charge: int):
+    """Return a shape normalized and scaled for one charge's yield."""
+    if charge not in (-1, 1):
+        raise ValueError("charge must be +1 or -1")
+    data = normalization_sample.as_dict()
+    acceptance = 1.0 if veto is None else jnp.asarray(veto(data))
+    normalization = jnp.mean(normalization_sample.weights * acceptance * shape(data))
+    if not bool(jnp.isfinite(normalization) & (normalization > 0.0)):
+        raise ValueError("background must have a positive finite post-veto integral")
+    return ChargeScaledBackground(shape, float((1.0 - charge * asymmetry) / normalization))

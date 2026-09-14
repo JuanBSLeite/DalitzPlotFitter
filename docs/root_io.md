@@ -76,6 +76,14 @@ background = square_dalitz_background_from_root(
 
 The TH2 x axis is interpreted as `m'` and the y axis as `theta'`. Usually both axes cover `[0,1]`. The ordered `pair` must be exactly the same Square-Dalitz convention used when producing the histogram.
 
+Both constructors accept `interpolation="linear"` to evaluate bilinearly
+between bin centres (the `useInterpolation` convention), or
+`interpolation="spline"` for smooth tensor-product cubic interpolation. Use
+`interpolation="none"` for piecewise-constant lookup. For a
+background density stored per Square-Dalitz area, use
+`divide_jacobian=True` on `square_dalitz_background_from_root`. The same object
+then exposes `generation_value()` for the raw height used by toy generation.
+
 The fitter itself continues to pass ordinary invariants `(s12,s13,s23)`. The histogram model converts every evaluation point internally with `invariants_to_square_dalitz`, then performs the TH2 bin lookup. This means the same object works transparently in:
 
 ```text
@@ -86,7 +94,13 @@ background normalization
 CP fits
 ```
 
-No extra Jacobian multiplies the efficiency or background histogram value. The map represents a scalar efficiency or shape evaluated at the transformed coordinates. The Square-Dalitz Jacobian belongs to coordinate integration, and is already included when a `SquareDalitzGrid` normalization sample is used.
+Efficiency histograms are dimensionless and never receive a Jacobian. For a
+background histogram that is a density in Square-Dalitz area, pass
+`divide_jacobian=True` so its callable value is the density in ordinary
+invariant coordinates used by the likelihood. With `SquareDalitzGrid`, the
+integration weights already contain the Jacobian. During toy generation,
+the generators call `generation_value()` and use the raw histogram height,
+matching Laura++'s separate generation path.
 
 The classes can also be constructed directly without ROOT:
 
@@ -120,7 +134,9 @@ A background histogram remains an unnormalized shape until its Dalitz integral i
 bkg_norm = jnp.mean(norm.weights * background(norm.as_dict()))
 ```
 
-For Square-Dalitz quadrature, `norm.weights` already contain the transformation Jacobian. Therefore the efficiency/background map itself must not include an additional Jacobian unless that factor was intentionally built into the external histogram definition.
+For Square-Dalitz quadrature, `norm.weights` already contain the
+transformation Jacobian. A background with `divide_jacobian=True` therefore
+has the expected cancellation in the product `weights * background(...)`.
 
 ## Examples
 

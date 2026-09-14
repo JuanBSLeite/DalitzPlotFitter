@@ -60,3 +60,29 @@ def test_square_histograms_load_from_root(tmp_path):
     data = _data([0.25, 0.75], [0.25, 0.75])
     assert jnp.allclose(eff(data), jnp.asarray([0.7, 1.0]))
     assert jnp.allclose(bkg(data), jnp.asarray([1.0, 4.0]))
+
+
+def test_square_histogram_linear_interpolation_uses_bin_centres():
+    edges = jnp.asarray([0.0, 0.5, 1.0])
+    values = jnp.asarray([[1.0, 3.0], [3.0, 5.0]])
+    eff = SquareDalitzHistogramEfficiency(
+        edges, edges, values, 5.27934,
+        (0.493677, 0.13957039, 0.13957039), (0, 2),
+        interpolation="linear",
+    )
+    # (m', theta')=(0.5, 0.5) is the centre of the four-bin support.
+    got = eff(_data([0.5], [0.5]))
+    assert jnp.allclose(got, jnp.asarray([3.0]))
+
+
+def test_square_background_separates_fit_jacobian_from_generation_value():
+    edges = jnp.asarray([0.0, 0.5, 1.0])
+    values = jnp.ones((2, 2))
+    bkg = SquareDalitzHistogramBackground(
+        edges, edges, values, 5.27934,
+        (0.493677, 0.13957039, 0.13957039), (0, 2),
+        interpolation="linear", divide_jacobian=True,
+    )
+    data = _data([0.25], [0.25])
+    assert jnp.allclose(bkg.generation_value(data), jnp.ones(1))
+    assert float(bkg(data)[0]) != 1.0

@@ -23,7 +23,10 @@ from .amplitude import (
     ConstantAmplitude,
     PreparedAmplitudeCache,
 )
-from .background import BackgroundCategory, CPBackgroundCategory
+from .background import (
+    BackgroundCategory, CPBackgroundCategory, ChargeScaledBackground,
+    charge_scaled_background,
+)
 from .coefficients import CPRealImag, RealImag
 from .config import enable_x64
 from .constraints import ConstrainedNLL, GaussianConstraint
@@ -66,6 +69,7 @@ from .goodness_of_fit import (
     BinnedChi2Result,
     PointToPointResult,
     chi2_from_histograms,
+    kdtree_local_residuals,
     point_to_point_dissimilarity,
 )
 from .integration import DalitzGaussLegendreGrid
@@ -136,7 +140,7 @@ from .veto import (
 from .workflow import BackgroundSpec, FitSession
 
 __all__ = [
-    "AmplitudeComponent", "BackgroundCategory", "BackgroundSpec", "BinnedChi2Result", "BreitWigner1D", "CPBackgroundCategory",
+    "AmplitudeComponent", "BackgroundCategory", "BackgroundSpec", "BinnedChi2Result", "BreitWigner1D", "CPBackgroundCategory", "kdtree_local_residuals",
     "CPBackgroundSpec", "CPFitSession", "CPJointNLL", "CPToyBackground", "BaBarFlatte", "CPRealImag",
     "CoherentAmplitudeModel", "CompositeVeto", "ConstrainedNLL", "ConstantAmplitude",
     "ConvolvedPDF1D", "CovariantAngular", "CovariantKinematics", "DalitzAmplitude",

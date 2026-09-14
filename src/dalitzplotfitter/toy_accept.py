@@ -106,6 +106,17 @@ def _scores(pool: PhaseSpaceSample, density) -> jax.Array:
     return values
 
 
+def _generation_shape(shape, data):
+    """Evaluate a shape in the measure used by its generator.
+
+    Square-Dalitz histogram backgrounds expose ``generation_value`` because
+    Laura++ divides by the Jacobian for the fit PDF but samples the raw
+    histogram height during generation.
+    """
+    evaluator = getattr(shape, "generation_value", shape)
+    return evaluator(data)
+
+
 def _score_statistics(values: jax.Array, *, include_mean: bool = False):
     valid = jnp.all(jnp.isfinite(values)) & jnp.all(values >= 0.0)
     maximum = jnp.max(values)
@@ -661,7 +672,7 @@ def generate_toy(
             continue
 
         def background_density(data, background=background):
-            result = jnp.asarray(background.shape(data))
+            result = jnp.asarray(_generation_shape(background.shape, data))
             if veto is not None and background.apply_veto:
                 result = result * jnp.asarray(veto(data))
             return result
@@ -825,8 +836,8 @@ def generate_cp_toy(
         minus_norm_sample = minus_model.normalization_sample
         plus_norm_data = plus_norm_sample.as_dict()
         minus_norm_data = minus_norm_sample.as_dict()
-        j_plus_values = jnp.asarray(background.plus_shape(plus_norm_data))
-        j_minus_values = jnp.asarray(background.resolved_minus_shape(minus_norm_data))
+        j_plus_values = jnp.asarray(_generation_shape(background.plus_shape, plus_norm_data))
+        j_minus_values = jnp.asarray(_generation_shape(background.resolved_minus_shape, minus_norm_data))
         if background.apply_veto:
             if plus_veto is not None:
                 j_plus_values = j_plus_values * jnp.asarray(plus_veto(plus_norm_data))
@@ -845,7 +856,7 @@ def generate_cp_toy(
         if count_plus > 0:
 
             def plus_background_density(data, background=background):
-                result = jnp.asarray(background.plus_shape(data))
+                result = jnp.asarray(_generation_shape(background.plus_shape, data))
                 if background.apply_veto and plus_veto is not None:
                     result = result * jnp.asarray(plus_veto(data))
                 return result
@@ -866,7 +877,7 @@ def generate_cp_toy(
         if count_minus > 0:
 
             def minus_background_density(data, background=background):
-                result = jnp.asarray(background.resolved_minus_shape(data))
+                result = jnp.asarray(_generation_shape(background.resolved_minus_shape, data))
                 if background.apply_veto and minus_veto is not None:
                     result = result * jnp.asarray(minus_veto(data))
                 return result

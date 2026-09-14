@@ -25,6 +25,7 @@ from dalitzplotfitter.goodness_of_fit import (
 from dalitzplotfitter.io import read_phase_space_sample
 from dalitzplotfitter.kinematics import (
     PhaseSpaceSample,
+    SquareDalitzGrid,
     fold_thetaprime,
     invariants_to_square_dalitz,
 )
@@ -761,12 +762,23 @@ class CPFitSession:
             hist_range = None
 
         values = self.result_values(result)
-        plus_sample = self.plus_model.generate_phase_space(
-            projection_size, seed=projection_seed
-        )
-        minus_sample = self.minus_model.generate_phase_space(
-            projection_size, seed=projection_seed + 1
-        )
+        if square_dalitz:
+            # A regular Square-Dalitz quadrature removes the artificial MC
+            # noise from the residual map and uses the same coordinate-area
+            # measure as Laura++ (the sample weights contain |J|).
+            resolution = max(2, int(np.sqrt(projection_size)))
+            plus_sample = SquareDalitzGrid(
+                mother_mass=mother_mass, masses=tuple(masses),
+                pair=pair, resolution=resolution,
+            ).sample()
+            minus_sample = plus_sample
+        else:
+            plus_sample = self.plus_model.generate_phase_space(
+                projection_size, seed=projection_seed
+            )
+            minus_sample = self.minus_model.generate_phase_space(
+                projection_size, seed=projection_seed + 1
+            )
         plus_components, minus_components = self._projection_components_pair(
             values, plus_sample, minus_sample
         )

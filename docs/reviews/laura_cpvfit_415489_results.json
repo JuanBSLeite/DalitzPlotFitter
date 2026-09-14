@@ -1,0 +1,497 @@
+{
+  "audit_date": "2026-09-14",
+  "input_sha256": {
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/GenFit3piCP_R2_415489.cc": "2d4a852957d2dfb1e3da991b7953c64985f78a976f2ccb265f46e7002568a432",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/GenFit3piCP_fit_415489.log": "93d11998e1a081068115619d92c4fb9d669cf0666bd96502f8e7f3469365e01b",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/ACC_pipipiNoSpike_prodAsy.root": "290addb7a8ad0c6363c3b8e8db258e25f471562cd1a3e05544dbe0294ad7252d",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/ACC_pipipi_15161718_15X15_NoSpike_prodAsy.root": "8ff92b736dd153fafde931893b0b6ff44aa498901b221da76cf521da0779631b",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/ACC_pipipi_15161718_NoSpike_Nowarwick_prodAsy.root": "57420fd1452660e8b937efc70f69076016c2694b20addc22c78d6ed79ad84d97",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/ACC_pipipi_15161718_NoSpike_prodAsy.root": "54e6d4af17b0ae80fcdb6f4e06a33126dc9ba321deb98a824b193376214997d9",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/AccRndHistos_pipipi_151617.root": "90fc8f04b8caf02f40b5ab9b4d5c9682b8b22baf123fd4d58aeda6e74a9aaa3c",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/AccRndHistos_pipipi_15161718.root": "95080c3a9159bf86bbffa3e88344f2b884cec11f69abbdeeadade84bb9a6e5f2",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/BkgRndHistos_pipipi_15161718.root": "f5de16fe145afe0dd6ba20458e8ac79a0542020441332966b7cda8605ab6e0df",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Gen_bkg_pipipisW.root": "b7630dd3b062db7d9a8767e8f190ac60a0fb6a5e3d1a85d06239d00bbbf731d5",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKGV3_pm_322_1GVeto_splot_normcut.root": "e4bc903a5bf5502c2c4170cf4c964017b7cfd46930be7d3b2aae2590981bf1a0",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_2x3x3_Unif_30x15_V2.root": "4ecc1eefd8bc2831351318dd7176c50ed3894f7140d60f63f96e61e3d8283716",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_2x3x3_Unif_60x30_V2.root": "0eccd86cb0034c10df4a29a8885a814c35bf4e2478d5c795539066a4cf98cc36",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_322_1GNoVeto_splot_norm.root": "7f3c7545aa44447af67d26fa16530d275c19f62aee3dc2124c5a864942844143",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_322_1GVeto_splot_norm.root": "eb5ca178ffc43cd5f525a03c2372f92b336d0dd3d5c8f5d1386b368241f25aa0",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_322_1GVeto_splot_normcut.root": "eb5ca178ffc43cd5f525a03c2372f92b336d0dd3d5c8f5d1386b368241f25aa0",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_322_1GVeto_splot_normshift.root": "6233931b271e24ead3ea68e9be22aca31cb727c6603d89f2268da99e1bbec505",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_322_V1_splot_normcut.root": "f0873a19a721bc12e405abfb59afddcec3f53ab183439775820c2ac4e0d2b54e",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_322_V2_splot_normcut.root": "eb042ce42099aa5fc21f6d6832d5b52330a6278df3d832ea73be615c924cd7c0",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_322_V2a_splot_normcut.root": "59db10055578b726c3b1d5ac7dc57cf6a10dd06b9f4c87c2111dcf32651781ed",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_322_V2b_splot_normcut.root": "e8c9bb1943daa67c4c59dea768c0277b0590fc8bcd98cf2ed66e17b8c1aa8544",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_322_V2c_splot_normcut.root": "fd5e911c1e17270124a95a50a091cc303bca15febc4c7e828ffcf3a997e535a8",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_322_V2d_splot_normcut.root": "62fab26b7749f3fc3c3fadcd6ed2c7406799c96f495df9811798a30c2ab1fb1c",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_322_V2e_splot_normcut.root": "2cfc6a6eeebd741fb3b60e2753eba422180cd2edcdb8cc3a77358536d9434556",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_322_V2f_splot_normcut.root": "13dbfe930f3c5db0686665e0c12ab91e728f630163ef243e295a5e440eeeac93",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_322_V2g_splot_normcut.root": "3ac411a065987ec467d69d58537f50cc19e3879152a77b9d232d4b0c9fa509fe",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_322_V2h_splot_normcut.root": "d428e1755acb553b54a2b46901b150121fa26336773a5071f3b59ec4e39967f3",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_3x2x2_Unif_30x15_V2.root": "cdb3a8f1f59600d7bcc82411cab27b6d2fb8ecba51b5aec86257de0805c94607",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/Lau_3pi_BKG_pm_3x2x2_Unif_60x30_V2.root": "74c76d23f6e62fec0d5c3ef322d203a45dafc2c7de645c6eff114681676224ec",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/bkg_kpipi_histo.root": "73164f83790c3c4fe24b5759686a590280f1d00057e703b99e9e10c253952451",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/bkg_sW_pipipi.root": "a6d909f61c25a9946ad1efe76e2ca9314a43ce5f0242a70530dfde012b5d0e18",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/data15161718_pipipi_LauNoSpike.root": "da3cb290635ad7ae1fcf951783587e3df99a86e44cbe92860c0e3773ee2590e3",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/data15161718_pipipi_LauNoSpikeLT4.root": "b525c520c489c7b721a1b31c505e71b459396b8ee78863da1530284546747f58",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/data15161718_pipipi_LauNoSpike_GT15.root": "64dea1e39fe6e352ad2a2f0e1c2d79b25ca3ddca412d048b9717631a12ac8b0d",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/data15161718_pipipi_LauNoSpike_GT7LT15.root": "26a33c4ce3e7750c77d938cdc2681b3d41078539d5ba2728e36c0ad54d5e9271",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/data15161718_pipipi_LauNoSpike_LT7.root": "14ada9bc3ce36aa8345377d041e281a1c02b88f18c9eed0401908eacdc1e8006",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/data15161718_pipipi_LauNoSpike_LowGT4.root": "e7f93abf15acd53bbd69fbcb904f4b952a189e761f5ddf47bc6e896d9038ec3a",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/data15161718_pipipi_LauNoSpike_Nochic.root": "e7a1344ce1eebefd55afa1399fff4e93860263f65b1014c80130dd96923eff42",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/data15161718_pipipi_LauNoSpike_lgveto.root": "caa650465c8311b8512a4c59edb1bed92d57f2a1f60c8df0e15865a7c1ae0d32",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/data15161718_pipipi_LauNoSpike_m13lessthan_4.root": "817b45d1ccfeaa94b71f43397dd924809fd903456665c2e0ebd1cfb5dc908f11",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/pipipi_15161718_massFit_v1_trglobalchain-smallWindow_splot_combinatorial-v2.root": "88fe1313b6bb8c7295ccae34a621f3580b158a3209788d3eb782332b0d2a41f2",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/pipipi_15161718_massFit_v1_trglobalchain-smallWindow_splot_combinatorial-v4.root": "031a9bf33620a94c90432062c8f77f913bd5d64c40e630c08ee997c9fe04d17e",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/pipipi_15161718_massFit_v1_trglobalchain_combinatorial_via_splot.root": "f527f6b74fa1d8b1f4d0d79ed7a81cd501f2c0fdf2ad5c217b1c1169d6f5a1f1",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/pipipi_15161718_massFit_v1_trglobalchain_splot_combinatorial-v2.root": "1f000553f87fe2881fe289b88c120871b5b4f1c33fb19add88abf2cdb394e872",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/pipipi_15161718_massFit_v1_trglobalchain_splot_combinatorial-v3.root": "d476ad4f8b1ecccce4ceda4f19b2c8a8a86d32362d30760c8af654b57fe0725f",
+    "/home/juan-leite/Work/data/fit415489_pipipinotav3_21-5--11h32m13s415489/inputs/pipipi_15161718_massFit_v1_trglobalchain_splot_combinatorial-v5.root": "30b12c955497f4f40b7838ff3d4b25bf09e2cc2201ece72156b6170a4efad5f3"
+  },
+  "original_saved_300": {
+    "values": {
+      "rho0_770.x": 1.0,
+      "rho0_770.y": 0.0,
+      "rho0_770.dx": 0.000305726,
+      "rho0_770.dy": 0.0,
+      "rho0_770.mass": 0.77076,
+      "rho0_770.width": 0.159572,
+      "omega_782.x": -0.0245235,
+      "omega_782.y": 0.0971254,
+      "omega_782.dx": 0.0103551,
+      "omega_782.dy": 0.0113187,
+      "omega_782.mass": 0.78265,
+      "omega_782.width": 0.00849,
+      "rho0_1450.x": -0.246867,
+      "rho0_1450.y": 0.0967258,
+      "rho0_1450.dx": -0.103136,
+      "rho0_1450.dy": -0.02183,
+      "rho0_1450.mass": 1.465,
+      "rho0_1450.width": 0.4,
+      "f2_1270.x": 0.340579,
+      "f2_1270.y": 0.192416,
+      "f2_1270.dx": -0.0466484,
+      "f2_1270.dy": -0.0999168,
+      "f2_1270.mass": 1.25167,
+      "f2_1270.width": 0.179022,
+      "rho0_3_1690.x": 0.0712092,
+      "rho0_3_1690.y": 0.0519808,
+      "rho0_3_1690.dx": 0.0330825,
+      "rho0_3_1690.dy": 0.0629358,
+      "rho0_3_1690.mass": 1.686,
+      "rho0_3_1690.width": 0.186,
+      "sigma0.x": -0.309378,
+      "sigma0.y": 0.365282,
+      "sigma0.dx": 0.26175,
+      "sigma0.dy": 0.143077,
+      "sigma0.mass": 0.453811,
+      "sigma0.width": 0.357589,
+      "f0_980.x": 0.128141,
+      "f0_980.y": -0.0435818,
+      "f0_980.dx": -0.044662,
+      "f0_980.dy": -0.056226,
+      "f0_980.mass": 0.972789,
+      "f0_980.width": 0.0475793,
+      "chi_c0.x": 0.0241175,
+      "chi_c0.y": 0.0194479,
+      "chi_c0.dx": -0.0299427,
+      "chi_c0.dy": -0.0265657,
+      "chi_c0.mass": 3.41471,
+      "chi_c0.width": 0.0131,
+      "f0_1370.x": 0.109994,
+      "f0_1370.y": -0.0653653,
+      "f0_1370.dx": 0.0170966,
+      "f0_1370.dy": -0.0391998,
+      "f0_1370.mass": 1.46931,
+      "f0_1370.width": 0.188839,
+      "n_signal": 84124.8,
+      "n_qqbar": 10985.2,
+      "n_kpipibkg": 0.0
+    },
+    "errors": {
+      "rho0_770.x": 0.0,
+      "rho0_770.y": 0.0,
+      "rho0_770.dx": 0.00339357,
+      "rho0_770.dy": 0.0,
+      "rho0_770.mass": 0.000597084,
+      "rho0_770.width": 0.00148247,
+      "omega_782.x": 0.00410393,
+      "omega_782.y": 0.00387279,
+      "omega_782.dx": 0.00382627,
+      "omega_782.dy": 0.00342499,
+      "omega_782.mass": 0.0,
+      "omega_782.width": 0.0,
+      "rho0_1450.x": 0.00568136,
+      "rho0_1450.y": 0.00535743,
+      "rho0_1450.dx": 0.00550169,
+      "rho0_1450.dy": 0.00488214,
+      "rho0_1450.mass": 0.0,
+      "rho0_1450.width": 0.0,
+      "f2_1270.x": 0.00516166,
+      "f2_1270.y": 0.00530013,
+      "f2_1270.dx": 0.00436139,
+      "f2_1270.dy": 0.00448374,
+      "f2_1270.mass": 0.00145361,
+      "f2_1270.width": 0.00337562,
+      "rho0_3_1690.x": 0.0040743,
+      "rho0_3_1690.y": 0.00479799,
+      "rho0_3_1690.dx": 0.00403193,
+      "rho0_3_1690.dy": 0.00469024,
+      "rho0_3_1690.mass": 0.0,
+      "rho0_3_1690.width": 0.0,
+      "sigma0.x": 0.00808117,
+      "sigma0.y": 0.00582338,
+      "sigma0.dx": 0.0050632,
+      "sigma0.dy": 0.00574018,
+      "sigma0.mass": 0.00626275,
+      "sigma0.width": 0.00717421,
+      "f0_980.x": 0.00411477,
+      "f0_980.y": 0.00546801,
+      "f0_980.dx": 0.00443219,
+      "f0_980.dy": 0.0036484,
+      "f0_980.mass": 0.00119291,
+      "f0_980.width": 0.00260145,
+      "chi_c0.x": 0.00484696,
+      "chi_c0.y": 0.00551413,
+      "chi_c0.dx": 0.00486064,
+      "chi_c0.dy": 0.00549887,
+      "chi_c0.mass": 0.0,
+      "chi_c0.width": 0.0,
+      "f0_1370.x": 0.00505636,
+      "f0_1370.y": 0.00605035,
+      "f0_1370.dx": 0.00483781,
+      "f0_1370.dy": 0.00398793,
+      "f0_1370.mass": 0.00478333,
+      "f0_1370.width": 0.0137073,
+      "n_signal": 0.0,
+      "n_qqbar": 0.0,
+      "n_kpipibkg": 0.0
+    },
+    "nll": -490595.452076
+  },
+  "laura_final_printed": {
+    "rho0_770.x": [
+      1.0,
+      0.0
+    ],
+    "rho0_770.y": [
+      0.0,
+      0.0
+    ],
+    "rho0_770.dx": [
+      0.00102312,
+      0.00360608
+    ],
+    "rho0_770.dy": [
+      0.0,
+      0.0
+    ],
+    "omega_782.x": [
+      -0.0303268,
+      0.00434944
+    ],
+    "omega_782.y": [
+      0.0948849,
+      0.00414539
+    ],
+    "omega_782.dx": [
+      0.00729877,
+      0.00407079
+    ],
+    "omega_782.dy": [
+      0.013826,
+      0.00360962
+    ],
+    "rho0_1450.x": [
+      -0.270865,
+      0.00646501
+    ],
+    "rho0_1450.y": [
+      0.113529,
+      0.00570862
+    ],
+    "rho0_1450.dx": [
+      -0.0916491,
+      0.00614297
+    ],
+    "rho0_1450.dy": [
+      -0.00771941,
+      0.00537036
+    ],
+    "f2_1270.x": [
+      0.351291,
+      0.00534772
+    ],
+    "f2_1270.y": [
+      0.171931,
+      0.00593363
+    ],
+    "f2_1270.dx": [
+      -0.0545892,
+      0.00456093
+    ],
+    "f2_1270.dy": [
+      -0.117944,
+      0.00502792
+    ],
+    "rho0_3_1690.x": [
+      0.0964994,
+      0.00398479
+    ],
+    "rho0_3_1690.y": [
+      0.0191968,
+      0.00536046
+    ],
+    "rho0_3_1690.dx": [
+      0.0492371,
+      0.00392311
+    ],
+    "rho0_3_1690.dy": [
+      0.0541424,
+      0.00523042
+    ],
+    "sigma0.x": [
+      -0.402003,
+      0.00867937
+    ],
+    "sigma0.y": [
+      0.357099,
+      0.00800027
+    ],
+    "sigma0.dx": [
+      0.28669,
+      0.00595293
+    ],
+    "sigma0.dy": [
+      0.201322,
+      0.0075976
+    ],
+    "f0_980.x": [
+      0.14106,
+      0.00421299
+    ],
+    "f0_980.y": [
+      -0.01405,
+      0.00584319
+    ],
+    "f0_980.dx": [
+      -0.045093,
+      0.00483089
+    ],
+    "f0_980.dy": [
+      -0.0770899,
+      0.00392358
+    ],
+    "chi_c0.x": [
+      0.0271432,
+      0.00479001
+    ],
+    "chi_c0.y": [
+      0.0141733,
+      0.00583786
+    ],
+    "chi_c0.dx": [
+      -0.0402037,
+      0.00484198
+    ],
+    "chi_c0.dy": [
+      -0.0402666,
+      0.00588143
+    ],
+    "f0_1370.x": [
+      0.100608,
+      0.00483099
+    ],
+    "f0_1370.y": [
+      -0.0234739,
+      0.00737598
+    ],
+    "f0_1370.dx": [
+      0.0511699,
+      0.00595883
+    ],
+    "f0_1370.dy": [
+      -0.0563136,
+      0.00465568
+    ],
+    "rho0_770.mass": [
+      0.770229,
+      0.000599753
+    ],
+    "rho0_770.width": [
+      0.148864,
+      0.00144233
+    ],
+    "f2_1270.mass": [
+      1.25071,
+      0.00143721
+    ],
+    "f2_1270.width": [
+      0.170502,
+      0.00335104
+    ],
+    "sigma0.mass": [
+      0.509084,
+      0.00699672
+    ],
+    "sigma0.width": [
+      0.425813,
+      0.00889256
+    ],
+    "f0_980.mass": [
+      0.976535,
+      0.00107026
+    ],
+    "f0_980.width": [
+      0.0477831,
+      0.00261757
+    ],
+    "f0_1370.mass": [
+      1.50218,
+      0.00670858
+    ],
+    "f0_1370.width": [
+      0.173547,
+      0.0135102
+    ]
+  },
+  "jacobian_300": {
+    "variant": "jac",
+    "resolution": 300,
+    "values": {
+      "rho0_770.x": 1.0,
+      "rho0_770.y": 0.0,
+      "rho0_770.dx": 0.0005737191349407389,
+      "rho0_770.dy": 0.0,
+      "rho0_770.mass": 0.7704723733395994,
+      "rho0_770.width": 0.14884708399866503,
+      "omega_782.x": -0.03158756985200035,
+      "omega_782.y": 0.09714671013866026,
+      "omega_782.dx": 0.007735379259446779,
+      "omega_782.dy": 0.013558841378700084,
+      "omega_782.mass": 0.78265,
+      "omega_782.width": 0.00849,
+      "rho0_1450.x": -0.26781128670851473,
+      "rho0_1450.y": 0.11531065649602847,
+      "rho0_1450.dx": -0.09029543470064227,
+      "rho0_1450.dy": -0.006737139847878225,
+      "rho0_1450.mass": 1.465,
+      "rho0_1450.width": 0.4,
+      "f2_1270.x": 0.3509151922257473,
+      "f2_1270.y": 0.17028474759604406,
+      "f2_1270.dx": -0.054196521152185054,
+      "f2_1270.dy": -0.11763826756824386,
+      "f2_1270.mass": 1.2509465817390595,
+      "f2_1270.width": 0.1709680744295797,
+      "rho0_3_1690.x": 0.09662841941900546,
+      "rho0_3_1690.y": 0.016478707710986334,
+      "rho0_3_1690.dx": 0.04952512046510351,
+      "rho0_3_1690.dy": 0.05379595709531435,
+      "rho0_3_1690.mass": 1.686,
+      "rho0_3_1690.width": 0.186,
+      "sigma0.x": -0.4017269813851686,
+      "sigma0.y": 0.36477686891902195,
+      "sigma0.dx": 0.2883663839479108,
+      "sigma0.dy": 0.19898879236938982,
+      "sigma0.mass": 0.5052241808383356,
+      "sigma0.width": 0.4366676493944631,
+      "f0_980.x": 0.1419311990829372,
+      "f0_980.y": -0.013791606943682446,
+      "f0_980.dx": -0.04574573329074366,
+      "f0_980.dy": -0.07704557425381457,
+      "f0_980.mass": 0.9765848138038378,
+      "f0_980.width": 0.048748713709763906,
+      "chi_c0.x": 0.026113074023817677,
+      "chi_c0.y": 0.016766954940317064,
+      "chi_c0.dx": -0.04093969859337646,
+      "chi_c0.dy": -0.04066815782838693,
+      "chi_c0.mass": 3.41471,
+      "chi_c0.width": 0.0131,
+      "f0_1370.x": 0.10394907425924907,
+      "f0_1370.y": -0.018778596061233672,
+      "f0_1370.dx": 0.0535947413468038,
+      "f0_1370.dy": -0.056993189403054284,
+      "f0_1370.mass": 1.5071352697163867,
+      "f0_1370.width": 0.18055547627432822,
+      "n_signal": 84124.795,
+      "n_qqbar": 10985.205,
+      "n_kpipibkg": 0.0
+    },
+    "laura_point_nll": -491360.5557033294,
+    "nll": -491362.145069,
+    "valid": true
+  },
+  "corrected_300": {
+    "variant": "interp",
+    "resolution": 300,
+    "values": {
+      "rho0_770.x": 1.0,
+      "rho0_770.y": 0.0,
+      "rho0_770.dx": 0.0007795947576156534,
+      "rho0_770.dy": 0.0,
+      "rho0_770.mass": 0.7703865832626059,
+      "rho0_770.width": 0.14889914436023224,
+      "omega_782.x": -0.03122506369442721,
+      "omega_782.y": 0.09702639753624998,
+      "omega_782.dx": 0.00772290426910226,
+      "omega_782.dy": 0.013708490170558215,
+      "omega_782.mass": 0.78265,
+      "omega_782.width": 0.00849,
+      "rho0_1450.x": -0.2711946958158288,
+      "rho0_1450.y": 0.11262607307779167,
+      "rho0_1450.dx": -0.09112580760560202,
+      "rho0_1450.dy": -0.007651669407591149,
+      "rho0_1450.mass": 1.465,
+      "rho0_1450.width": 0.4,
+      "f2_1270.x": 0.35007223359624184,
+      "f2_1270.y": 0.17175457492606208,
+      "f2_1270.dx": -0.054278432954965594,
+      "f2_1270.dy": -0.11773533032871561,
+      "f2_1270.mass": 1.2507558859483763,
+      "f2_1270.width": 0.1698117676139021,
+      "rho0_3_1690.x": 0.09513564665328435,
+      "rho0_3_1690.y": 0.018592626346727793,
+      "rho0_3_1690.dx": 0.049327610632703,
+      "rho0_3_1690.dy": 0.05475077466233502,
+      "rho0_3_1690.mass": 1.686,
+      "rho0_3_1690.width": 0.186,
+      "sigma0.x": -0.402838884561471,
+      "sigma0.y": 0.3570449626434932,
+      "sigma0.dx": 0.2862376976159151,
+      "sigma0.dy": 0.20149070254529525,
+      "sigma0.mass": 0.5095088366440378,
+      "sigma0.width": 0.4264235593434622,
+      "f0_980.x": 0.14098480712480208,
+      "f0_980.y": -0.013202104502195862,
+      "f0_980.dx": -0.04457273106213355,
+      "f0_980.dy": -0.0771687989567264,
+      "f0_980.mass": 0.9767386509489784,
+      "f0_980.width": 0.0477159110718664,
+      "chi_c0.x": 0.027109246653221508,
+      "chi_c0.y": 0.015125211779233956,
+      "chi_c0.dx": -0.039627074454778484,
+      "chi_c0.dy": -0.04192711064078074,
+      "chi_c0.mass": 3.41471,
+      "chi_c0.width": 0.0131,
+      "f0_1370.x": 0.10091562327206721,
+      "f0_1370.y": -0.02322112671990012,
+      "f0_1370.dx": 0.05159508838924616,
+      "f0_1370.dy": -0.05624458414231681,
+      "f0_1370.mass": 1.5025300136747919,
+      "f0_1370.width": 0.17434917931583457,
+      "n_signal": 84124.795,
+      "n_qqbar": 10985.205,
+      "n_kpipibkg": 0.0
+    },
+    "laura_point_nll": -491638.7688426515,
+    "nll": -491639.145684,
+    "valid": true
+  },
+  "corrected_1000_point": {
+    "variant": "corrected",
+    "resolution": 1000,
+    "laura_point_nll": -491593.48743503354,
+    "qqbar_plus_probability": 0.5039
+  },
+  "corrected_1000_fit_status": "interrupted during CPU MIGRAD; only fixed-parameter NLL evaluation completed"
+}
