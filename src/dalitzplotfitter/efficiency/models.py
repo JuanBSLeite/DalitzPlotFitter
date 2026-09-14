@@ -8,6 +8,8 @@ from typing import Callable
 import jax.numpy as jnp
 from jax import Array
 
+from dalitzplotfitter.histogram import interpolate_2d
+
 
 def _validate_histogram_edges(edges: Array, label: str) -> Array:
     edges = jnp.asarray(edges)
@@ -63,6 +65,7 @@ class HistogramEfficiency:
     x_variable: str = "s12"
     y_variable: str = "s13"
     folded: bool = False
+    interpolation: str = "none"
 
     def __post_init__(self) -> None:
         x_edges = _validate_histogram_edges(self.x_edges, "x")
@@ -83,6 +86,8 @@ class HistogramEfficiency:
                 "silently clamp whichever value is smaller/larger to the "
                 "narrower grid's boundary"
             )
+        if self.interpolation not in {"none", "linear", "spline"}:
+            raise ValueError("interpolation must be 'none', 'linear' or 'spline'")
         object.__setattr__(self, "x_edges", x_edges)
         object.__setattr__(self, "y_edges", y_edges)
         object.__setattr__(self, "values", values)
@@ -92,15 +97,4 @@ class HistogramEfficiency:
         y = jnp.asarray(data[self.y_variable])
         if self.folded:
             x, y = jnp.minimum(x, y), jnp.maximum(x, y)
-        ix = jnp.searchsorted(self.x_edges, x, side="right") - 1
-        iy = jnp.searchsorted(self.y_edges, y, side="right") - 1
-        in_range = (
-            (ix >= 0)
-            & (ix < self.values.shape[0])
-            & (iy >= 0)
-            & (iy < self.values.shape[1])
-        )
-        safe_ix = jnp.clip(ix, 0, self.values.shape[0] - 1)
-        safe_iy = jnp.clip(iy, 0, self.values.shape[1] - 1)
-        values = self.values[safe_ix, safe_iy]
-        return jnp.where(in_range, values, 0.0)
+        return interpolate_2d(x, y, self.x_edges, self.y_edges, self.values, self.interpolation)

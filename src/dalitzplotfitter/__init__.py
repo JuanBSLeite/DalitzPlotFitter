@@ -23,7 +23,10 @@ from .amplitude import (
     ConstantAmplitude,
     PreparedAmplitudeCache,
 )
-from .background import BackgroundCategory, CPBackgroundCategory
+from .background import (
+    BackgroundCategory, CPBackgroundCategory, ChargeScaledBackground,
+    charge_scaled_background,
+)
 from .coefficients import CPRealImag, RealImag
 from .config import enable_x64
 from .constraints import ConstrainedNLL, GaussianConstraint

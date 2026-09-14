@@ -154,8 +154,9 @@ The background normalization must then be computed from `vetoed_background` on t
 ## Importing Square-Dalitz histogram densities
 
 `SquareDalitzHistogramBackground` returns piecewise-constant bin values at
-the transformed coordinates. It does not infer the density measure or
-interpolate between bin centres. If an external histogram represents a
+the transformed coordinates by default. Set `interpolation="linear"` for
+bilinear interpolation between bin centres, or `interpolation="spline"` for
+smooth cubic interpolation. If an external histogram represents a
 density `h(mprime, thetaprime)` in Square-Dalitz area, convert it to the
 invariant-mass measure used by the signal likelihood:
 `b(s13, s23) = h(mprime, thetaprime) / square_dalitz_jacobian(...)`.

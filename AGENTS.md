@@ -213,3 +213,13 @@ analyses (not tutorials) that consume the same public API and can break silently
 lineshape or normalization convention changes underneath them; `notebooks/benchmark/` holds
 numeric-reproduction benchmarks against a specific published paper/Laura++ configuration (e.g.
 `paper_isobar_benchmark.ipynb` for the LHCb `B -> 3pi` isobar model) rather than tutorials.
+
+### Histogram interpolation and Square-Dalitz acceptance
+
+Histogram efficiency and background models accept `interpolation="none"`,
+`"linear"`, or `"spline"`. The spline mode is JAX-differentiable cubic
+interpolation over bin-centre values. Efficiency maps do not get normalized to
+unit integral; use `clip=True` only when reproducing the reference convention
+that bounds interpolated efficiencies to `[0, 1]`. Square-Dalitz backgrounds use
+`divide_jacobian=True` for PDF evaluation and their raw `generation_value()` for
+toy generation. Apply vetoes before acceptance/background normalization.

@@ -8,6 +8,7 @@ import jax.numpy as jnp
 from jax import Array
 
 from dalitzplotfitter.kinematics import fold_thetaprime, invariants_to_square_dalitz
+from dalitzplotfitter.histogram import interpolate_2d
 
 
 def _validate_edges(edges: Array, label: str) -> Array:
@@ -28,6 +29,8 @@ class _SquareDalitzHistogram2D:
     masses: tuple[float, float, float]
     pair: tuple[int, int] = (0, 1)
     folded: bool = False
+    interpolation: str = "none"
+    divide_jacobian: bool = False
 
     def __post_init__(self) -> None:
         mp = _validate_edges(self.mprime_edges, "mprime")
@@ -47,6 +50,8 @@ class _SquareDalitzHistogram2D:
                 "fold_thetaprime before the bin lookup, so bins above 0.5 would "
                 "never be reached"
             )
+        if self.interpolation not in {"none", "linear", "spline"}:
+            raise ValueError("interpolation must be 'none', 'linear' or 'spline'")
         object.__setattr__(self, "mprime_edges", mp)
         object.__setattr__(self, "thetaprime_edges", tp)
         object.__setattr__(self, "values", values)
@@ -65,23 +70,50 @@ class _SquareDalitzHistogram2D:
             tp = fold_thetaprime(tp)
         return mp, tp
 
-    def __call__(self, data: dict[str, Array]) -> Array:
+    def _histogram_value(self, data: dict[str, Array]) -> Array:
         mp, tp = self.square_coordinates(data)
-        ix = jnp.searchsorted(self.mprime_edges, mp, side="right") - 1
-        iy = jnp.searchsorted(self.thetaprime_edges, tp, side="right") - 1
-        in_range = (
-            (ix >= 0) & (ix < self.values.shape[0])
-            & (iy >= 0) & (iy < self.values.shape[1])
+        return interpolate_2d(mp, tp, self.mprime_edges, self.thetaprime_edges,
+                              self.values, self.interpolation)
+
+    def generation_value(self, data: dict[str, Array]) -> Array:
+        """Raw histogram value used by Laura++-style toy generation.
+
+        A Square-Dalitz histogram is a density in ``dm' dtheta'`` for
+        generation. The Jacobian conversion belongs only to its PDF value in
+        ordinary Dalitz coordinates.
+        """
+        return jnp.maximum(self._histogram_value(data), 0.0)
+
+    def __call__(self, data: dict[str, Array]) -> Array:
+        value = jnp.maximum(self._histogram_value(data), 0.0)
+        if not self.divide_jacobian:
+            return value
+        from dalitzplotfitter.kinematics import square_dalitz_jacobian
+        mp, tp = self.square_coordinates(data)
+        jacobian = square_dalitz_jacobian(mp, tp, mother_mass=self.mother_mass,
+                                          masses=self.masses, pair=self.pair)
+        return jnp.where(jacobian > 0.0, value / jnp.where(jacobian > 0.0, jacobian, 1.0), 0.0)
+
+    def with_charge_asymmetry(self, normalization_sample, *, charge: int,
+                              asymmetry: float = 0.0, veto=None):
+        """Return this histogram normalized and scaled for one charge.
+
+        This convenience method packages the fixed Laura++ background-yield
+        convention; the returned object still forwards ``generation_value``.
+        """
+        from dalitzplotfitter.background import charge_scaled_background
+        return charge_scaled_background(
+            self, normalization_sample, charge=charge,
+            asymmetry=asymmetry, veto=veto,
         )
-        safe_ix = jnp.clip(ix, 0, self.values.shape[0] - 1)
-        safe_iy = jnp.clip(iy, 0, self.values.shape[1] - 1)
-        return jnp.where(in_range, self.values[safe_ix, safe_iy], 0.0)
 
 
 @dataclass(frozen=True)
 class SquareDalitzHistogramEfficiency(_SquareDalitzHistogram2D):
     """Piecewise-constant efficiency map in ``(m', theta')``.
 
+    ``interpolation='linear'`` reproduces Laura++'s bilinear interpolation
+    between bin centres; ``'none'`` keeps the piecewise-constant lookup.
     ``folded=True`` folds ``theta'`` onto ``[0, 0.5]`` (via
     :func:`~dalitzplotfitter.kinematics.fold_thetaprime`) before the bin
     lookup. ``values`` and ``thetaprime_edges`` must then describe only that
@@ -100,10 +132,25 @@ class SquareDalitzHistogramEfficiency(_SquareDalitzHistogram2D):
     don't actually have, silently.
     """
 
+    # Laura++ bounds the interpolated efficiency to [0, 1], including any
+    # overshoot produced between histogram bins.
+    clip: bool = False
+
+    def __call__(self, data: dict[str, Array]) -> Array:
+        value = super().__call__(data)
+        return jnp.clip(value, 0.0, 1.0) if self.clip else value
+
 
 @dataclass(frozen=True)
 class SquareDalitzHistogramBackground(_SquareDalitzHistogram2D):
     """Piecewise-constant background shape in ``(m', theta')``.
+
+    ``interpolation='linear'`` reproduces Laura++'s bilinear interpolation
+    between bin centres; ``'none'`` keeps the piecewise-constant lookup.
+    ``divide_jacobian=True`` converts the Square-Dalitz density to a density
+    in ordinary Dalitz coordinates for the fit PDF. Toy generation uses
+    :meth:`generation_value`, which intentionally never divides by the
+    Jacobian, matching Laura++'s ``LauBkgndDPModel::generate``.
 
     ``folded=True`` folds ``theta'`` onto ``[0, 0.5]`` before the bin lookup;
     see :class:`SquareDalitzHistogramEfficiency`.

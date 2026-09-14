@@ -295,11 +295,13 @@ def histogram_efficiency_from_root(
     x_variable: str = "s12",
     y_variable: str = "s13",
     folded: bool = False,
+    interpolation: str = "none",
 ) -> HistogramEfficiency:
     values, x_edges, y_edges = read_root_histogram2d(file_path, histogram)
     return HistogramEfficiency(
         x_edges=x_edges, y_edges=y_edges, values=values,
         x_variable=x_variable, y_variable=y_variable, folded=folded,
+        interpolation=interpolation,
     )
 
 
@@ -310,11 +312,13 @@ def histogram_background_from_root(
     x_variable: str = "s12",
     y_variable: str = "s13",
     folded: bool = False,
+    interpolation: str = "none",
 ) -> HistogramBackground:
     values, x_edges, y_edges = read_root_histogram2d(file_path, histogram)
     return HistogramBackground(
         x_edges=x_edges, y_edges=y_edges, values=values,
         x_variable=x_variable, y_variable=y_variable, folded=folded,
+        interpolation=interpolation,
     )
 
 
@@ -326,6 +330,7 @@ def square_dalitz_efficiency_from_root(
     masses: tuple[float, float, float],
     pair: tuple[int, int] = (0, 1),
     folded: bool = False,
+    interpolation: str = "none",
 ) -> SquareDalitzHistogramEfficiency:
     """Construct an efficiency map from a ROOT TH2 whose axes are ``(m', theta')``."""
     values, mp_edges, tp_edges = read_root_histogram2d(file_path, histogram)
@@ -337,6 +342,7 @@ def square_dalitz_efficiency_from_root(
         masses=masses,
         pair=pair,
         folded=folded,
+        interpolation=interpolation,
     )
 
 
@@ -348,6 +354,8 @@ def square_dalitz_background_from_root(
     masses: tuple[float, float, float],
     pair: tuple[int, int] = (0, 1),
     folded: bool = False,
+    interpolation: str = "none",
+    divide_jacobian: bool = False,
 ) -> SquareDalitzHistogramBackground:
     """Construct a background map from a ROOT TH2 whose axes are ``(m', theta')``."""
     values, mp_edges, tp_edges = read_root_histogram2d(file_path, histogram)
@@ -359,6 +367,8 @@ def square_dalitz_background_from_root(
         masses=masses,
         pair=pair,
         folded=folded,
+        interpolation=interpolation,
+        divide_jacobian=divide_jacobian,
     )
 
 
