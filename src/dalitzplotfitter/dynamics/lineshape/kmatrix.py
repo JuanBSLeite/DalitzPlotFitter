@@ -19,6 +19,7 @@ _POLE_COUPLINGS = jnp.asarray([
 _F_SCATT_ROW = jnp.asarray([0.23399, 0.15044, -0.20545, 0.32825, 0.35412])
 _S0_SCATT = -3.92637
 _S0_PROD = -3.0
+_M_SQ0 = 1.0
 _S_A = 1.0
 _S_A0 = -0.15
 _MPI = 0.13957039
@@ -58,12 +59,21 @@ def _phase_space_vector(s):
     ], axis=-1)
 
 
-def _slowly_varying_factor(s, s0):
-    return (1.0 - s0 / s) / (s - s0)
+def _slowly_varying_factor(s, s0, m_sq0=_M_SQ0):
+    """Laura++ slowly-varying pole factor.
+
+    Laura++ evaluates this as ``(mSq0 - s0)/(s - s0)``.  Keeping the
+    numerator explicit is important: ``(1-s0/s)/(s-s0)`` would reduce to
+    ``1/s`` and is not the same parameterisation.
+    """
+    return (m_sq0 - s0) / (s - s0)
 
 
 def _adler_factor(s):
-    return (1.0 - _S_A0 / s) * (s - 0.5 * _S_A * _MPI**2)
+    # Laura++: (s - sAConst) * (1 - sA0) / (s - sA0), with
+    # sAConst = 0.5 * sA * m_pi^2.
+    s_a_const = 0.5 * _S_A * _MPI**2
+    return (s - s_a_const) * (1.0 - _S_A0) / (s - _S_A0)
 
 
 def _stable_inverse_denominators(s):
