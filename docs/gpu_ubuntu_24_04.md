@@ -112,17 +112,24 @@ python -m pip install -e ".[dev]"
 
 Do not install CUDA 12 and CUDA 13 JAX plugins in the same virtual environment.
 
+The project exposes both choices as optional installation extras. This installs
+the project together with JAX and the corresponding official CUDA wheels:
+
 For the RTX 3050 Ti / WSL2 reference configuration:
 
 ```bash
-python -m pip install --upgrade "jax[cuda12]"
+python -m pip install -e ".[dev,cuda12]"
 ```
 
 Use CUDA 13 only when the Windows NVIDIA driver is new enough and there is a specific reason to move to it:
 
 ```bash
-python -m pip install --upgrade "jax[cuda13]"
+python -m pip install -e ".[dev,cuda13]"
 ```
+
+The `cuda12` and `cuda13` extras are mutually exclusive choices for a virtual
+environment. For the compatibility matrix and driver requirements, see the
+[official JAX installation guide](https://docs.jax.dev/en/latest/installation.html).
 
 ## 6. Fix duplicate PJRT CUDA registration
 
