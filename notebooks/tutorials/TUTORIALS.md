@@ -41,6 +41,9 @@ separate approximations. No remote data, GPU, or ROOT installation is required.
 | 11 | [QMI Cartesian isobar closure](tutorial_09_qmi_cartesian_isobar_closure.ipynb) | Cartesian QMI nodes, coefficient recovery, fit validation |
 | 12 | [QMI2D: campo de Dalitz e ajuste de toy](tutorial_10_qmi2d_dalitz_closure.ipynb) | QMI2D, DalitzAmplitude, máscara física, folding, interpolação e ajuste de magnitude/fase |
 
+| 13 | [Line shapes opcionais com SymPy](tutorial_11_sympy_lineshapes.ipynb) | SympyLineshape, parâmetros explícitos, gradientes, ajuste Asimov e JSON; requer o extra `sympy` |
+| 14 | [SymPy no Dalitz de B → 3π](tutorial_12_sympy_b3pi_dalitz.ipynb) | Polo definido por SymPy, spin=1 com Zemach_P, fatores de forma, simetrização de π⁺ idênticos e gradientes |
+
 ## Continue with focused examples
 
 The course covers the main fitting workflow, not every specialized catalog entry.

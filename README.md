@@ -92,6 +92,21 @@ python -m pip install -e ".[dev]"
 pytest
 ```
 
+For NVIDIA GPU support, install exactly one CUDA extra instead of the CPU-only
+JAX dependency. The extras use JAX's official CUDA wheels:
+
+```bash
+# CUDA 12
+python -m pip install -e ".[dev,cuda12]"
+
+# or CUDA 13
+python -m pip install -e ".[dev,cuda13]"
+```
+
+Do not install both CUDA extras in the same virtual environment. CUDA wheels
+are currently provided for Linux; see the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html)
+for driver and platform requirements.
+
 The project deliberately runs `float64`/`complex128` rather than JAX's own default, for
 amplitude-analysis stability. `import dalitzplotfitter` already enables double precision
 automatically, so no separate call is needed for normal use:
