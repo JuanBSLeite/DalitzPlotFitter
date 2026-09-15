@@ -367,3 +367,104 @@ LHCb Collaboration, *Amplitude analysis of the B+ -> pi+ pi+ pi- decay*, Phys. R
 reproduce this paper's isobar conventions; see `docs/reviews/paper_isobar_conventions.md` for the
 numeric reproduction against Laura++ and the published tables, including the remaining unresolved
 discrepancies.
+
+## Optional SymPy expressions
+
+`SympyLineshape` is an additional plugin for `Resonance(..., lineshape=...)`.
+Existing classes, custom JAX callables, and the default `RelativisticBreitWigner()`
+are unchanged. Install the optional dependency with
+`python -m pip install -e ".[sympy]"` from the repository root (or
+`python -m pip install "dalitzplotfitter[sympy]"` for an installed distribution).
+Importing the package or using existing lineshapes does not import SymPy.
+
+```python
+import sympy as sp
+from dalitzplotfitter import Parameter, RealImag, Resonance, SympyLineshape
+
+m, m0, gamma, alpha = sp.symbols("m m0 gamma alpha", real=True)
+mass = Parameter.dynamics("custom.mass", 0.77, owner="custom", bounds=(0.7, 0.85))
+width = Parameter.dynamics("custom.width", 0.15, owner="custom", fixed=True)
+shape = SympyLineshape(
+    sp.exp(-alpha*m**2) / (m-m0-sp.I*gamma/2),
+    mass_symbol=m,
+    parameters={
+        m0: mass,
+        gamma: width,
+        alpha: Parameter.dynamics("custom.alpha", 0.2, owner="custom", bounds=(0, 2)),
+    },
+)
+component = Resonance(
+    "custom", (0, 1), RealImag(1, 0), lineshape=shape,
+    mass=mass, width=width, spin=0,
+)
+```
+
+Bindings use actual SymPy `Symbol` objects. `mass_symbol` receives the per-event
+pair mass in GeV; `parameters` maps other symbols to scalar numerical constants
+or `Parameter.dynamics` declarations. Fixed values, bounds, steps and backend
+aliases follow the existing parameter API. Extra constants have user-defined
+units; `alpha` in this example has units GeV^-2. Every free symbol needs exactly
+one binding; unused bindings are rejected, except that `mass_symbol` may be
+absent from a constant expression. Symbol names must be unique.
+
+Reuse the same mass/width Parameters in `Resonance` to keep its barrier factors
+and integration metadata consistent. Alternatively,
+`context_symbols={m0: "pole_mass", gamma: "pole_width"}` binds symbols directly to
+the resolved `ResonanceContext`. Available fields are `parent_mass`,
+`daughter_masses[0]`, `daughter_masses[1]`, `bachelor_mass`, `spin`, `pole_mass`,
+`pole_width`, `resonance_radius` and `parent_radius`.
+
+The plugin exposes its parameters to `DecayModel` and resolves current values
+without rebuilding the compiled function. Floating parameters must have kind
+`DYNAMICS` and an `owner` matching the component name. Each dynamics parameter
+currently belongs to one component. The existing cache recomputes affected
+amplitudes and normalization matrix entries. Changing an expression or a
+parameter's fixed/free status requires a new model/cache. The mapping properties
+return copies; the wrapper itself is immutable.
+
+### Evaluation and supported expressions
+
+SymPy 1.14+ generates a JAX function once, with common-subexpression elimination.
+Runtime arithmetic and derivatives are JAX operations; the enclosing likelihood
+is compiled by the existing minimizer. Output is complex and has the shape of
+the input mass array, including for constant expressions. Precision follows the
+package's JAX configuration (normally float64/complex128).
+
+Supported operations are `Add`, `Mul`, `Pow` (including `sqrt`), `exp`, `log`,
+`sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh`, `Abs`, `re`,
+`im`, and `conjugate`, with finite numeric literals and constants `I`, `pi`, `E`.
+`Piecewise`, arbitrary symbolic functions, matrices and unevaluated
+integrals/derivatives are rejected. No NumPy/SciPy fallback is used. Construction
+accepts trusted scalar SymPy expressions, not strings.
+
+The default evaluates roots/logarithms on real inputs according to JAX rules.
+For analytic continuation, `complex_domain=True` converts numerical arguments to
+complex before evaluation, selecting the principal branches. It does not choose
+a physical Riemann sheet or override simplifications already performed using
+SymPy assumptions. Choose assumptions consistent with the intended domain.
+Singularities and thresholds can have undefined gradients; floating parameters
+and JAX Hessians require the corresponding differentiability. Test gradients
+through the normalized likelihood, not only through the raw lineshape.
+
+The expression supplies only the lineshape. The existing external angular,
+barrier and identical-particle symmetrization factors remain in `Resonance`.
+For a genuinely two-dimensional expression a different `DalitzAmplitude` plugin
+would be needed; it is not part of this API. Automatic grid refinement only sees
+the declared resonance mass and width; additional narrow structures in a formula
+need an explicit normalization-convergence study.
+
+### Saving definitions
+
+`shape.to_spec()` returns a versioned JSON-compatible tree containing symbols,
+assumptions, allowed operations, bindings and full Parameter declarations.
+`SympyLineshape.from_spec(spec, parameter_registry={p.name: p, ...})` reconstructs
+and recompiles it without `eval` or arbitrary formula parsing. A registry reuses
+Parameter objects also supplied to `Resonance`; conflicting definitions fail.
+This saves initial declarations, not fitted values: save the latter separately.
+Compiled kernels, prepared samples and complete `DecayModel` objects are not
+serialized by this API.
+
+See [the runnable SymPy tutorial](../notebooks/tutorials/tutorial_11_sympy_lineshapes.ipynb)
+for plots, an Asimov parameter-recovery fit, gradient validation and JSON roundtrip.
+See also [the B → 3π Dalitz example](../notebooks/tutorials/tutorial_12_sympy_b3pi_dalitz.ipynb)
+for a complete symmetrized Dalitz model with a user-defined pole.

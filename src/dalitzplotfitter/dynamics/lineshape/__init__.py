@@ -15,6 +15,7 @@ from .gounaris_sakurai import GounarisSakurai
 from .kmatrix import KMatrix
 from .lass import LASS
 from .pole import Pole, SigmaPole
+from .sympy import SympyLineshape
 from .pipi_kk_rescattering import PipiKKRescattering
 from .qmi import QMI
 from .relativistic_breit_wigner import RelativisticBreitWigner
@@ -34,6 +35,7 @@ __all__ = [
     "RhoOmegaMixing",
     "Rescattering2",
     "SigmaPole",
+    "SympyLineshape",
     "bachelor_momentum_parent_frame",
     "bachelor_momentum_resonance_frame",
     "blatt_weisskopf_from_momenta",

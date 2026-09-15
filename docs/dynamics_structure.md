@@ -68,3 +68,8 @@ Only `L=0..2` are supported by this legacy option. For a full reproduction of th
 For the covariant and Zemach choices, the angular plugin does not implicitly alter the Blatt-Weisskopf convention. The parent-barrier bachelor-momentum frame remains controlled independently through `bachelor_momentum_frame`.
 
 `QMI2D` remains at the `dynamics` level because it is a full two-dimensional Dalitz amplitude evaluated through `DalitzAmplitude`, rather than a one-dimensional `lineshape(mass, context)` plugin used by `Resonance`.
+
+`lineshape/sympy.py` provides the optional `SympyLineshape` adapter. It uses the
+same callable interface and parameter-resolution hooks; existing plugins and
+resonance assembly are unchanged. SymPy is imported only when constructing or
+loading symbolic definitions. See `docs/lineshapes.md`.

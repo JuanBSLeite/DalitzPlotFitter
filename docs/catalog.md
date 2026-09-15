@@ -44,6 +44,7 @@ Each is passed as `Resonance(..., lineshape=...)`; all implement `lineshape(mass
 
 | Name | Kind | What it does |
 |---|---|---|
+| `SympyLineshape` | class | Optional SymPy scalar expression with explicit parameter/context bindings, compiled to JAX; see `docs/lineshapes.md` and `tutorial_11_sympy_lineshapes.ipynb`. |
 | `RelativisticBreitWigner` | class | Standard relativistic Breit-Wigner with running width and Blatt-Weisskopf barrier factor. |
 | `Pole` | class | Simple fixed-width Breit-Wigner pole, `1/(m - m0 - i*Gamma0/2)` (Laura++ `BW`). |
 | `SigmaPole` | class | LHCb 3pi-isobar `f0(500)` pole, `1/((pole_mass - i*pole_width)**2 - m**2)`; distinct from `Pole`'s convention. |
