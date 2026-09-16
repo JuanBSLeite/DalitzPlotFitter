@@ -209,6 +209,32 @@ Docs: `docs/root_io.md`. Notebooks: `15_b2kpipi_square_dalitz_eff_background.ipy
 
 Docs: `docs/root_io.md`. Notebooks: `13_b2kpipi_root_tree_input.ipynb`, `19_toy_root_output.ipynb`.
 
+## Model import/export
+
+| Name | Kind | What it does |
+|---|---|---|
+| `export_model` | function | Write a `DecayModel`'s (or `FitSession`'s `.model`) channel, components (lineshape/angular/coefficient plugins, embedded `Parameter`s) and normalization settings to a JSON file. |
+| `import_model` | function | Reconstruct a `DecayModel` from a file written by `export_model`. |
+| `model_to_spec` | function | In-memory `dict` form of `export_model`, for embedding a model definition without file I/O. |
+| `model_from_spec` | function | In-memory counterpart of `import_model`; accepts an optional `parameter_registry` to preserve shared `Parameter` identity. |
+| `export_cp_models` | function | Like `export_model`, for a B+/B- model pair or a `CPFitSession` (its `.plus_model`/`.minus_model`), sharing one parameter registry. |
+| `import_cp_models` | function | Reconstruct a `(plus_model, minus_model)` pair from a file written by `export_cp_models`. |
+| `cp_models_to_spec` | function | In-memory `dict` form of `export_cp_models`. |
+| `cp_models_from_spec` | function | In-memory counterpart of `import_cp_models`. |
+| `model_with_fitted_values` | function | Return a new `DecayModel` (or `FitSession`'s `.model`) with every `Parameter.value` taken from a `{name: float}` mapping (e.g. `session.result_values(result)`) -- fitting never mutates the original model's frozen `Parameter`s. |
+| `cp_models_with_fitted_values` | function | Like `model_with_fitted_values`, for a B+/B- model pair, keeping a coefficient shared between charges shared in the result. |
+
+`FitSession.fit(update_model=True)`/`CPFitSession.fit(update_model=True)` call these
+automatically, returning `(result, updated_model)`/`(result, plus_model, minus_model)` instead of
+plain `result` (default `False`, existing callers are unaffected).
+
+Only the built-in dalitzplotfitter component/plugin classes (`Resonance`/`NonResonant`/
+`DalitzAmplitude`, every lineshape and angular model, `RealImag`/`CPRealImag`, `QMI2D`) round-trip;
+a custom plugin needs its own `to_spec`/`from_spec` pair, as `SympyLineshape` already provides.
+`normalization_method="toy-mc"` is not supported, since its external `normalization_sample` is not
+part of the specification. None of these capture a session's `data`/`efficiency`/`veto`/
+`backgrounds`/`constraints` -- only the amplitude model(s). Docs: `docs/model_io.md`.
+
 ## Toy (pseudo-data) generation
 
 | Name | Kind | What it does |

@@ -60,6 +60,24 @@ def test_cp_fit_session_collects_shared_parameters_once():
     assert jnp.isfinite(value)
 
 
+def test_cp_fit_session_fit_update_model_returns_a_model_pair_with_fitted_values():
+    plus, minus = _models()
+    session = CPFitSession(plus, minus, _data(), _data(0.02))
+
+    result, plus_model, minus_model = session.fit(
+        {"NR.x": 1.0, "NR.dx": 0.1}, simplex=False, ncall=100, update_model=True
+    )
+
+    assert result.valid
+    fitted_x = float(result.values["NR.x"])
+    plus_x = next(p for p in plus_model.parameters if p.name == "NR.x")
+    minus_x = next(p for p in minus_model.parameters if p.name == "NR.x")
+    assert plus_x.value == pytest.approx(fitted_x)
+    assert minus_x is plus_x
+    # the session's own models are frozen dataclasses and are left untouched
+    assert next(p for p in session.plus_model.parameters if p.name == "NR.x").value == 1.0
+
+
 def test_cp_fit_session_automatically_builds_joint_background():
     plus, minus = _models()
     fraction = Parameter("signal_fraction", 0.8, bounds=(0.0, 1.0))
