@@ -29,7 +29,7 @@ from dalitzplotfitter.goodness_of_fit import (
     point_to_point_dissimilarity as _point_to_point_dissimilarity,
 )
 from dalitzplotfitter.integration import GridIntegrator
-from dalitzplotfitter.io import read_phase_space_sample
+from dalitzplotfitter.io import model_with_fitted_values, read_phase_space_sample
 from dalitzplotfitter.kinematics import (
     PhaseSpaceSample,
     fold_thetaprime,
@@ -476,13 +476,22 @@ class FitSession:
         method: str = "minuit",
         nesterov_max_iter: int = 1000,
         nesterov_gtol: float = 1e-4,
+        update_model: bool = False,
     ):
         """Fit with ``ncall`` as an approximate limit per optimizer stage.
 
         The limit applies separately to SIMPLEX, each MIGRAD call and HESSE,
         not to the whole fit. Strategy 2 runs MIGRAD twice.
+
+        ``self.model`` is a frozen ``DecayModel`` and is never mutated by this
+        call, regardless of ``update_model``: fitting always reports its
+        result separately (see ``result_values``). Pass ``update_model=True``
+        to also get a new ``DecayModel`` with every free parameter's
+        ``.value`` set to its fitted result (via ``model_with_fitted_values``)
+        -- the return value then becomes ``(result, updated_model)`` instead
+        of plain ``result``.
         """
-        return self.minimizer(
+        result = self.minimizer(
             tolerance=tolerance, verbose=verbose, hessian=hessian
         ).fit(
             start_values=start_values,
@@ -494,6 +503,9 @@ class FitSession:
             nesterov_max_iter=nesterov_max_iter,
             nesterov_gtol=nesterov_gtol,
         )
+        if not update_model:
+            return result
+        return result, model_with_fitted_values(self.model, self.result_values(result))
 
     def fit_multistart(
         self,

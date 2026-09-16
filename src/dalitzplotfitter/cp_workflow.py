@@ -22,7 +22,7 @@ from dalitzplotfitter.goodness_of_fit import (
 from dalitzplotfitter.goodness_of_fit import (
     point_to_point_dissimilarity as _point_to_point_dissimilarity,
 )
-from dalitzplotfitter.io import read_phase_space_sample
+from dalitzplotfitter.io import cp_models_with_fitted_values, read_phase_space_sample
 from dalitzplotfitter.kinematics import (
     PhaseSpaceSample,
     SquareDalitzGrid,
@@ -240,8 +240,20 @@ class CPFitSession:
         self, start_values=None, *, simplex=False, ncall=None, strategy=2,
         hesse=True, tolerance=1e-4, verbose=0, hessian="numerical",
         method="minuit", nesterov_max_iter=1000, nesterov_gtol=1e-4,
+        update_model=False,
     ):
-        return self.minimizer(
+        """Fit the joint B+/B- likelihood.
+
+        ``self.plus_model``/``self.minus_model`` are frozen and never mutated
+        by this call. Pass ``update_model=True`` to also get a
+        ``(plus_model, minus_model)`` pair with every free parameter's
+        ``.value`` set to its fitted result (via
+        ``cp_models_with_fitted_values``, which keeps a coefficient shared
+        between charges shared in the returned models too) -- the return
+        value then becomes ``(result, plus_model, minus_model)`` instead of
+        plain ``result``.
+        """
+        result = self.minimizer(
             tolerance=tolerance, verbose=verbose, hessian=hessian,
         ).fit(
             start_values=start_values,
@@ -253,6 +265,12 @@ class CPFitSession:
             nesterov_max_iter=nesterov_max_iter,
             nesterov_gtol=nesterov_gtol,
         )
+        if not update_model:
+            return result
+        plus_model, minus_model = cp_models_with_fitted_values(
+            self.plus_model, self.result_values(result), self.minus_model
+        )
+        return result, plus_model, minus_model
 
     def fit_multistart(
         self, n_starts=20, *, seed=None, include_default=False, simplex=False,

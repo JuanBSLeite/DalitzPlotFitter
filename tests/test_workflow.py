@@ -65,6 +65,28 @@ def test_fit_session_cold_fit_materializes_cache_before_jit():
     assert "acceptance_data" in session.__dict__
 
 
+def test_fit_session_fit_update_model_returns_a_model_with_fitted_values():
+    session = FitSession(_model(), _data())
+    initial_x = next(p for p in session.model.parameters if p.name == "NR.x").value
+
+    result, updated_model = session.fit(
+        {"NR.x": 0.9}, simplex=False, ncall=100, update_model=True
+    )
+
+    assert result.valid
+    fitted_x = next(p for p in updated_model.parameters if p.name == "NR.x").value
+    assert fitted_x == pytest.approx(float(result.values["NR.x"]))
+    # the session's own model is a frozen dataclass and is left untouched
+    session_x = next(p for p in session.model.parameters if p.name == "NR.x")
+    assert session_x.value == initial_x
+
+
+def test_fit_session_fit_without_update_model_returns_plain_result():
+    session = FitSession(_model(), _data())
+    result = session.fit({"NR.x": 0.9}, simplex=False, ncall=100)
+    assert result.valid
+
+
 def test_fit_session_cached_signal_matches_generic_pdf():
     session = FitSession(_model(), _data())
     values = {"NR.x": 1.3}
