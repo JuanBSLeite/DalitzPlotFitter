@@ -75,12 +75,15 @@ class YieldAsymmetry:
 
     @property
     def parameters(self) -> tuple[object, ...]:
+        """The fit Parameter objects among total/asymmetry, skipping plain numbers."""
         return tuple(value for value in (self.total, self.asymmetry) if hasattr(value, "resolve"))
 
     def plus(self, parameters: Parameters) -> Array:
+        """Expected B+ signal yield, ``N_plus = N_s (1 - asymmetry) / 2``."""
         return 0.5 * jnp.asarray(_resolve(self.total, parameters)) * (1.0 - jnp.asarray(_resolve(self.asymmetry, parameters)))
 
     def minus(self, parameters: Parameters) -> Array:
+        """Expected B- signal yield, ``N_minus = N_s (1 + asymmetry) / 2``."""
         return 0.5 * jnp.asarray(_resolve(self.total, parameters)) * (1.0 + jnp.asarray(_resolve(self.asymmetry, parameters)))
 
 
@@ -224,10 +227,12 @@ class CPJointNLL:
 
     @property
     def has_legacy_background(self) -> bool:
+        """Whether the legacy plus_background/minus_background arguments are set."""
         return self.plus_background is not None
 
     @property
     def has_background(self) -> bool:
+        """Whether any background, legacy or category-based, is configured."""
         return self.has_legacy_background or bool(self.background_categories)
 
     def _signal_densities(self, parameters: Parameters) -> tuple[Array, Array, Array, Array]:
@@ -253,6 +258,10 @@ class CPJointNLL:
         return self._legacy_background_densities()
 
     def background_weights(self, parameters: Parameters) -> Array:
+        """Resolve each non-extended background category's relative fraction.
+
+        The last category's weight is the remainder, ``1 - sum(others)``.
+        """
         n = len(self.background_categories)
         if n == 0:
             return jnp.empty((0,), dtype=jnp.float64)
@@ -279,6 +288,12 @@ class CPJointNLL:
         return (signal_plus, signal_minus), None
 
     def densities(self, parameters: Parameters) -> tuple[Array, Array]:
+        """Return the (plus, minus) per-event densities the NLL takes the log of.
+
+        In extended mode these are total expected densities (signal yield(s)
+        plus any background yield(s)); otherwise they are the
+        signal_fraction-weighted signal/background mixture.
+        """
         signal_plus, signal_minus, integral_plus, integral_minus = self._signal_densities(parameters)
         if self.extended:
             n_plus, n_minus, standalone = _signal_yield_pair(self.signal_yield, parameters)
@@ -315,6 +330,7 @@ class CPJointNLL:
         return f_signal * signal_plus + (1.0 - f_signal) * background_plus, f_signal * signal_minus + (1.0 - f_signal) * background_minus
 
     def expected_events(self, parameters: Parameters) -> Array:
+        """Total expected events (signal + background) for the extended Poisson term."""
         if not self.extended:
             raise RuntimeError("expected_events is only defined in extended mode")
         if isinstance(self.signal_yield, YieldAsymmetry):
@@ -346,6 +362,7 @@ class CPJointNLL:
                             operand=None)
 
     def charge_probabilities(self, parameters: Parameters) -> tuple[Array, Array]:
+        """The model's predicted (B+, B-) event-count fractions, signal+background."""
         integral_plus = self.plus_cache.normalization(parameters)
         integral_minus = self.minus_cache.normalization(parameters)
         signal_total = integral_plus + integral_minus

@@ -212,6 +212,7 @@ class SympyLineshape:
 
     @property
     def context_symbols(self) -> dict:
+        """A copy of the symbols bound to ResonanceContext fields (e.g. pole_mass)."""
         return dict(self._context_bindings)
 
     def resolve(self, values=None):

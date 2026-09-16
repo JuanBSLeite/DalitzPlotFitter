@@ -37,6 +37,7 @@ class AmplitudeComponent:
         parameters: Mapping[str, object] | None = None,
         coefficient_values: Mapping[str, object] | None = None,
     ) -> Array:
+        """Coefficient-scaled amplitude ``c_i * F_i(x)`` for this component."""
         dynamics = jnp.asarray(self.function(data, parameters))
         coefficient = jnp.asarray(coefficient_value(self.coefficient, coefficient_values))
         return coefficient * dynamics
@@ -50,6 +51,7 @@ class ConstantAmplitude:
 
     @property
     def parameters(self) -> dict[str, object]:
+        """No dynamics parameters; a constant amplitude has none to float."""
         return {}
 
     def __call__(
@@ -78,6 +80,7 @@ class CoherentAmplitudeModel:
         parameters: Mapping[str, Mapping[str, object]] | None = None,
         coefficient_values: Mapping[str, object] | None = None,
     ) -> Array:
+        """Coherent sum ``A(x) = sum_i c_i F_i(x)`` over all components."""
         if not self.components:
             raise ValueError("At least one amplitude component is required")
         total = None
@@ -92,5 +95,6 @@ class CoherentAmplitudeModel:
         return jnp.asarray(total)
 
     def intensity(self, data: Mapping[str, Array], **kwargs) -> Array:
+        """Intensity ``|A(x)|^2`` from the coherent sum of components."""
         amplitude = self.amplitude(data, **kwargs)
         return jnp.real(amplitude * jnp.conj(amplitude))

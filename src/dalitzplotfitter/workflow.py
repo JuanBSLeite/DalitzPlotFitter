@@ -168,6 +168,7 @@ class FitSession:
         constraints: Sequence[object] = (),
         **root_kwargs,
     ) -> "FitSession":
+        """Build a `FitSession` reading its data sample from a ROOT tree."""
         data = read_phase_space_sample(file_path, tree, **root_kwargs)
         return cls(
             model=model,
@@ -182,9 +183,11 @@ class FitSession:
         )
 
     def with_efficiency(self, efficiency: object | None) -> "FitSession":
+        """Return a copy of this session with `efficiency` replaced."""
         return replace(self, efficiency=efficiency)
 
     def with_veto(self, veto: object | None) -> "FitSession":
+        """Return a copy of this session with `veto` replaced."""
         return replace(self, veto=veto)
 
     def with_background(
@@ -197,6 +200,7 @@ class FitSession:
         normalization_sample: PhaseSpaceSample | None = None,
         apply_veto: bool = True,
     ) -> "FitSession":
+        """Return a copy of this session with a `BackgroundSpec` appended."""
         spec = BackgroundSpec(
             name=name,
             shape=shape,
@@ -208,6 +212,7 @@ class FitSession:
         return replace(self, backgrounds=self.backgrounds + (spec,))
 
     def with_constraint(self, constraint: object) -> "FitSession":
+        """Return a copy of this session with `constraint` appended."""
         return replace(self, constraints=self.constraints + (constraint,))
 
     @cached_property
@@ -432,6 +437,11 @@ class FitSession:
 
     @property
     def parameters(self) -> tuple[Parameter, ...]:
+        """All fit `Parameter`s from model, yield/fraction, backgrounds, constraints.
+
+        Deduplicated by name; raises if the same name resolves to conflicting
+        `Parameter` definitions across those sources.
+        """
         candidates: list[Parameter] = list(getattr(self.model, "parameters", ()))
         candidates.extend(_collect_parameters(self.signal_fraction))
         candidates.extend(_collect_parameters(self.signal_yield))
@@ -454,6 +464,7 @@ class FitSession:
         verbose: int = 0,
         hessian: str = "numerical",
     ) -> Minimizer:
+        """Build a `Minimizer` over `self.objective` and `self.parameters`."""
         return Minimizer(
             self.objective,
             self.parameters,
@@ -519,6 +530,7 @@ class FitSession:
         verbose: int = 0,
         hessian: str = "numerical",
     ):
+        """Fit from `n_starts` randomized initial values, keeping the best result."""
         return self.minimizer(
             tolerance=tolerance, verbose=verbose, hessian=hessian
         ).fit_multistart(
@@ -530,6 +542,7 @@ class FitSession:
         )
 
     def result_values(self, result) -> dict[str, float]:
+        """Map each parameter name to its fitted value (fixed value if not floated)."""
         return {
             parameter.name: (
                 float(parameter.value)
@@ -540,6 +553,7 @@ class FitSession:
         }
 
     def print_result(self, result, *, precision: int = 6) -> dict[str, float]:
+        """Print validity, NLL and a value/error table, and return `result_values`."""
         if precision < 0:
             raise ValueError("precision must be non-negative")
         values = self.result_values(result)
@@ -562,6 +576,7 @@ class FitSession:
         include_interference: bool = False,
         precision: int = 3,
     ):
+        """Print and return per-component fit fractions at `result`'s fitted values."""
         return self.model.print_fit_fractions(
             self.result_values(result),
             efficiency=self.efficiency if acceptance_weighted else None,
@@ -595,6 +610,12 @@ class FitSession:
         acceptance_weighted_fractions: bool = False,
         include_correlation: bool = True,
     ) -> dict[str, object]:
+        """Assemble a summary dict of fit results: validity, NLL, EDM, values, errors.
+
+        Optionally includes fit fractions (`include_fit_fractions`) and the
+        free-parameter correlation matrix (`include_correlation`, only if a
+        covariance is available).
+        """
         values = self.print_result(result)
         errors = {
             parameter.name: (

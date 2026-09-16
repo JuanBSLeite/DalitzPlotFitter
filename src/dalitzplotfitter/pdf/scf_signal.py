@@ -49,6 +49,12 @@ class SCFSignalPDF:
         return self.efficiency(true_data) * self.intensity(true_data, parameters)
 
     def normalization(self, parameters: Parameters) -> Array:
+        """Total normalization: continuous CR integral plus binned migrated-SCF sum.
+
+        Computed as separate CR and SCF terms rather than one continuous
+        integral, since a single integral would misrepresent the coarse SCF
+        migration bins for non-constant intensity.
+        """
         # Always split CR (continuous) + SCF (migration-binned): a single
         # continuous integral of efficiency*intensity, used only when veto was
         # None, silently assumed the coarse SCF-bin midpoint mass equals the
@@ -71,6 +77,7 @@ class SCFSignalPDF:
         return cr_norm + scf_norm
 
     def numerator(self, data: dict[str, Array], parameters: Parameters) -> Array:
+        """Reconstructed-space density: correctly reconstructed plus migrated SCF."""
         required = ("s12", "s13", "s23")
         missing = [key for key in required if key not in data]
         if missing:
@@ -95,6 +102,7 @@ class SCFSignalPDF:
         return jnp.where(numerator > 0.0, jnp.clip(normalized, min=self.floor), 0.0)
 
     def logpdf(self, data: dict[str, Array], parameters: Parameters) -> Array:
+        """Log-density: log(numerator) - log(normalization), floored, -inf if zero."""
         numerator = self.numerator(data, parameters)
         return jnp.where(
             numerator > 0.0,

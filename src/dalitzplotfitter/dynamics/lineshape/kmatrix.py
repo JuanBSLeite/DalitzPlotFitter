@@ -134,16 +134,20 @@ class KMatrix:
             raise ValueError("KMatrix requires five production SVP coefficients")
 
     def phase_space(self, mass):
+        """Return the five-channel phase-space vector rho(s) at each mass."""
         return _phase_space_vector(jnp.asarray(mass) ** 2)
 
     def scattering_matrix(self, mass):
+        """Return the 5x5 real scattering K-matrix at each mass."""
         return _scattering_matrix(jnp.asarray(mass) ** 2)
 
     def scattering_amplitude(self, mass):
+        """Return the 5x5 complex T-matrix, T = (I - i K rho)^-1 K, at each mass."""
         _, _, k_matrix, _, kernel = _kernel(mass)
         return jnp.linalg.solve(kernel, k_matrix)
 
     def s_matrix(self, mass):
+        """Return the unitary 5x5 S-matrix, S = I + 2i*sqrt(rho) T sqrt(rho)."""
         mass = jnp.asarray(mass)
         rho = self.phase_space(mass)
         sqrt_rho = jnp.sqrt(rho)
@@ -165,6 +169,7 @@ class KMatrix:
         return pole + smooth
 
     def production_vector(self, mass):
+        """Return the five-channel production vector P(s) (pole + slowly-varying)."""
         s = jnp.asarray(mass) ** 2
         inverse_denominators = _stable_inverse_denominators(s)
         return self._production_vector_from_inverse(s, inverse_denominators)
@@ -195,6 +200,7 @@ class KMatrix:
         return jnp.einsum("...j,...j->...", response_row, production)
 
     def amplitude_vector(self, mass):
+        """Return the full five-channel amplitude vector F = (I - i K rho)^-1 P."""
         mass = jnp.asarray(mass)
         s, inverse_denominators, _, _, kernel = _kernel(mass)
         production = self._production_vector_from_inverse(s, inverse_denominators)

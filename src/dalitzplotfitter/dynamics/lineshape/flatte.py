@@ -33,6 +33,7 @@ class Flatte:
         return (jnp.asarray(mass) ** 2 - s_a) / (jnp.asarray(pole_mass) ** 2 - s_a)
 
     def widths(self, mass, context: ResonanceContext):
+        """Return the (gamma1, gamma2) coupled-channel widths at each mass."""
         f_a = self._adler(mass, context.pole_mass)
         rho11 = _phase_space(mass, *self.channel1[0])
         rho12 = _phase_space(mass, *self.channel1[1])
@@ -50,6 +51,7 @@ class Flatte:
 
     @classmethod
     def f0_980(cls):
+        """Build the f0(980) Flatte with default BES couplings (pipi/KK channels)."""
         mpi0, mpip = 0.1349768, 0.13957039
         mkp, mk0 = 0.493677, 0.497611
         m0_ref = 0.965
@@ -58,16 +60,19 @@ class Flatte:
 
     @classmethod
     def k0star_1430_neutral(cls):
+        """Build the neutral K0*(1430) Flatte with Laura++ default couplings."""
         mk0, mkp, mpi0, mpip, metap = 0.497611, 0.493677, 0.1349768, 0.13957039, 0.95778
         return cls(0.304, 0.380, ((mk0, mpi0), (mkp, mpip)), ((mk0, metap), (mk0, metap)), 0.234)
 
     @classmethod
     def k0star_1430_charged(cls):
+        """Build the charged K*(1430) Flatte with Laura++ default couplings."""
         mk0, mkp, mpi0, mpip, metap = 0.497611, 0.493677, 0.1349768, 0.13957039, 0.95778
         return cls(0.304, 0.380, ((mkp, mpi0), (mk0, mpip)), ((mkp, metap), (mkp, metap)), 0.234)
 
     @classmethod
     def a0_980_neutral(cls):
+        """Build the neutral a0(980) Flatte with Laura++ default couplings."""
         meta, mpi0, mkp, mk0 = 0.547862, 0.1349768, 0.493677, 0.497611
         m0_ref = 0.999
         g1 = 0.105 / m0_ref
@@ -75,6 +80,7 @@ class Flatte:
 
     @classmethod
     def a0_980_charged(cls):
+        """Build the charged a0(980) Flatte with Laura++ default couplings."""
         meta, mpip, mkp, mk0 = 0.547862, 0.13957039, 0.493677, 0.497611
         m0_ref = 0.999
         g1 = 0.105 / m0_ref

@@ -23,6 +23,8 @@ class VetoMap:
         raise NotImplementedError
 
     def accept(self, data: dict[str, Array]) -> Array:
+        """Return the boolean acceptance mask (``True`` = accepted) for `data`."""
+
         return jnp.asarray(self(data), dtype=bool)
 
     def apply(self, sample: PhaseSpaceSample, *, for_integration: bool = False) -> PhaseSpaceSample:
@@ -65,6 +67,8 @@ class MassWindowVeto(VetoMap):
 
     @property
     def variable(self) -> str:
+        """Invariant-mass-squared key (``s12``/``s13``/``s23``) vetoed by ``pair``."""
+
         return {(0, 1): "s12", (0, 2): "s13", (1, 2): "s23"}[self.pair]
 
     def __call__(self, data: dict[str, Array]) -> Array:

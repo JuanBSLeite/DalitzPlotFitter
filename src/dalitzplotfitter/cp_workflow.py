@@ -119,6 +119,7 @@ class CPBackgroundSpec:
 
     @property
     def resolved_minus_shape(self):
+        """The B- background shape, falling back to plus_shape when unset."""
         return self.plus_shape if self.minus_shape is None else self.minus_shape
 
 
@@ -140,20 +141,25 @@ class CPFitSession:
 
     @classmethod
     def from_root(cls, plus_model, minus_model, plus_file, plus_tree, minus_file, minus_tree, *, plus_root_kwargs=None, minus_root_kwargs=None, **session_kwargs):
+        """Build a CPFitSession, reading plus/minus samples from separate ROOT files."""
         plus_data = read_phase_space_sample(plus_file, plus_tree, **({} if plus_root_kwargs is None else dict(plus_root_kwargs)))
         minus_data = read_phase_space_sample(minus_file, minus_tree, **({} if minus_root_kwargs is None else dict(minus_root_kwargs)))
         return cls(plus_model, minus_model, plus_data, minus_data, **session_kwargs)
 
     def with_efficiency(self, plus_efficiency, minus_efficiency=None):
+        """Return a copy with plus/minus efficiencies set, defaulting minus to plus."""
         return replace(self, plus_efficiency=plus_efficiency, minus_efficiency=plus_efficiency if minus_efficiency is None else minus_efficiency)
 
     def with_veto(self, plus_veto, minus_veto=None):
+        """Return a copy with plus/minus vetoes set, defaulting minus to plus."""
         return replace(self, plus_veto=plus_veto, minus_veto=plus_veto if minus_veto is None else minus_veto)
 
     def with_background(self, name, plus_shape, *, minus_shape=None, fraction=None, yield_=None, plus_normalization_sample=None, minus_normalization_sample=None, apply_veto=True):
+        """Return a copy with an added charge-aware background component."""
         return replace(self, backgrounds=self.backgrounds + (CPBackgroundSpec(name, plus_shape, minus_shape, fraction, yield_, plus_normalization_sample, minus_normalization_sample, apply_veto),))
 
     def with_constraint(self, constraint):
+        """Return a copy with an added constraint applied to the joint objective."""
         return replace(self, constraints=self.constraints + (constraint,))
 
     @cached_property
@@ -221,6 +227,10 @@ class CPFitSession:
 
     @property
     def parameters(self):
+        """All fit parameters, deduplicated across both models and backgrounds.
+
+        Raises if two sources give conflicting definitions for the same name.
+        """
         candidates = list(getattr(self.plus_model, "parameters", ())) + list(getattr(self.minus_model, "parameters", ()))
         candidates.extend(_collect_parameters(self.signal_fraction)); candidates.extend(_collect_parameters(self.signal_yield)); candidates.extend(_collect_parameters(self.backgrounds)); candidates.extend(_collect_parameters(self.constraints))
         unique = {}
@@ -231,6 +241,7 @@ class CPFitSession:
         return tuple(unique.values())
 
     def minimizer(self, *, tolerance=1e-4, verbose=0, hessian="numerical"):
+        """Build a Minimizer over the joint objective and this session's parameters."""
         return Minimizer(
             self.objective, self.parameters,
             tolerance=tolerance, verbose=verbose, hessian=hessian,
@@ -276,6 +287,7 @@ class CPFitSession:
         self, n_starts=20, *, seed=None, include_default=False, simplex=False,
         strategy=1, tolerance=1e-4, verbose=0, hessian="numerical",
     ):
+        """Fit the joint likelihood from multiple random starts, keep the best fit."""
         return self.minimizer(
             tolerance=tolerance, verbose=verbose, hessian=hessian,
         ).fit_multistart(
@@ -287,9 +299,14 @@ class CPFitSession:
         )
 
     def result_values(self, result):
+        """Map each parameter name to its fitted (or fixed) value from a fit result."""
         return {p.name: (float(p.value) if p.fixed else float(result.values[p.name])) for p in self.parameters}
 
     def print_result(self, result, *, precision=6):
+        """Print fitted parameter values/errors and predicted B+/B- charge fractions.
+
+        Returns the values dict.
+        """
         values = self.result_values(result)
         print(f"valid={bool(result.valid)}  NLL={float(result.fval):.{precision}f}")
         print(f"{'parameter':24s} {'value':>16s} {'error':>16s}")
@@ -349,6 +366,7 @@ class CPFitSession:
         }
 
     def print_fit_fractions(self, result, *, acceptance_weighted=False, include_interference=False, precision=3):
+        """Print and return each charge's per-component fit fractions."""
         values = self.result_values(result)
         print("B+ fit fractions")
         plus = self.plus_model.print_fit_fractions(values, efficiency=self.plus_efficiency if acceptance_weighted else None, include_interference=include_interference, precision=precision)
@@ -357,6 +375,11 @@ class CPFitSession:
         return {"plus": plus, "minus": minus}
 
     def report(self, result, *, include_fit_fractions=True, acceptance_weighted_fractions=False, include_correlation=True):
+        """Assemble a dict summary of the fit.
+
+        Includes validity, NLL, EDM, parameter values/errors, charge
+        probabilities, and optionally fit fractions/correlation matrix.
+        """
         values = self.print_result(result)
         errors = {p.name: (0.0 if p.fixed else float(result.errors[p.name])) for p in self.parameters}
         pplus, pminus = self.base_objective.charge_probabilities(values)

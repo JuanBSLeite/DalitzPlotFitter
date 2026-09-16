@@ -166,6 +166,13 @@ class ConvolvedPDF1D:
         object.__setattr__(self, "_hermite_weights", hermite_weights)
 
     def normalization(self, parameters: Parameters | None = None) -> Array:
+        """Return the retained-probability normalization on the observed range.
+
+        Integrates ``pdf(true) * P(observed in range | true)`` over the true
+        interval by Gauss-Legendre quadrature; parameter dependent whenever
+        probability migrates across the observed boundaries.
+        """
+
         nodes = self._true_nodes
         true_density = jnp.asarray(self.pdf(nodes, parameters))
         retained = jnp.asarray(

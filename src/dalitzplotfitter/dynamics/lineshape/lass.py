@@ -30,6 +30,7 @@ class LASS:
             raise ValueError("LASS mode must be 'full', 'resonant', or 'nonresonant'")
 
     def terms(self, mass, context: ResonanceContext):
+        """Return the (nonresonant, resonant) LASS amplitude terms at each mass."""
         if int(context.spin) != 0:
             raise ValueError("LASS is defined for a spin-0 K-pi S-wave")
         m = jnp.asarray(mass)

@@ -131,6 +131,7 @@ Docs: `docs/square_dalitz.md`.
 | `ParameterKind` | class | Enum-like role tag (`COEFFICIENT` vs `DYNAMICS`) that determines what a floating parameter invalidates in the cache. |
 | `Minimizer` | class | Wraps `iminuit` around a JAX `value_and_grad` objective; `fit()`, `fit_multistart()`, `check_gradient()`. |
 | `MultiStartResult` | class | Collection of independent minimizations from `fit_multistart`, plus the best valid minimum. |
+| `NesterovResult` | class | Minuit-compatible result object returned by `Minimizer.fit(method="nesterov")`. |
 
 Docs: `docs/fitting.md`.
 
@@ -300,6 +301,7 @@ array already ordered like the requested parameter names. Docs:
 | `chi2_from_histograms` | function | Low-level binned Pearson chi2 test between observed/expected count arrays (1D or 2D). |
 | `PointToPointResult` | class | Point-to-point dissimilarity (PPD) result: statistic, permutation-test p-value. |
 | `point_to_point_dissimilarity` | function | Low-level unbinned PPD test (Williams, arXiv:1006.3019) between plain coordinate/density arrays. |
+| `kdtree_local_residuals` | function | Adaptive k-neighbour local-residual diagnostic: per-point Pearson pulls from a KD-tree-selected neighbourhood, in any coordinate pair. |
 
 `FitSession`/`CPFitSession` expose these as `goodness_of_fit_projection`/`goodness_of_fit_chi2`/
 `point_to_point_dissimilarity` methods, reusing the same reweighted-MC-projection machinery as

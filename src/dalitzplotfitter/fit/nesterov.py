@@ -28,6 +28,8 @@ class NesterovResult:
 
     @property
     def fmin(self):
+        """Minuit-``FMin``-like stand-in; ``edm`` is always ``nan`` (no EDM check)."""
+
         return SimpleNamespace(edm=float("nan"))
 
 

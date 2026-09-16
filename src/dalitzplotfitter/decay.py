@@ -172,14 +172,17 @@ class DecayChannel:
 
     @property
     def parent_mass(self) -> float:
+        """Parent particle mass in GeV, looked up by name from `particle`."""
         return _mass_gev(self.parent)
 
     @property
     def daughter_masses(self) -> tuple[float, float, float]:
+        """Final-state masses in GeV, in `final_state` order."""
         return tuple(_mass_gev(name) for name in self.final_state)
 
     @property
     def final_state_ids(self) -> tuple[int, int, int]:
+        """PDG IDs of the final-state particles, in `final_state` order."""
         return tuple(int(_particle(name).pdgid) for name in self.final_state)
 
 
@@ -658,6 +661,7 @@ class DecayModel:
 
     @property
     def parameters(self) -> tuple[Parameter, ...]:
+        """All `Parameter`s referenced by `components`, deduplicated by name."""
         unique: dict[str, Parameter] = {}
         for component in self.components:
             for parameter in _collect_parameters(component):
@@ -666,6 +670,11 @@ class DecayModel:
 
     @property
     def normalization_sample(self) -> PhaseSpaceSample:
+        """Deterministic quadrature sample used to normalize the amplitude model.
+
+        Built lazily from `normalization_method` (with automatic narrow-resonance
+        grid refinement) and cached on first access.
+        """
         sample = self._normalization_sample
         if sample is None:
             narrow = self._adaptive_narrow_resonances()
@@ -815,6 +824,11 @@ class DecayModel:
 
     @property
     def amplitude_model(self) -> CoherentAmplitudeModel:
+        """Built `CoherentAmplitudeModel`, resolving each declared component's dynamics.
+
+        Built lazily from `components` (`Resonance`, `NonResonant`, `DalitzAmplitude`)
+        and cached on first access.
+        """
         model = self._amplitude_model
         if model is not None:
             return model
@@ -877,6 +891,7 @@ class DecayModel:
         seed: int | None = None,
         include_momenta: bool = True,
     ) -> PhaseSpaceSample:
+        """Generate a uniform-in-phase-space toy sample for `channel`."""
         return PhaseSpaceMC(
             self.channel.parent_mass,
             self.channel.daughter_masses,
@@ -925,6 +940,7 @@ class DecayModel:
         return 1.0 / jnp.sqrt(integral)
 
     def amplitude(self, data, values=None):
+        """Coherent sum of every component's coefficient-scaled dynamics at `data`."""
         total = None
         for component in self.amplitude_model.components:
             dynamics = jnp.asarray(component.function(data, values))
@@ -934,10 +950,16 @@ class DecayModel:
         return jnp.asarray(total)
 
     def intensity(self, data, values=None):
+        """Squared magnitude of `amplitude` at `data`, i.e. |A|^2."""
         amplitude = self.amplitude(data, values)
         return jnp.real(amplitude * jnp.conj(amplitude))
 
     def pdf(self, normalization_sample: PhaseSpaceSample | None = None, *, efficiency=None) -> SignalPDF:
+        """Build a `SignalPDF` for this model, normalized on `normalization_sample`.
+
+        Defaults to `self.normalization_sample`; an explicit sample is validated
+        as a proper integration sample first.
+        """
         sample = self.normalization_sample if normalization_sample is None else normalization_sample
         if normalization_sample is not None:
             sample.validate_integration()
@@ -956,6 +978,12 @@ class DecayModel:
         efficiency_normalization=None,
         normalize_components: bool | None = None,
     ) -> PreparedAmplitudeCache:
+        """Build a `PreparedAmplitudeCache` for `data_sample` against this model.
+
+        Reuses a cached fixed component-scale/normalization-matrix template
+        when nothing floating can change it (no floating dynamics parameters,
+        no efficiency normalization, and the default `normalization_sample`).
+        """
         sample = self.normalization_sample if normalization_sample is None else normalization_sample
         if normalization_sample is not None:
             sample.validate_integration()

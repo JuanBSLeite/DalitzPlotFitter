@@ -96,17 +96,25 @@ class SparseMigration:
 
     @property
     def shape(self) -> tuple[int, int]:
+        """Dense ``(n_bins, n_bins)`` shape this operator represents."""
+
         return self.n_bins, self.n_bins
 
     @property
     def nnz(self) -> int:
+        """Number of stored ``(true_bin, reco_bin)`` entries."""
+
         return int(self.probabilities.shape[0])
 
     @property
     def density(self) -> float:
+        """Fraction of the dense ``n_bins x n_bins`` matrix that is stored."""
+
         return self.nnz / float(self.n_bins * self.n_bins)
 
     def row_sums(self) -> Array:
+        """Sum of stored probabilities per true bin, duplicates summed together."""
+
         return jnp.zeros((self.n_bins,), dtype=self.probabilities.dtype).at[
             self.true_indices
         ].add(self.probabilities)
@@ -248,14 +256,20 @@ class SquareDalitzSCFMap:
 
     @property
     def n_bins(self) -> int:
+        """Total number of SDP bins, ``bins_mprime * bins_thetaprime``."""
+
         return self.bins_mprime * self.bins_thetaprime
 
     @property
     def is_sparse(self) -> bool:
+        """Whether the migration operator is stored as a :class:`SparseMigration`."""
+
         return isinstance(self.migration, SparseMigration)
 
     @property
     def migration_nnz(self) -> int:
+        """Number of non-zero migration entries, sparse or dense storage alike."""
+
         if isinstance(self.migration, SparseMigration):
             return self.migration.nnz
         return int(
@@ -266,6 +280,8 @@ class SquareDalitzSCFMap:
 
     @property
     def migration_density(self) -> float:
+        """Fraction of the dense migration matrix that is non-zero."""
+
         return self.migration_nnz / float(self.n_bins * self.n_bins)
 
     def migration_matrix(self) -> Array:
@@ -277,6 +293,8 @@ class SquareDalitzSCFMap:
 
     @property
     def bin_widths(self) -> tuple[float, float]:
+        """Uniform bin widths, ``(1/bins_mprime, 1/bins_thetaprime)``."""
+
         return 1.0 / self.bins_mprime, 1.0 / self.bins_thetaprime
 
     @cached_property
@@ -291,6 +309,8 @@ class SquareDalitzSCFMap:
         return grid_mp.reshape(-1), grid_tp.reshape(-1)
 
     def square_centers(self) -> tuple[Array, Array]:
+        """Return cached ``(m', theta')`` centres of all true bins."""
+
         return self._square_centers
 
     @cached_property
@@ -329,6 +349,8 @@ class SquareDalitzSCFMap:
         return self._phase_space_areas
 
     def bin_indices(self, mprime: Array, thetaprime: Array) -> Array:
+        """Flatten ``(m', theta')`` coordinates to row-major bin indices."""
+
         mp = jnp.asarray(mprime)
         tp = jnp.asarray(thetaprime)
         if mp.shape != tp.shape:
@@ -345,6 +367,8 @@ class SquareDalitzSCFMap:
         s13: Array,
         s23: Array,
     ) -> Array:
+        """Convert Dalitz invariants to Square-Dalitz-Plot bin indices."""
+
         mp, tp = invariants_to_square_dalitz(
             s12,
             s13,
@@ -361,6 +385,8 @@ class SquareDalitzSCFMap:
         s13: Array,
         s23: Array,
     ) -> Array:
+        """Look up the true-bin SCF fraction for each event's invariants."""
+
         indices = self.bin_indices_from_invariants(s12, s13, s23)
         return self.scf_fraction[indices]
 
@@ -394,6 +420,8 @@ class SquareDalitzSCFMap:
         s13: Array,
         s23: Array,
     ) -> Array:
+        """Smear ``true_density`` and sample the reconstructed density at each event."""
+
         reco_density = self.smeared_bin_density(true_density)
         indices = self.bin_indices_from_invariants(s12, s13, s23)
         return reco_density[indices]

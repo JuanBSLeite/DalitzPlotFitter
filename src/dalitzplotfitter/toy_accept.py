@@ -540,6 +540,8 @@ class CPToyBackground:
 
     @property
     def resolved_minus_shape(self):
+        """Effective B- shape: ``minus_shape`` if set, else ``plus_shape``."""
+
         return self.plus_shape if self.minus_shape is None else self.minus_shape
 
 

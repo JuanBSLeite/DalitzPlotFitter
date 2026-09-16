@@ -53,6 +53,7 @@ class ResonanceContext:
         self,
         values: Mapping[str, object] | None = None,
     ) -> "ResonanceContext":
+        """Return a numerical ResonanceContext with all fit Parameters resolved."""
         return replace(
             self,
             parent_mass=resolve_value(self.parent_mass, values),

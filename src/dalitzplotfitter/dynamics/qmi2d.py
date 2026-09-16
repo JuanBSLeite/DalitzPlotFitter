@@ -231,9 +231,13 @@ class QMI2D:
                                 )
 
     @property
-    def shape(self): return (len(self.s12_edges)-1,len(self.s13_edges)-1)
+    def shape(self):
+        """Grid shape as (n_s12_bins, n_s13_bins)."""
+        return (len(self.s12_edges)-1,len(self.s13_edges)-1)
     @property
-    def n_active_bins(self): return self.shape[0]*self.shape[1] if self.active_mask is None else sum(sum(bool(v) for v in r) for r in self.active_mask)
+    def n_active_bins(self):
+        """Number of physical bins; all bins unless active_mask restricts them."""
+        return self.shape[0]*self.shape[1] if self.active_mask is None else sum(sum(bool(v) for v in r) for r in self.active_mask)
 
     @cached_property
     def _x_edges_fixed(self):
@@ -264,6 +268,7 @@ class QMI2D:
         return (jnp.minimum(s12,s13),jnp.maximum(s12,s13)) if self.folded else (s12,s13)
 
     def interpolated_magnitude_phase(self,data):
+        """Return the interpolated (magnitude, phase) at each event's (s12, s13)."""
         x,y=self._coordinates(data)
         xe=self._x_edges_fixed.astype(x.dtype)
         ye=self._y_edges_fixed.astype(y.dtype)

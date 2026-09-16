@@ -693,10 +693,12 @@ class QMI:
 
     @property
     def size(self) -> int:
+        """Number of mass knots."""
         return len(self.knots)
 
     @property
     def parameterization(self) -> str:
+        """Whether knots are "cartesian" (real/imag) or "polar" (magnitude/phase)."""
         return "cartesian" if self.real_parts is not None else "polar"
 
     def _interpolate(self, s, knot_s, values, prepared_index=None):
@@ -832,6 +834,7 @@ class QMI:
         return jnp.abs(value), jnp.angle(value)
 
     def interpolated_magnitude_phase(self, mass):
+        """Return the interpolated (magnitude, phase) of the amplitude at each mass."""
         return self._interpolated_magnitude_phase(mass)
 
     def _interpolated_cartesian(self, mass, prepared_index=None):
@@ -851,6 +854,7 @@ class QMI:
         return magnitude * jnp.cos(phase), magnitude * jnp.sin(phase)
 
     def interpolated_cartesian(self, mass):
+        """Return the interpolated (real, imaginary) amplitude parts at each mass."""
         return self._interpolated_cartesian(mass)
 
     @property
@@ -880,6 +884,7 @@ class QMI:
         return compact_index, fraction, order, starts, ends
 
     def evaluate_prepared(self, mass, prepared_index, context: ResonanceContext):
+        """Evaluate the complex amplitude from a cached knot interval/fraction."""
         if int(context.spin) != 0:
             raise ValueError("QMI is defined for a scalar S-wave")
 

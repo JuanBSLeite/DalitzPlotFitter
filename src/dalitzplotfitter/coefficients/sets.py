@@ -25,9 +25,13 @@ class RealImag:
 
     @property
     def parameters(self) -> tuple[object, ...]:
+        """Embedded fit ``Parameter`` objects among ``x, y``."""
+
         return tuple(value for value in (self.x, self.y) if hasattr(value, "resolve"))
 
     def value(self, values: Mapping[str, object] | None = None):
+        """Resolve the complex coefficient ``x + i y``."""
+
         return jnp.asarray(_resolve(self.x, values)) + 1j * jnp.asarray(
             _resolve(self.y, values)
         )
