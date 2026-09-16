@@ -53,6 +53,8 @@ class MultiStartResult:
 
     @property
     def valid_results(self) -> tuple[object, ...]:
+        """Subset of ``results`` that Minuit marked valid with a finite fval."""
+
         return tuple(
             result
             for result in self.results
@@ -319,6 +321,12 @@ class Minimizer:
         relative_floor: float = 1e-12,
         print_table: bool = True,
     ) -> GradientCheckResult:
+        """Compare the JAX gradient against a central finite-difference gradient.
+
+        Evaluated at ``values`` (or each free parameter's current value) and
+        optionally prints a per-parameter comparison table.
+        """
+
         if step_scale <= 0:
             raise ValueError("step_scale must be positive")
         if relative_floor <= 0:
@@ -570,6 +578,12 @@ class Minimizer:
         return value
 
     def random_start(self, *, seed: int | None = None) -> dict[str, float]:
+        """Draw a random starting point for every free parameter.
+
+        Uniform within bounds when both are set, otherwise Gaussian around the
+        parameter's current value and clipped to any one-sided bound.
+        """
+
         rng = np.random.default_rng(seed)
         return {
             parameter.name: self._draw_parameter(parameter, rng)
@@ -586,6 +600,13 @@ class Minimizer:
         simplex: bool = False,
         strategy: int = 1,
     ) -> MultiStartResult:
+        """Run independent minimizations from random starts and refine the best.
+
+        Each start is fit without HESSE; the valid minimum with the lowest
+        ``fval`` is then re-run with the requested ``strategy`` and HESSE
+        enabled. Raises if no start converges to a valid, finite minimum.
+        """
+
         if n_starts < 1:
             raise ValueError("n_starts must be at least 1")
         strategy = self._validate_strategy(strategy)

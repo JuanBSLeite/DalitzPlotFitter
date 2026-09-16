@@ -38,6 +38,8 @@ class CPRealImag:
 
     @property
     def parameters(self) -> tuple[object, ...]:
+        """Embedded fit ``Parameter`` objects among ``x, y, dx, dy``."""
+
         return tuple(
             value
             for value in (self.x, self.y, self.dx, self.dy)
@@ -45,6 +47,8 @@ class CPRealImag:
         )
 
     def value(self, values: Mapping[str, object] | None = None):
+        """Resolve the complex coefficient for this instance's `charge`."""
+
         q = float(self.charge)
         real = jnp.asarray(_resolve(self.x, values)) + q * jnp.asarray(
             _resolve(self.dx, values)

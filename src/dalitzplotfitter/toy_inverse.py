@@ -85,6 +85,14 @@ class PreparedInverseToyGenerator:
         shuffle: bool = True,
         include_momenta: bool = True,
     ) -> PhaseSpaceSample:
+        """Draw `size` unweighted events from the prepared signal/background mix.
+
+        Splits `size` into signal and per-background counts via the fitted
+        `signal_fraction`/background weights, generates each component from
+        its prepared inverse-CDF sampler, and merges (optionally shuffling)
+        the result.
+        """
+
         if size <= 0:
             raise ValueError("toy size must be positive")
         rng = np.random.default_rng(seed)

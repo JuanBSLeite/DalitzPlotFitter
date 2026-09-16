@@ -72,6 +72,8 @@ class Parameter:
         step: float | None = None,
         owner: str | None = None,
     ) -> "Parameter":
+        """Declare a ``ParameterKind.COEFFICIENT`` parameter."""
+
         return cls(
             name=name,
             value=value,

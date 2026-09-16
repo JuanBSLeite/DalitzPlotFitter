@@ -130,6 +130,13 @@ class MultiBackgroundNLL:
         return jnp.concatenate((explicit, jnp.asarray([remainder])))
 
     def density(self, parameters: Parameters) -> Array:
+        """Return the per-event mixture density.
+
+        Extended mode sums ``yield * density`` across signal and every
+        background category; non-extended mode mixes by
+        ``signal_fraction``/`background_weights`.
+        """
+
         signal = jnp.asarray(self.signal_density(parameters))
         if not self.backgrounds:
             if self.extended:
@@ -160,6 +167,8 @@ class MultiBackgroundNLL:
         return f_signal * signal + (1.0 - f_signal) * background
 
     def expected_events(self, parameters: Parameters) -> Array:
+        """Total expected yield (signal + all backgrounds); extended mode only."""
+
         if not self.extended:
             raise RuntimeError("expected_events is only defined in extended mode")
         total = jnp.asarray(_resolve(self.signal_yield, parameters))

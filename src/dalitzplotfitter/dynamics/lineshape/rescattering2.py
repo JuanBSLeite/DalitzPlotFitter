@@ -97,6 +97,7 @@ class Rescattering2:
 
     @property
     def threshold_mass(self) -> float:
+        """Charged-kaon threshold, 2*kaon_mass, below which the amplitude is zero."""
         return 2.0 * float(self.kaon_mass)
 
     def _scaled_mass(self, mass, lower: float, upper: float):

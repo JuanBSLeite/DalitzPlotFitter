@@ -389,6 +389,7 @@ class PreparedAmplitudeCache:
         has_efficiency: bool,
         normalization_chunk_size: int = DEFAULT_NORMALIZATION_CHUNK_SIZE,
     ):
+        """Build the reusable chunked coefficient-only prepare kernel."""
         return _compact_prepare_kernel(
             tuple(components),
             normalize_components=bool(normalize_components),
@@ -402,6 +403,7 @@ class PreparedAmplitudeCache:
         *,
         normalize_components: bool,
     ):
+        """Build the reusable data-only kernel for fixed normalization."""
         return _compact_data_kernel(
             tuple(components),
             normalize_components=bool(normalize_components),
@@ -465,6 +467,13 @@ class PreparedAmplitudeCache:
         compact_prepare_kernel=None,
         normalization_chunk_size: int = DEFAULT_NORMALIZATION_CHUNK_SIZE,
     ) -> "PreparedAmplitudeCache":
+        """Evaluate components and the normalization matrix once, from scratch.
+
+        Coefficient-only fits (no floating DYNAMICS parameter) take the fast
+        compact path and never re-evaluate lineshapes afterwards; fits with a
+        floating DYNAMICS parameter instead partition fixed vs. dynamic
+        components so only the dynamic block is re-evaluated per step.
+        """
         components = tuple(components)
         parameters = tuple(parameters)
         if not components:
@@ -658,6 +667,7 @@ class PreparedAmplitudeCache:
 
     @property
     def floating_dynamics(self) -> tuple[Parameter, ...]:
+        """The DYNAMICS parameters that are not fixed."""
         return tuple(
             p
             for p in self.parameters
@@ -666,12 +676,14 @@ class PreparedAmplitudeCache:
 
     @property
     def floating_dynamic_owners(self) -> frozenset[str]:
+        """Names of components owning at least one floating DYNAMICS parameter."""
         return frozenset(
             p.owner for p in self.floating_dynamics if p.owner is not None
         )
 
     @property
     def is_compact(self) -> bool:
+        """True if no component has a floating DYNAMICS parameter."""
         return not self.floating_dynamic_owners
 
     def check_parameters(self, parameters: Sequence[Parameter]) -> None:
@@ -711,6 +723,7 @@ class PreparedAmplitudeCache:
         )
 
     def coefficient_vector(self, fit_values: Mapping[str, object]) -> Array:
+        """Resolve each component's complex coefficient at ``fit_values``."""
         return jnp.asarray(
             [coefficient_value(component.coefficient, fit_values) for component in self.components]
         )
@@ -906,6 +919,7 @@ class PreparedAmplitudeCache:
         )
 
     def evaluate(self, fit_values: Mapping[str, object]) -> tuple[Array, Array]:
+        """Return ``(intensity, normalization)`` at ``fit_values``."""
         coefficients = self.coefficient_vector(fit_values)
         if not self.floating_dynamic_owners:
             amplitude = self.data_components @ coefficients
@@ -925,6 +939,7 @@ class PreparedAmplitudeCache:
         return intensity, normalization
 
     def amplitude(self, fit_values: Mapping[str, object]) -> Array:
+        """Coherent amplitude ``A(x) = sum_i c_i F_i(x)`` on the data sample."""
         coefficients = self.coefficient_vector(fit_values)
         if not self.floating_dynamic_owners:
             return self.data_components @ coefficients
@@ -932,9 +947,11 @@ class PreparedAmplitudeCache:
         return self._amplitude_from_dynamic(coefficients, dynamic_data)
 
     def intensity(self, fit_values: Mapping[str, object]) -> Array:
+        """Unnormalized intensity ``|A(x)|^2`` on the data sample."""
         return jnp.abs(self.amplitude(fit_values)) ** 2
 
     def normalization(self, fit_values: Mapping[str, object]) -> Array:
+        """Total normalization integral ``c^dagger M c`` at ``fit_values``."""
         coefficients = self.coefficient_vector(fit_values)
         if not self.floating_dynamic_owners:
             return matrix_normalization(coefficients, self.normalization_matrix_fixed)
@@ -945,12 +962,14 @@ class PreparedAmplitudeCache:
         )
 
     def normalization_matrix(self, fit_values: Mapping[str, object]) -> Array:
+        """Hermitian normalization matrix ``M_ij = integral conj(F_i) F_j dPhi``."""
         if not self.floating_dynamic_owners:
             return self.normalization_matrix_fixed
         _, dynamic_norm = self._evaluate_dynamic_components(fit_values)
         return self._matrix_from_dynamic(dynamic_norm)
 
     def fit_fractions(self, fit_values: Mapping[str, object]) -> Array:
+        """Per-component fit fractions from the coefficients and norm matrix."""
         return matrix_fit_fractions(
             self.coefficient_vector(fit_values),
             self.normalization_matrix(fit_values),
@@ -1002,6 +1021,7 @@ class PreparedAmplitudeCache:
         return kernel
 
     def interference_fractions(self, fit_values: Mapping[str, object]) -> Array:
+        """Pairwise interference fractions from the coefficients and norm matrix."""
         return matrix_interference_fractions(
             self.coefficient_vector(fit_values),
             self.normalization_matrix(fit_values),

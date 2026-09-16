@@ -22,15 +22,21 @@ class PhaseSpaceSample:
 
     @property
     def size(self) -> int:
+        """Number of events in the sample."""
+
         return int(self.s12.shape[0])
 
     def as_dict(self) -> dict[str, Array]:
+        """Return invariants (and four-momenta, if present) as a flat dict."""
+
         data = {"s12": self.s12, "s13": self.s13, "s23": self.s23}
         if self.p1 is not None and self.p2 is not None and self.p3 is not None:
             data.update({"p1": self.p1, "p2": self.p2, "p3": self.p3})
         return data
 
     def momentum_dict(self) -> dict[str, Array]:
+        """Return ``{"p1", "p2", "p3"}`` four-momenta; raises if not stored."""
+
         if self.p1 is None or self.p2 is None or self.p3 is None:
             raise ValueError("This sample does not contain four-momenta")
         return {"p1": self.p1, "p2": self.p2, "p3": self.p3}
@@ -128,6 +134,8 @@ class PhaseSpaceSample:
         return result
 
     def take(self, indices: Array) -> PhaseSpaceSample:
+        """Return the subsample at ``indices`` (invariants, weights, momenta)."""
+
         indices = jnp.asarray(indices)
         return PhaseSpaceSample(
             s12=self.s12[indices],

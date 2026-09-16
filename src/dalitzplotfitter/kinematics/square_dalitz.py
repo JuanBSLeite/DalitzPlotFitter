@@ -204,6 +204,13 @@ class SquareDalitzGrid:
             raise ValueError("quadrature must be 'midpoint' or 'gauss-legendre'")
 
     def sample(self) -> PhaseSpaceSample:
+        """Build the deterministic quadrature grid as a weighted `PhaseSpaceSample`.
+
+        Points are generated uniformly in ``(m', theta')`` and mapped to
+        ``(s12, s13, s23)``; weights fold in the quadrature weights and the
+        Square-Dalitz Jacobian, so `mean(sample.weights * f)` integrates ``f``.
+        """
+
         n = int(self.resolution)
         axis, axis_weights = _quadrature_axis(n, self.quadrature)
         mprime, thetaprime = jnp.meshgrid(axis, axis, indexing="ij")

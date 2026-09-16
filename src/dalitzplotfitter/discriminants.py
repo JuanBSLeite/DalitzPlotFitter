@@ -160,6 +160,8 @@ class LineshapeIntensity1D:
         return jnp.real(amplitude * jnp.conj(amplitude))
 
     def normalization(self, parameters: Parameters | None = None) -> Array:
+        """Integral of ``|lineshape|^2`` over ``[low, high]`` by quadrature."""
+
         values = self._intensity(self._nodes, parameters)
         return jnp.sum(self._weights * values)
 

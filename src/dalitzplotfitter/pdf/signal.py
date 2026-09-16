@@ -56,6 +56,7 @@ class SignalPDF:
         return acceptance
 
     def normalization(self, parameters: Parameters) -> Array:
+        """Integral of acceptance-weighted intensity over `integrator`'s sample."""
         return self.integrator.integrate(
             lambda data: self._acceptance(data) * self.intensity(data, parameters)
         )
@@ -69,5 +70,10 @@ class SignalPDF:
         return jnp.where(valid & valid_norm, density, jnp.nan)
 
     def logpdf(self, data: dict[str, Array], parameters: Parameters) -> Array:
+        """Log-density at `data`, i.e. log(numerator) - log(normalization).
+
+        Physical zeros (finite non-negative numerator) are kept as -inf rather
+        than raising on the invalid log(0) that autodiff would otherwise see.
+        """
         numerator = self._acceptance(data) * self.intensity(data, parameters)
         return _normalized_log_density(numerator, self.normalization(parameters))

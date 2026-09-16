@@ -185,6 +185,15 @@ def read_root_tree(
     entry_start: int | None = None,
     entry_stop: int | None = None,
 ) -> dict[str, Array]:
+    """Read arbitrary named ROOT TTree branches into JAX arrays with uproot.
+
+    ``branches`` is either a sequence of branch names (returned under their
+    own name) or a ``{output_name: branch_name}`` mapping to rename them on
+    the way in. ``cut`` is an uproot expression string; ``entry_start``/
+    ``entry_stop`` select a contiguous entry range. Every requested branch
+    must be flat scalar or fixed-size numeric -- a jagged/object-valued
+    branch raises ``ValueError``.
+    """
     if isinstance(branches, Mapping):
         rename = dict(branches)
         expressions = list(rename.values())
@@ -230,6 +239,14 @@ def read_phase_space_sample(
     entry_start: int | None = None,
     entry_stop: int | None = None,
 ) -> PhaseSpaceSample:
+    """Read a ROOT TTree directly into a ``PhaseSpaceSample``.
+
+    ``s12``/``s13``/``s23`` name the invariant-mass-squared branches; if
+    ``weight`` is omitted every event gets unit weight. ``p1``/``p2``/``p3``,
+    when given, are each a 4-branch sequence ordered ``(E, px, py, pz)`` for
+    that daughter's four-momentum -- all three or none must be supplied.
+    ``cut``/``entry_start``/``entry_stop`` are forwarded to ``read_root_tree``.
+    """
     branch_map: dict[str, str] = {"s12": s12, "s13": s13, "s23": s23}
     if weight is not None:
         branch_map["weight"] = weight
@@ -275,6 +292,12 @@ def read_phase_space_sample(
 
 
 def read_root_histogram2d(file_path: PathLike, histogram: str) -> tuple[Array, Array, Array]:
+    """Read a ROOT TH2 into ``(values, x_edges, y_edges)`` JAX arrays via uproot.
+
+    ``values`` has shape ``(len(x_edges) - 1, len(y_edges) - 1)`` with
+    overflow/underflow bins excluded. Raises ``TypeError`` if ``histogram``
+    does not resolve to a two-dimensional histogram.
+    """
     obj = _open_object(file_path, histogram)
     try:
         values, x_edges, y_edges = obj.to_numpy(flow=False)
@@ -297,6 +320,12 @@ def histogram_efficiency_from_root(
     folded: bool = False,
     interpolation: str = "none",
 ) -> HistogramEfficiency:
+    """Build a ``HistogramEfficiency`` map from a ROOT TH2 in ordinary Dalitz coordinates.
+
+    ``x_variable``/``y_variable`` name the Dalitz invariants the TH2 axes
+    represent (e.g. ``"s12"``/``"s13"``); ``folded``/``interpolation`` are
+    forwarded to ``HistogramEfficiency`` unchanged.
+    """
     values, x_edges, y_edges = read_root_histogram2d(file_path, histogram)
     return HistogramEfficiency(
         x_edges=x_edges, y_edges=y_edges, values=values,
@@ -314,6 +343,12 @@ def histogram_background_from_root(
     folded: bool = False,
     interpolation: str = "none",
 ) -> HistogramBackground:
+    """Build a ``HistogramBackground`` map from a ROOT TH2 in ordinary Dalitz coordinates.
+
+    ``x_variable``/``y_variable`` name the Dalitz invariants the TH2 axes
+    represent (e.g. ``"s12"``/``"s13"``); ``folded``/``interpolation`` are
+    forwarded to ``HistogramBackground`` unchanged.
+    """
     values, x_edges, y_edges = read_root_histogram2d(file_path, histogram)
     return HistogramBackground(
         x_edges=x_edges, y_edges=y_edges, values=values,

@@ -43,6 +43,7 @@ class BaBarFlatte:
         return jnp.sqrt(argument)
 
     def widths(self, mass):
+        """Return the (Gamma_pipi, Gamma_KK) coupled-channel widths at each mass."""
         gamma_pi = self.g_pi * (
             (1.0 / 3.0) * self._rho(mass, self.mpi0)
             + (2.0 / 3.0) * self._rho(mass, self.mpip)

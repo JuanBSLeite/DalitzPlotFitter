@@ -54,6 +54,7 @@ class BackgroundCategory:
 
     @property
     def density(self) -> Array:
+        """Normalized per-event density ``values / normalization``."""
         return self.values / self.normalization
 
 
@@ -102,22 +103,27 @@ class CPBackgroundCategory:
 
     @property
     def normalization(self) -> Array:
+        """Combined normalization across both charges."""
         return self.plus_normalization + self.minus_normalization
 
     @property
     def plus_density(self) -> Array:
+        """B+ density, normalized jointly against both charges."""
         return self.plus_values / self.normalization
 
     @property
     def minus_density(self) -> Array:
+        """B- density, normalized jointly against both charges."""
         return self.minus_values / self.normalization
 
     @property
     def plus_probability(self) -> Array:
+        """Fraction of the joint normalization coming from B+."""
         return self.plus_normalization / self.normalization
 
     @property
     def minus_probability(self) -> Array:
+        """Fraction of the joint normalization coming from B-."""
         return self.minus_normalization / self.normalization
 
 
