@@ -17,3 +17,5 @@ build/
 # Local Genfit run diagnostics
 notebooks/genfit/logs/
 notebooks/benchmark/logs/
+notebooks/tutorials/*.root
+notebooks/tutorials/*.json
