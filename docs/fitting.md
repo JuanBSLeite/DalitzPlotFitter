@@ -215,18 +215,31 @@ only skips the final explicit HESSE call.
 With iminuit >= 2.32, automatic second derivatives can be selected explicitly:
 
 ```python
-result = session.fit(strategy=1, hessian="jax", hesse=True, verbose=1)
+result = session.fit(
+    strategy=1,
+    hessian="jax",
+    hessian_batch_size=1,
+    hesse=True,
+    verbose=1,
+)
 # Also supported by CPFitSession and both session.fit_multistart() methods.
 # Low-level API:
-minimizer = Minimizer(nll, parameters, hessian="jax", verbose=1)
+minimizer = Minimizer(
+    nll,
+    parameters,
+    hessian="jax",
+    hessian_batch_size=1,
+    verbose=1,
+)
 ```
 
 `hessian="numerical"` remains the library default. `"jax"` also supplies the
 Hessian during MIGRAD; Minuit still handles bounds, covariance inversion and the
-`errordef` scaling. It requires an objective differentiable twice. The backend
-linearizes the gradient and evaluates Hessian-vector products sequentially,
-supporting QMI's custom VJPs without an
-event-by-parameter batch of intermediate derivatives. This reduces repeated
+`errordef` scaling. It requires an objective differentiable twice. For floating
+dynamics, `hessian_batch_size=1` evaluates Hessian-vector products sequentially
+and minimizes peak memory. Larger values evaluate several columns together and
+can improve throughput on GPUs with more VRAM. This supports QMI's custom VJPs
+without requiring the full event-by-parameter batch. This reduces repeated
 likelihood probes but does not guarantee a faster fit: second-order JIT
 compilation and retained intermediate arrays can be expensive. Compilation is
 lazy and reused across fits of the same session. `verbose=1` reports times and

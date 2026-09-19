@@ -1,5 +1,6 @@
-import numpy as np
 import jax.numpy as jnp
+import numpy as np
+import pytest
 import uproot
 
 from dalitzplotfitter import (
@@ -39,6 +40,33 @@ def test_read_root_tree_and_phase_space(tmp_path):
     assert sample.size == 3
     assert jnp.allclose(sample.s12, jnp.asarray([1.0, 1.1, 1.2]))
     assert jnp.allclose(sample.weights, jnp.asarray([1.0, 0.5, 2.0]))
+
+
+def test_read_root_tree_numpy_never_transfers_to_jax(tmp_path, monkeypatch):
+    path = tmp_path / "toys.root"
+    with uproot.recreate(path) as root_file:
+        root_file.mktree("fitTree", {
+            "mass": np.arange(6, dtype=np.float64),
+            "iExpt": np.asarray([0, 0, 1, 1, 2, 2], dtype=np.int32),
+        })
+
+    def unexpected_transfer(*args, **kwargs):
+        raise AssertionError("host-only ROOT input must not allocate a JAX array")
+
+    monkeypatch.setattr(jnp, "asarray", unexpected_transfer)
+    arrays = read_root_tree(
+        path, "fitTree", {"s12": "mass", "toy": "iExpt"},
+        library="np", entry_start=1, entry_stop=5, cut="iExpt == 1",
+    )
+    assert all(isinstance(value, np.ndarray) for value in arrays.values())
+    np.testing.assert_array_equal(arrays["s12"], [2.0, 3.0])
+    np.testing.assert_array_equal(arrays["toy"], [1, 1])
+    assert arrays["toy"].dtype == np.int32
+
+
+def test_read_root_tree_rejects_unknown_library():
+    with pytest.raises(ValueError, match="library must be"):
+        read_root_tree("unused.root", "fitTree", ["mass"], library="numpy")
 
 
 def test_write_phase_space_sample(tmp_path):

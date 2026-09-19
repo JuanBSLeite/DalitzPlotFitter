@@ -83,6 +83,20 @@ def test_model_round_trip_preserves_parameters():
     assert original == reloaded
 
 
+def test_model_round_trip_preserves_dynamic_microbatch_tuning():
+    spec = model_to_spec(_floating_rho_model())
+    spec["dynamics_microbatch_size"] = 12_345
+    restored = model_from_spec(spec)
+    assert restored.dynamics_microbatch_size == 12_345
+
+
+def test_old_model_spec_uses_default_dynamic_microbatch_size():
+    spec = model_to_spec(_floating_rho_model())
+    del spec["dynamics_microbatch_size"]
+    restored = model_from_spec(spec)
+    assert restored.dynamics_microbatch_size == 20_000
+
+
 def test_export_import_file_round_trip(tmp_path):
     model = _floating_rho_model()
     path = tmp_path / "model.json"

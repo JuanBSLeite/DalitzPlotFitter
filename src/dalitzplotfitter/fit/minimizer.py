@@ -12,8 +12,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from .parameters import Parameter
 from .nesterov import minimize as nesterov_minimize
+from .parameters import Parameter, ParameterKind
 
 # ``FitSession.fit()`` constructs a new Minimizer for each call. The objective
 # object itself is cached by the session, so use its identity to retain the JAX
@@ -88,9 +88,11 @@ class Minimizer:
 
     ``hessian="jax"`` supplies automatic second derivatives to Minuit, including
     its internal HESSE calls during MIGRAD. The default ``"numerical"`` keeps
-    Minuit's finite differences. JAX Hessians compile lazily and use sequential
-    Hessian-vector products without batching over all events and all parameters
-    at once. Second-order differentiability is required.
+    Minuit's finite differences. JAX Hessians compile lazily. Floating-dynamics
+    fits evaluate ``hessian_batch_size`` Hessian-vector products together;
+    its default of 1 keeps the bounded-memory sequential behavior. Larger
+    batches can improve throughput on GPUs with more VRAM. Second-order
+    differentiability is required.
     """
 
     def __init__(
@@ -102,6 +104,7 @@ class Minimizer:
         tolerance: float = 1e-4,
         verbose: int = 0,
         hessian: str = "numerical",
+        hessian_batch_size: int = 1,
     ):
         if errordef <= 0:
             raise ValueError("errordef must be positive")
@@ -111,12 +114,19 @@ class Minimizer:
             raise ValueError("verbose must be a non-negative integer")
         if hessian not in ("numerical", "jax"):
             raise ValueError("hessian must be 'numerical' or 'jax'")
+        if (
+            isinstance(hessian_batch_size, bool)
+            or not isinstance(hessian_batch_size, int)
+            or hessian_batch_size < 1
+        ):
+            raise ValueError("hessian_batch_size must be a positive integer")
         self.objective = objective
         self.parameters = tuple(parameters)
         self.errordef = float(errordef)
         self.tolerance = float(tolerance)
         self.verbose = int(verbose)
         self.hessian = hessian
+        self.hessian_batch_size = hessian_batch_size
         self._backend_cache = None
 
     def _log(self, message: str) -> None:
@@ -143,7 +153,11 @@ class Minimizer:
         )
 
     def _shared_backend(self):
-        key = (id(self.objective), self._backend_signature())
+        key = (
+            id(self.objective),
+            self._backend_signature(),
+            self.hessian_batch_size,
+        )
         cached = _SHARED_BACKENDS.get(key)
         if cached is None:
             return key, None
@@ -231,16 +245,43 @@ class Minimizer:
             _, gradient = evaluate(values)
             return gradient
 
+        has_floating_dynamics = any(
+            parameter.kind is ParameterKind.DYNAMICS for parameter in free
+        )
+        gradient_function = jax.grad(vector_objective)
+        if has_floating_dynamics:
+            # The checkpoint closes a recomputation boundary that the inner
+            # chunk scans do not extend to second-order differentiation.
+            gradient_function = jax.checkpoint(gradient_function)
+
         @jax.jit
-        def hessian_program(vector):
+        def hessian_vector_product(vector, tangent):
             # Differentiate the gradient in forward mode, not the original
             # custom_vjp objective. QMI's gradient has already expanded its
             # grouped reductions; this preserves them in second derivatives.
             # Reverse-over-reverse instead reintroduces highly contended FP64
             # scatter-adds on GPU when differentiating the saved knot gathers.
-            # Reuse one linearization and compute one column at a time to
-            # avoid an event-by-parameter batch of intermediate arrays.
-            _, pushforward = jax.linearize(jax.grad(vector_objective), vector)
+            return jax.jvp(
+                gradient_function,
+                (vector,),
+                (tangent,),
+            )[1]
+
+        @jax.jit
+        def hessian_vector_product_batch(vector, tangents):
+            return jax.vmap(
+                lambda tangent: jax.jvp(
+                    gradient_function,
+                    (vector,),
+                    (tangent,),
+                )[1]
+            )(tangents)
+
+        @jax.jit
+        def hessian_program(vector):
+            # Coefficient-only objectives are small enough to reuse one
+            # linearization and evaluate every column inside one executable.
+            _, pushforward = jax.linearize(gradient_function, vector)
             return jax.lax.map(
                 pushforward,
                 jnp.eye(len(names), dtype=vector.dtype),
@@ -253,9 +294,44 @@ class Minimizer:
             nonlocal hessian_point, hessian_value
             point = np.asarray(values, dtype=float)
             if hessian_point is None or not np.array_equal(point, hessian_point):
-                matrix = np.asarray(
-                    jax.device_get(hessian_program(jnp.asarray(point))), dtype=float
-                )
+                device_point = jnp.asarray(point)
+                if has_floating_dynamics:
+                    # Synchronize each configured HVP batch before launching
+                    # the next, so temporary buffers cannot overlap across
+                    # batches. The default batch size of one is the validated
+                    # bounded-memory path for a 4 GiB GPU.
+                    basis = np.eye(len(names), dtype=point.dtype)
+                    batch_size = min(self.hessian_batch_size, len(names))
+                    columns = []
+                    for start in range(0, len(names), batch_size):
+                        stop = min(start + batch_size, len(names))
+                        tangents = basis[start:stop]
+                        count = stop - start
+                        if count < batch_size:
+                            tangents = np.pad(
+                                tangents,
+                                ((0, batch_size - count), (0, 0)),
+                            )
+                        if batch_size == 1:
+                            products = jax.device_get(
+                                hessian_vector_product(
+                                    device_point,
+                                    jnp.asarray(tangents[0], dtype=device_point.dtype),
+                                )
+                            )[None, :]
+                        else:
+                            products = jax.device_get(
+                                hessian_vector_product_batch(
+                                    device_point,
+                                    jnp.asarray(tangents, dtype=device_point.dtype),
+                                )
+                            )
+                        columns.extend(np.asarray(products[:count], dtype=float))
+                    matrix = np.column_stack(columns)
+                else:
+                    matrix = np.asarray(
+                        jax.device_get(hessian_program(device_point)), dtype=float
+                    )
                 # Minuit expects a symmetric matrix in external coordinates.
                 # Its own transformations handle parameter bounds and errordef.
                 hessian_value = 0.5 * (matrix + matrix.T)

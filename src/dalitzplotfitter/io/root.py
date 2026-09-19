@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Literal
 
 import jax.numpy as jnp
-from jax import Array
 import numpy as np
 import uproot
+from jax import Array
 
 from dalitzplotfitter.background import HistogramBackground
 from dalitzplotfitter.efficiency import HistogramEfficiency
@@ -184,8 +185,9 @@ def read_root_tree(
     cut: str | None = None,
     entry_start: int | None = None,
     entry_stop: int | None = None,
-) -> dict[str, Array]:
-    """Read arbitrary named ROOT TTree branches into JAX arrays with uproot.
+    library: Literal["jax", "np"] = "jax",
+) -> dict[str, Array] | dict[str, np.ndarray]:
+    """Read arbitrary named ROOT TTree branches with uproot.
 
     ``branches`` is either a sequence of branch names (returned under their
     own name) or a ``{output_name: branch_name}`` mapping to rename them on
@@ -193,7 +195,13 @@ def read_root_tree(
     ``entry_stop`` select a contiguous entry range. Every requested branch
     must be flat scalar or fixed-size numeric -- a jagged/object-valued
     branch raises ``ValueError``.
+
+    ``library="jax"`` (default) transfers arrays to the default JAX device.
+    Use ``library="np"`` to keep a large tree in host memory, select a toy or
+    event subset in NumPy, and only then transfer that subset to JAX.
     """
+    if library not in ("jax", "np"):
+        raise ValueError("library must be 'jax' or 'np'")
     if isinstance(branches, Mapping):
         rename = dict(branches)
         expressions = list(rename.values())
@@ -212,7 +220,7 @@ def read_root_tree(
         library="np",
         how=dict,
     )
-    result: dict[str, Array] = {}
+    result = {}
     for output_name, branch_name in rename.items():
         values = np.asarray(arrays[branch_name])
         if values.dtype == object:
@@ -220,7 +228,7 @@ def read_root_tree(
                 f"branch {branch_name!r} is jagged/object-valued; amplitude-fit inputs "
                 "must be flat scalar or fixed-size numeric branches"
             )
-        result[output_name] = jnp.asarray(values)
+        result[output_name] = jnp.asarray(values) if library == "jax" else values
     return result
 
 

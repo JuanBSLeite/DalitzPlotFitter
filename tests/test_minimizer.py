@@ -295,6 +295,73 @@ def test_hessian_cache_tracks_point_and_shares_compilation_across_modes():
     np.testing.assert_allclose(hessian(1.0), [[18.0]])
 
 
+def test_dynamic_hessian_dispatches_columns_as_separate_hvps(monkeypatch):
+    """Floating dynamics must not put every Hessian column in one XLA program."""
+    import jax
+
+    parameters = (
+        Parameter.dynamics("shape.x", 1.0, owner="shape"),
+        Parameter.dynamics("shape.y", 2.0, owner="shape"),
+    )
+
+    def objective(values):
+        x, y = values["shape.x"], values["shape.y"]
+        return x**2 + x * y + y**3
+
+    def reject_batched_columns(*args, **kwargs):
+        raise AssertionError("floating-dynamics Hessian must not call jax.lax.map")
+
+    monkeypatch.setattr(jax.lax, "map", reject_batched_columns)
+    hessian = Minimizer(objective, parameters, hessian="jax")._backend()[4]
+    np.testing.assert_allclose(hessian(1.0, 2.0), [[2.0, 1.0], [1.0, 12.0]])
+
+
+@pytest.mark.parametrize("batch_size", [1, 2, 3, 10])
+def test_dynamic_hessian_batch_size_preserves_result(batch_size):
+    parameters = tuple(
+        Parameter.dynamics(f"shape.{name}", value, owner="shape")
+        for name, value in (("x", 1.0), ("y", 2.0), ("z", 3.0))
+    )
+
+    def objective(values):
+        x, y, z = (values[f"shape.{name}"] for name in ("x", "y", "z"))
+        return x**2 + x * y + y**3 + y * z + z**2
+
+    hessian = Minimizer(
+        objective,
+        parameters,
+        hessian="jax",
+        hessian_batch_size=batch_size,
+    )._backend()[4]
+    np.testing.assert_allclose(
+        hessian(1.0, 2.0, 3.0),
+        [[2.0, 1.0, 0.0], [1.0, 12.0, 1.0], [0.0, 1.0, 2.0]],
+    )
+
+
+def test_hessian_batch_size_participates_in_shared_backend_key():
+    parameter = Parameter.dynamics("shape.x", 1.0, owner="shape")
+
+    def objective(values):
+        return values["shape.x"] ** 2
+
+    first = Minimizer(objective, (parameter,), hessian_batch_size=1)
+    same = Minimizer(objective, (parameter,), hessian_batch_size=1)
+    larger = Minimizer(objective, (parameter,), hessian_batch_size=2)
+    assert first._backend() is same._backend()
+    assert first._backend() is not larger._backend()
+
+
+@pytest.mark.parametrize("batch_size", [0, -1, True, 1.5])
+def test_invalid_hessian_batch_size(batch_size):
+    with pytest.raises(ValueError, match="hessian_batch_size"):
+        Minimizer(
+            lambda values: values["x"] ** 2,
+            (Parameter("x", 1.0),),
+            hessian_batch_size=batch_size,
+        )
+
+
 @pytest.mark.parametrize("mode", [None, True, "automatic"])
 def test_invalid_hessian_mode(mode):
     with pytest.raises(ValueError, match="hessian"):
@@ -385,9 +452,14 @@ def test_session_hessian_option_reaches_single_and_multistart_fit(session_name):
             return lambda v: (v['x'] - 0.3)**2 + (v['y'] + v['x'])**2
 
     session = object.__new__(Session)
-    result = session.fit(hessian='jax', strategy=1)
+    result = session.fit(hessian='jax', hessian_batch_size=2, strategy=1)
     assert result.valid
     assert result.nhessian > 0
-    scan = session.fit_multistart(n_starts=1, include_default=True, hessian='jax')
+    scan = session.fit_multistart(
+        n_starts=1,
+        include_default=True,
+        hessian='jax',
+        hessian_batch_size=2,
+    )
     assert scan.best.valid
     assert scan.best.nhessian > 0

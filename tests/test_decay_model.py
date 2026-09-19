@@ -545,6 +545,20 @@ def test_normalization_chunk_size_is_configurable():
         )
 
 
+def test_dynamics_microbatch_size_is_public_and_validated():
+    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    components = [NonResonant(RealImag(1.0, 0.0), name="NR")]
+
+    default = DecayModel(channel, components)
+    configured = DecayModel(channel, components, dynamics_microbatch_size=37)
+    assert default.dynamics_microbatch_size == 20_000
+    assert configured.dynamics_microbatch_size == 37
+
+    for invalid in (0, -1, True, 1.5):
+        with pytest.raises(ValueError, match="dynamics_microbatch_size"):
+            DecayModel(channel, components, dynamics_microbatch_size=invalid)
+
+
 def test_compact_prepare_kernel_is_reused_by_model():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     model = _model(
