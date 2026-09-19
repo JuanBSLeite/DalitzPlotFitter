@@ -420,10 +420,17 @@ class Minimizer:
         # it, non-convex starting points raise "NoneType is not callable".
         # Both callbacks reuse the same cached matrix; silence only the
         # misleading warning about supplying both, not numerical warnings.
+        # iminuit issues that warning with stacklevel=2, so it is attributed
+        # to *this* module (the Minuit(...) call site) rather than
+        # iminuit.minuit - filter on that, not on iminuit's own module.
+        from iminuit.warnings import IMinuitWarning
+
         with warnings.catch_warnings():
             warnings.filterwarnings(
-                "ignore", message="hessian overrides g2, passing g2 has no effect",
-                module=r"iminuit\.minuit",
+                "ignore",
+                message="hessian overrides g2, passing g2 has no effect",
+                category=IMinuitWarning,
+                module=__name__,
             )
             minuit = Minuit(fcn, *start, name=names, grad=grad, **derivatives)
         minuit.errordef = self.errordef

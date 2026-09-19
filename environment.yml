@@ -1,0 +1,35 @@
+# Conda environment for DalitzPlotFitter (CPU by default).
+#
+# Create and install:
+#   conda env create -f environment.yml   # run from the repo root: the
+#                                          # "-e ." pip entry below is
+#                                          # resolved relative to the CWD,
+#                                          # not to this file's location.
+#   conda activate dalitzplotfitter
+#   pytest
+#
+# Update an existing environment after pulling changes:
+#   conda env update -f environment.yml --prune
+#
+# GPU (NVIDIA, Linux only): JAX's CUDA wheels are pip-only, so don't add a
+# conda-forge cuda package here. Instead, after activating the environment,
+# install exactly one of:
+#   pip install -e ".[dev,cuda12]"
+#   pip install -e ".[dev,cuda13]"
+# (never both in the same environment; this replaces the CPU jax installed
+# below with a CUDA build).
+#
+# Optional extras not included by default:
+#   pip install -e ".[sympy]"     # SympyLineshape (compiled SymPy lineshapes)
+#   pip install -e ".[cubature]"  # normalization_method="cubature" (quadax,
+#                                  # unreleased ND cubature, installed from a
+#                                  # pinned GitHub commit -- see
+#                                  # docs/mc_integration.md)
+name: dalitzplotfitter
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.15
+  - pip
+  - pip:
+      - -e .[dev,cuda12]
