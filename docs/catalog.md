@@ -202,7 +202,7 @@ Docs: `docs/root_io.md`. Notebooks: `15_b2kpipi_square_dalitz_eff_background.ipy
 
 | Name | Kind | What it does |
 |---|---|---|
-| `read_root_tree` | function | Read arbitrary named ROOT TTree branches into JAX arrays, with an optional `cut`. |
+| `read_root_tree` | function | Read arbitrary named ROOT TTree branches into JAX arrays (or host NumPy arrays with `library="np"`), with an optional `cut`; see `root_io.md`. |
 | `read_phase_space_sample` | function | Read a ROOT TTree directly into a `PhaseSpaceSample` (`s12/s13/s23`, optional `weight` and four-momenta). |
 | `write_phase_space_sample` | function | Write one `PhaseSpaceSample` to a ROOT TTree with uproot. |
 | `write_phase_space_samples` | function | Write several `PhaseSpaceSample` objects to ROOT TTrees in one call. |

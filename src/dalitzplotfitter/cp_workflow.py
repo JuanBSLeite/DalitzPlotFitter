@@ -240,16 +240,21 @@ class CPFitSession:
             unique[p.name] = p
         return tuple(unique.values())
 
-    def minimizer(self, *, tolerance=1e-4, verbose=0, hessian="numerical"):
+    def minimizer(
+        self, *, tolerance=1e-4, verbose=0, hessian="numerical",
+        hessian_batch_size=1,
+    ):
         """Build a Minimizer over the joint objective and this session's parameters."""
         return Minimizer(
             self.objective, self.parameters,
             tolerance=tolerance, verbose=verbose, hessian=hessian,
+            hessian_batch_size=hessian_batch_size,
         )
 
     def fit(
         self, start_values=None, *, simplex=False, ncall=None, strategy=2,
         hesse=True, tolerance=1e-4, verbose=0, hessian="numerical",
+        hessian_batch_size=1,
         method="minuit", nesterov_max_iter=1000, nesterov_gtol=1e-4,
         update_model=False,
     ):
@@ -266,6 +271,7 @@ class CPFitSession:
         """
         result = self.minimizer(
             tolerance=tolerance, verbose=verbose, hessian=hessian,
+            hessian_batch_size=hessian_batch_size,
         ).fit(
             start_values=start_values,
             simplex=simplex,
@@ -286,10 +292,12 @@ class CPFitSession:
     def fit_multistart(
         self, n_starts=20, *, seed=None, include_default=False, simplex=False,
         strategy=1, tolerance=1e-4, verbose=0, hessian="numerical",
+        hessian_batch_size=1,
     ):
         """Fit the joint likelihood from multiple random starts, keep the best fit."""
         return self.minimizer(
             tolerance=tolerance, verbose=verbose, hessian=hessian,
+            hessian_batch_size=hessian_batch_size,
         ).fit_multistart(
             n_starts=n_starts,
             seed=seed,

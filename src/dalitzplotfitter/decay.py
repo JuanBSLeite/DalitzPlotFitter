@@ -17,7 +17,10 @@ from dalitzplotfitter.amplitude import (
     PreparedAmplitudeCache,
 )
 from dalitzplotfitter.amplitude.components import coefficient_value
-from dalitzplotfitter.amplitude.cache import DEFAULT_NORMALIZATION_CHUNK_SIZE
+from dalitzplotfitter.amplitude.cache import (
+    DEFAULT_DYNAMICS_MICROBATCH_SIZE,
+    DEFAULT_NORMALIZATION_CHUNK_SIZE,
+)
 from dalitzplotfitter.observables.errors import _covariance_matrix
 from dalitzplotfitter.dynamics import (
     CovariantAngular,
@@ -343,10 +346,19 @@ class DecayModel:
         A common weight scale changes the density measure; use consistent
         conventions across components and charge samples.
     normalization_chunk_size:
-        Maximum number of normalization points evaluated by one compiled
-        coefficient-only normalization chunk. Smaller values reduce temporary
-        device memory approximately linearly at the cost of more chunk
-        executions. Default: 100000.
+        Maximum number of normalization points in one prepared macro-chunk.
+        The effective static width is balanced automatically below this limit
+        to minimize padding. Smaller values reduce preparation memory at the
+        cost of more chunk executions. Floating-dynamics evaluation may
+        subdivide these blocks further to bound automatic-differentiation
+        memory. Default: 100000.
+    dynamics_microbatch_size:
+        Maximum number of normalization points differentiated together inside
+        each floating-dynamics macro-chunk. The effective static width is
+        balanced automatically below this limit to minimize padding. Larger
+        values can improve throughput on GPUs with more VRAM; smaller values
+        lower peak AD memory. QMI is prepared directly under this limit because
+        its cached order is block-local. Default: 20000.
 
     Notes
     -----
@@ -367,6 +379,7 @@ class DecayModel:
     normalization_narrow_window: float
     normalization_binning_factor: float
     normalization_chunk_size: int
+    dynamics_microbatch_size: int
     _normalization_sample: PhaseSpaceSample | None
     _amplitude_model: CoherentAmplitudeModel | None
     _compact_prepare_kernels: dict[tuple[bool, bool], object]
@@ -388,9 +401,10 @@ class DecayModel:
         normalization_order_m23: int | None = None,
         normalization_narrow_width: float = 0.020,
         normalization_narrow_window: float = 5.0,
-        normalization_binning_factor: float = 30.0, #default Laura++ value is 100.0, but this is too high
+        normalization_binning_factor: float = 100.0, 
         normalization_sample: PhaseSpaceSample | None = None,
         normalization_chunk_size: int = DEFAULT_NORMALIZATION_CHUNK_SIZE,
+        dynamics_microbatch_size: int = DEFAULT_DYNAMICS_MICROBATCH_SIZE,
     ) -> None:
         if normalization_resolution < 2:
             raise ValueError("normalization_resolution must be at least 2")
@@ -427,6 +441,12 @@ class DecayModel:
             raise ValueError("normalization_binning_factor must be positive")
         if normalization_chunk_size < 1:
             raise ValueError("normalization_chunk_size must be positive")
+        if (
+            isinstance(dynamics_microbatch_size, bool)
+            or not isinstance(dynamics_microbatch_size, int)
+            or dynamics_microbatch_size < 1
+        ):
+            raise ValueError("dynamics_microbatch_size must be a positive integer")
         object.__setattr__(self, "channel", channel)
         object.__setattr__(self, "components", tuple(components))
         object.__setattr__(self, "normalize_components", bool(normalize_components))
@@ -446,6 +466,7 @@ class DecayModel:
             self, "normalization_binning_factor", float(normalization_binning_factor)
         )
         object.__setattr__(self, "normalization_chunk_size", int(normalization_chunk_size))
+        object.__setattr__(self, "dynamics_microbatch_size", dynamics_microbatch_size)
         object.__setattr__(self, "_normalization_sample", normalization_sample)
         object.__setattr__(self, "_amplitude_model", None)
         object.__setattr__(self, "_compact_prepare_kernels", {})
@@ -1035,6 +1056,8 @@ class DecayModel:
             efficiency_normalization=efficiency_normalization,
             normalize_components=normalize,
             compact_prepare_kernel=compact_kernel,
+            normalization_chunk_size=self.normalization_chunk_size,
+            dynamics_microbatch_size=self.dynamics_microbatch_size,
         )
         if can_reuse_normalization:
             self._fixed_normalization_templates[template_key] = (

@@ -58,6 +58,70 @@ If a mass, width, radius, lineshape parameter, or other `ParameterKind.DYNAMICS`
 
 For multiple floating dynamical components, all affected normalization-matrix rows are updated in one batched accelerator reduction rather than one full normalization-grid reduction per component.
 
+For floating dynamics, `normalization_chunk_size` also bounds the prepared
+normalization blocks. The requested size is a maximum: the cache balances the
+effective static width below it to minimize tail padding. Each block is
+accumulated with `jax.lax.scan` and checkpointed so gradients do not retain the
+whole grid. Ordinary parametric lineshapes use the additional
+`dynamics_microbatch_size` bound (default 20,000), which is balanced in the
+same way inside each macroblock.
+QMI is prepared directly in blocks no larger than that bound because its cached
+sort indices cannot be sliced after preparation. The grid resolution still
+controls quadrature accuracy and should not be reduced without a normalization-
+convergence check.
+
+## Input memory in multi-toy studies
+
+`read_root_tree` defaults to JAX arrays on the active device. Keeping a complete
+multi-toy file in that form consumes VRAM throughout every fit, even if each
+fit only selects one toy. Use `library="np"` to read into host RAM and apply
+the toy/charge mask before `jnp.asarray`; see [ROOT input](root_io.md).
+Restart an existing notebook kernel to release arrays and compiled programs
+from previous runs before comparing memory use.
+
+The notebook-23 `SqDP_FreeMasses` input has 47,560,440 entries. Its three float64
+invariants and two int32 labels occupy 1,521,934,080 bytes (1.417 GiB). Keeping
+these arrays on the host removes that retained device payload without changing
+events, precision, quadrature, free parameters, or likelihood conventions.
+
+For this notebook's actual model, maps and complete toy 0, run:
+
+```bash
+JAX_PLATFORMS=cuda XLA_PYTHON_CLIENT_PREALLOCATE=false OPENBLAS_NUM_THREADS=1 \
+  python benchmarks/benchmark_pull_study_memory.py --require-gpu --hessian \
+  --normalization-resolution 1000
+```
+
+This diagnostic requires the notebook's local ROOT inputs. It reads a bounded
+host entry range containing toy 0, executes setup only, and reports memory after
+input selection, model/map preparation, amplitude caches, value/gradient, and
+optionally the automatic Hessian. It does not run the multi-toy loop or write
+CSV results. `--hessian` reproduces the automatic-Hessian measurement.
+`--fit-ncall N` additionally runs one fit with a call limit; a
+limited run need not converge. CPU allocator statistics can be unavailable,
+and JAX's live/peak allocation counters exclude some CUDA/runtime overhead.
+Measure the device process as well when assessing a laptop's VRAM budget.
+
+On the RTX 3050 Ti (4 GiB), the 2026-09-19 end-to-end check used the notebook's
+95,074 accepted events, 41 free parameters, and one million normalization
+points per charge. With dynamic microbatching and sequential Hessian-vector
+products, the full toy-0 MIGRAD+HESSE fit completed with `hessian="jax"`,
+`valid=True`, accurate covariance, EDM `9.433e-8`, and NLL
+`-494077.2905459427`. The complete diagnostic, including explicit pre-fit
+value/gradient and Hessian evaluations, took 219.4 s; the already-compiled fit
+stage took 95.8 s. A corresponding `hessian="numerical"` run took about 1066 s
+and reached the same NLL to six decimal places.
+
+The current implementation also works with JAX's default BFC allocator. At the
+notebook's 500-by-500 setting, its effective pool limit was 2.76 GiB; the
+Hessian completed with a peak live JAX allocation of 438,583,552 bytes
+(418.3 MiB) and a 543,162,368-byte allocator pool (518 MiB). The benchmark
+finished preparation, value/gradient, and Hessian in 94.6 s. At 1000-by-1000,
+the Hessian took 74.4 s and the whole diagnostic took 129.9 s. Peak live JAX
+memory was 1,144,694,784 bytes (1.066 GiB), and the allocator pool reached
+2,153,775,104 bytes (2.006 GiB). This check validates one complete toy, not the
+full pull distribution.
+
 ## JAX and iminuit
 
 `Minimizer` compiles its `jax.value_and_grad` evaluator lazily. The compiled backend is reused both inside one `Minimizer` and across short-lived `Minimizer` instances that wrap the same live objective and parameter layout. This is the common pattern produced by repeated `FitSession.fit()` or `CPFitSession.fit()` calls, so a second fit of the same session does not pay the same XLA compilation cost again.
@@ -66,25 +130,28 @@ The shared lookup stores only a weak reference to the objective. A completed fit
 
 The Minuit value and gradient callbacks also share the last evaluated parameter point, so requesting the value and gradient at the same point causes only one JAX device evaluation and one device-to-host transfer.
 
-`Minimizer(..., hessian="jax")` (or `session.fit(hessian="jax")`) adds a separately
-compiled automatic Hessian for both MIGRAD and HESSE. It uses forward-over-reverse
-AD: `jax.linearize(jax.grad(objective), point)` followed by sequential
-Hessian-vector products, including through QMI's custom VJPs. It caches the last
-Hessian independently of the value/gradient point. Both compiled programs are
-shared across minimizers of the same live objective and fixed-parameter layout.
-No Hessian program runs or compiles on the default `hessian="numerical"` path.
-The JAX path supplies a diagonal callback too: iminuit 2.32's negative-curvature
-recovery can call it even when a full Hessian is supplied.
+`Minimizer(..., hessian="jax")` (or `session.fit(hessian="jax")`) adds an
+automatic Hessian for both MIGRAD and HESSE. It uses forward-over-reverse AD,
+including through QMI's custom VJPs. For floating dynamics,
+`hessian_batch_size` controls how many Hessian-vector products one compiled
+program evaluates together. Its default of 1 runs each column separately to
+minimize peak memory. For coefficient-only fits, one linearization is reused
+inside a single executable and this option has no effect.
+The last Hessian is cached independently of the value/gradient point. Compiled
+programs are shared across minimizers of the same live objective and fixed-
+parameter layout. No Hessian program runs or compiles on the default
+`hessian="numerical"` path. The JAX path supplies a diagonal callback too:
+iminuit 2.32's negative-curvature recovery can call it even when a full Hessian
+is supplied.
 
 The differentiation direction matters on GPU. Applying reverse mode again to
 the QMI gradient reintroduces scatter-adds through the saved knot gathers,
 including highly contended FP64 updates. The grouped first-derivative VJP alone
-does not prevent this. Linearizing the **gradient** in forward mode preserves its
-grouped reductions. An isolated prepared linear-QMI graph (49 knots, 10,000
+does not prevent this. Applying a forward-mode JVP to the **gradient** preserves
+its grouped reductions. An isolated prepared linear-QMI graph (49 knots, 10,000
 events) contained 16 scatter operations with reverse-over-reverse and none with
 the current forward-over-reverse implementation. Columns are still evaluated
-sequentially to bound intermediate memory. See
-[`jax.linearize`](https://docs.jax.dev/en/latest/_autosummary/jax.linearize.html).
+sequentially to bound intermediate memory.
 
 Run `python benchmarks/benchmark_hesse.py --model qmi --events 5000 --repeats 3`
 to compare numerical and automatic HESSE. The benchmark reports cold and warm
@@ -191,6 +258,156 @@ along that direction instead of a small one — the value simply never reaches t
 cache's compact evaluation path. Call `cache.check_parameters(parameters)` before
 constructing `Minimizer` whenever the two parameter lists are not obviously the
 same object.
+
+### AD microbatching for floating-dynamics normalization on constrained GPUs
+
+A follow-up review fixed the compatibility helper `_matrix_from_dynamic` for the
+chunked cache representation, corrected retained-memory accounting, and made
+the shared Hessian callback capture its configured batch size. It also replaced
+an invalid test assertion about private backend-tuple identity with checks that
+the compiled callbacks are actually shared; see
+[the 2026-09-19 review](reviews/20260919_dynamics_chunking_and_hessian_review.md).
+
+`normalization_chunk_size` (default 100,000) is chosen to amortize XLA
+compilation and geometry-storage cost, not to bound the memory of the reverse-AD
+pass through several floating `DYNAMICS` lineshapes at once. On a memory-constrained
+GPU, differentiating a single 100,000-point macro-chunk's worth of parametric
+lineshapes (e.g. several `GounarisSakurai`/`RelativisticBreitWigner`/`SigmaPole`
+components with barrier and angular factors) can itself exceed available memory,
+independent of how many macro-chunks the sample is split into — a 4 GB laptop
+GPU (RTX 3050 Ti) fitting a real `B -> 3pi` CP model (41 free parameters, 4
+floating-mass/width resonances, `normalization_resolution=1000` i.e.
+1,000,000-point Square-Dalitz grids per charge) hit `RESOURCE_EXHAUSTED` trying
+to allocate 1.4 GiB on the very first MIGRAD gradient call, well before ever
+reaching HESSE.
+
+`PreparedAmplitudeCache._chunked_dynamic_normalization` therefore re-splits each
+macro-chunk into `DecayModel(..., dynamics_microbatch_size=20_000)` microbatches
+via a second, nested
+`jax.lax.scan` wrapped in its own `jax.checkpoint`, so the reverse-AD pass never
+has to hold more than one microbatch's forward residuals live at a time —
+independent of `normalization_chunk_size` or the total grid size. The shown
+value is the default. This fixed
+the 1.4 GiB allocation above outright: the same model/data/GPU then ran a full
+MIGRAD+HESSE (`hessian="numerical"`) at `normalization_resolution=1000` to
+completion (`valid=True`, EDM `9.4e-8`), taking about 1066 s per toy — roughly
+proportional to the ~11x more normalization points than the 90,000-point grid
+(`normalization_resolution=300`) that already fit unchunked, confirming the added
+nested-scan/checkpoint machinery costs kernel-launch overhead, not a multiplicative
+blowup in wall time.
+
+Larger values reduce scan overhead and can be faster when the GPU has enough
+memory. Smaller values reduce peak gradient and Hessian memory. Changing this
+option changes only evaluation partitioning, not the normalization integral or
+its quadrature resolution.
+
+For a floating component whose lineshape sets
+`prepared_mass_is_order_dependent = True` (currently only `QMI`), preparation
+itself uses blocks no larger than `dynamics_microbatch_size`. `QMI.prepare_mass`
+sorts one prepared block by knot interval and returns `order`/`starts`/`ends`
+indices valid only for that exact block, so reshaping a larger prepared block
+would desynchronize those indices from the custom VJP. `KMatrix.prepare_mass`
+stores pointwise per-event responses and uses the ordinary inner microbatch
+path.
+
+### Bounded-memory `hessian="jax"` for floating dynamics
+
+The automatic Hessian originally put all columns into one XLA executable:
+`jax.linearize(jax.grad(vector_objective), point)` produced one pushforward,
+then `jax.lax.map` evaluated the basis vectors. Checkpointing the gradient
+reduced its program estimate substantially, but the real notebook model still
+required about 3.30 GiB at 500-by-500 resolution. That exceeded the default
+BFC allocator's 2.76 GiB pool on the 4 GiB RTX 3050 Ti.
+
+For floating `DYNAMICS` parameters, `Minimizer` now checkpoints the gradient
+and compiles a single forward-over-reverse Hessian-vector product:
+
+```python
+gradient = jax.checkpoint(jax.grad(vector_objective))
+hvp = jax.jit(lambda point, tangent: jax.jvp(
+    gradient, (point,), (tangent,),
+)[1])
+```
+
+With the default `hessian_batch_size=1`, the host invokes this reusable program
+once per basis vector and transfers each column before starting the next.
+Temporary buffers from different columns therefore cannot overlap, and XLA
+compiles one HVP rather than a program that contains the entire Hessian loop.
+The differentiation remains
+forward-over-reverse, preserving QMI's grouped custom-VJP reductions. The
+result is symmetrized once after the columns are assembled, as before.
+
+On a larger GPU, `hessian_batch_size=2`, `4`, or `8` evaluates that many HVPs
+with `jax.vmap` in each device execution. This trades temporary memory for fewer
+launches and more parallel work. For example:
+
+```python
+model = DecayModel(
+    channel,
+    components,
+    dynamics_microbatch_size=100_000,
+)
+session = FitSession(model, data)
+result = session.fit(
+    hessian="jax",
+    hessian_batch_size=4,
+    strategy=1,
+)
+```
+
+Tune the two options independently: increase `dynamics_microbatch_size` first
+for the repeatedly evaluated likelihood/gradient, then benchmark
+`hessian_batch_size` for automatic-Hessian calls. If either setting exhausts
+VRAM, reduce it. The defaults (`20_000` and `1`) retain the validated 4 GiB
+behavior.
+
+To compare macro- and microbatch combinations on a target GPU, run:
+
+```bash
+python benchmarks/benchmark_dynamics_chunking_sweep.py \
+  --events 100000 --normalization-resolution 500 \
+  --chunk-sizes 50000,100000,200000 \
+  --microbatch-sizes 20000,25000,40000,50000,100000
+```
+
+Both size options are upper bounds. For `N=250000`, for example, a requested
+macro limit of 200000 becomes two effective blocks of 125000 instead of two
+fixed blocks totaling 400000 positions; an inner limit of 100000 then becomes
+62500, giving exact division at both levels. When exact division is impossible
+with one static XLA shape, the balanced layout leaves fewer padded positions
+than the number of blocks rather than a large partial tail. Inspect
+`cache.effective_normalization_chunk_size`,
+`cache.effective_dynamics_microbatch_size`,
+`cache.normalization_padding_points`, and
+`cache.normalization_padding_fraction` after preparation. The sweep benchmark
+reports the requested and effective sizes plus the residual fraction. Compare
+steady objective time as well as compilation and preparation time; retained
+cache size is controlled mainly by the macro chunk representation and need not
+fall with a smaller microbatch.
+
+Coefficient-only fits keep the previous single-linearization program. They do
+not need the extra memory boundary, and a small eight-parameter GPU benchmark
+showed that applying the checkpoint there increased the warm Hessian time from
+about 18 ms to 22 ms.
+
+On the real `B -> 3pi` model at 500-by-500 resolution, the sequential-HVP
+implementation completed with the default allocator in 46.2 s for the Hessian.
+Peak live JAX memory was 418.3 MiB and the allocator pool reached 518 MiB,
+compared with the previous 3.30 GiB program requirement. The computed Hessian
+norm was identical to the platform-allocator run (`4892002.165911924`).
+
+At 1000-by-1000 resolution, also with the default allocator, the Hessian took
+74.4 s. Peak live JAX memory was 1.066 GiB and the pool reached 2.006 GiB,
+below its 2.76 GiB limit. A contemporaneous `nvidia-smi` sample showed
+3,524 MiB including CUDA/runtime memory outside JAX's counters.
+
+The end-to-end default-allocator check at one million normalization points per
+charge completed MIGRAD+HESSE with `valid=True`, accurate covariance, EDM
+`9.433e-8`, and NLL matching the numerical-HESSE run to six decimal places.
+MIGRAD used 39 function calls; the numerical version took about 1066 s and
+needed 2411. A live notebook should still avoid retaining unrelated device
+arrays, but the platform allocator is no longer part of the required
+configuration.
 
 ## QMI preparation
 

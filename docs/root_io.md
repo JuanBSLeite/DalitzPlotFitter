@@ -17,7 +17,26 @@ arrays = read_root_tree(
 )
 ```
 
-The mapping is `{output_name: ROOT_branch_name}`. Returned arrays are JAX arrays. Flat scalar and fixed-size numeric branches are supported.
+The mapping is `{output_name: ROOT_branch_name}`. Returned arrays are JAX arrays
+by default. Flat scalar and fixed-size numeric branches are supported.
+
+For a large tree containing many toys, use `library="np"` to keep the input in
+host RAM and select events **before** transferring to the JAX device:
+
+```python
+import jax.numpy as jnp
+
+raw = read_root_tree(
+    "toys.root", "fitTree", ["s12", "s13", "s23", "iExpt"], library="np",
+)
+mask = raw["iExpt"] == 0
+s12 = jnp.asarray(raw["s12"][mask])
+```
+
+`jnp.asarray(raw["s12"])[mask]` transfers the entire column first. Converting
+the output of the default JAX reader back to NumPy also incurs the initial
+device allocation; choose `library="np"` at read time. The host mode supports
+the same branch renaming, cuts and entry ranges as the default mode.
 
 For a three-body fit sample use `read_phase_space_sample`:
 
