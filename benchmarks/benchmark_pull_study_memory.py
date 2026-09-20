@@ -13,8 +13,9 @@ The default measures preparation and the value/gradient. Add --hessian for the
 actual Minimizer automatic Hessian, or --fit-ncall N for an actual numerical-
 HESSE fit (with --hessian it instead uses the automatic Hessian). A call limit
 can stop before convergence; this is a memory diagnostic, not a pull result.
-Use --dynamics-microbatch-size and --hessian-batch-size to benchmark the public
-throughput/memory controls; their defaults retain the 4 GiB path.
+Use --dynamics-microbatch-size, --dynamics-microbatch-parallelism and
+--hessian-batch-size to benchmark the public throughput/memory controls; their
+defaults retain the 4 GiB path.
 Allocator statistics exclude some CUDA/runtime overhead. Host ROOT payload is
 reported separately from device allocations. No fit results are written.
 """
@@ -53,6 +54,7 @@ def main():
     parser.add_argument("--normalization-resolution", type=int)
     parser.add_argument("--normalization-chunk-size", type=int)
     parser.add_argument("--dynamics-microbatch-size", type=int)
+    parser.add_argument("--dynamics-microbatch-parallelism", type=int, default=1)
     parser.add_argument("--hessian-batch-size", type=int, default=1)
     parser.add_argument("--check-hessian", action="store_true")
     args = parser.parse_args()
@@ -60,6 +62,8 @@ def main():
         parser.error("--fit-ncall must be nonnegative and --entry-stop positive")
     if args.dynamics_microbatch_size is not None and args.dynamics_microbatch_size < 1:
         parser.error("--dynamics-microbatch-size must be positive")
+    if args.dynamics_microbatch_parallelism < 1:
+        parser.error("--dynamics-microbatch-parallelism must be positive")
     if args.hessian_batch_size < 1:
         parser.error("--hessian-batch-size must be positive")
     if args.check_hessian and not args.hessian:
@@ -121,6 +125,9 @@ def main():
         scope["NORMALIZATION_CONFIG"]["dynamics_microbatch_size"] = (
             args.dynamics_microbatch_size
         )
+    scope["NORMALIZATION_CONFIG"]["dynamics_microbatch_parallelism"] = (
+        args.dynamics_microbatch_parallelism
+    )
     execute(6, "PLUS_CHANNEL =")
     with uproot.open(scope["TOY_FILE"]) as root_file:
         tree = root_file[scope["TOY_TREE"]]
@@ -192,6 +199,9 @@ def main():
                 "free_parameters": len(names),
                 "dynamics_microbatch_size": (
                     session.plus_model.dynamics_microbatch_size
+                ),
+                "dynamics_microbatch_parallelism": (
+                    session.plus_model.dynamics_microbatch_parallelism
                 ),
                 "hessian_batch_size": minimizer.hessian_batch_size,
                 "dropped_zero_efficiency": [dropped_plus, dropped_minus],

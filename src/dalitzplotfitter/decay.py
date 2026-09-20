@@ -19,6 +19,7 @@ from dalitzplotfitter.amplitude import (
 from dalitzplotfitter.amplitude.components import coefficient_value
 from dalitzplotfitter.amplitude.cache import (
     DEFAULT_DYNAMICS_MICROBATCH_SIZE,
+    DEFAULT_DYNAMICS_MICROBATCH_PARALLELISM,
     DEFAULT_NORMALIZATION_CHUNK_SIZE,
 )
 from dalitzplotfitter.observables.errors import _covariance_matrix
@@ -359,6 +360,11 @@ class DecayModel:
         values can improve throughput on GPUs with more VRAM; smaller values
         lower peak AD memory. QMI is prepared directly under this limit because
         its cached order is block-local. Default: 20000.
+    dynamics_microbatch_parallelism:
+        Number of ordinary floating-dynamics microbatches evaluated concurrently
+        with ``vmap`` inside each macro-chunk. Larger values can improve GPU
+        throughput at the cost of peak AD memory. QMI keeps this at one because
+        its prepared order is block-local. Default: 1.
 
     Notes
     -----
@@ -380,6 +386,7 @@ class DecayModel:
     normalization_binning_factor: float
     normalization_chunk_size: int
     dynamics_microbatch_size: int
+    dynamics_microbatch_parallelism: int
     _normalization_sample: PhaseSpaceSample | None
     _amplitude_model: CoherentAmplitudeModel | None
     _compact_prepare_kernels: dict[tuple[bool, bool], object]
@@ -405,6 +412,7 @@ class DecayModel:
         normalization_sample: PhaseSpaceSample | None = None,
         normalization_chunk_size: int = DEFAULT_NORMALIZATION_CHUNK_SIZE,
         dynamics_microbatch_size: int = DEFAULT_DYNAMICS_MICROBATCH_SIZE,
+        dynamics_microbatch_parallelism: int = DEFAULT_DYNAMICS_MICROBATCH_PARALLELISM,
     ) -> None:
         if normalization_resolution < 2:
             raise ValueError("normalization_resolution must be at least 2")
@@ -447,6 +455,14 @@ class DecayModel:
             or dynamics_microbatch_size < 1
         ):
             raise ValueError("dynamics_microbatch_size must be a positive integer")
+        if (
+            isinstance(dynamics_microbatch_parallelism, bool)
+            or not isinstance(dynamics_microbatch_parallelism, int)
+            or dynamics_microbatch_parallelism < 1
+        ):
+            raise ValueError(
+                "dynamics_microbatch_parallelism must be a positive integer"
+            )
         object.__setattr__(self, "channel", channel)
         object.__setattr__(self, "components", tuple(components))
         object.__setattr__(self, "normalize_components", bool(normalize_components))
@@ -467,6 +483,11 @@ class DecayModel:
         )
         object.__setattr__(self, "normalization_chunk_size", int(normalization_chunk_size))
         object.__setattr__(self, "dynamics_microbatch_size", dynamics_microbatch_size)
+        object.__setattr__(
+            self,
+            "dynamics_microbatch_parallelism",
+            dynamics_microbatch_parallelism,
+        )
         object.__setattr__(self, "_normalization_sample", normalization_sample)
         object.__setattr__(self, "_amplitude_model", None)
         object.__setattr__(self, "_compact_prepare_kernels", {})
@@ -1058,6 +1079,7 @@ class DecayModel:
             compact_prepare_kernel=compact_kernel,
             normalization_chunk_size=self.normalization_chunk_size,
             dynamics_microbatch_size=self.dynamics_microbatch_size,
+            dynamics_microbatch_parallelism=self.dynamics_microbatch_parallelism,
         )
         if can_reuse_normalization:
             self._fixed_normalization_templates[template_key] = (
