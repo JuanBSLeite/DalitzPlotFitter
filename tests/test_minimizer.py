@@ -348,8 +348,13 @@ def test_hessian_batch_size_participates_in_shared_backend_key():
     first = Minimizer(objective, (parameter,), hessian_batch_size=1)
     same = Minimizer(objective, (parameter,), hessian_batch_size=1)
     larger = Minimizer(objective, (parameter,), hessian_batch_size=2)
-    assert first._backend() is same._backend()
-    assert first._backend() is not larger._backend()
+    first_backend = first._backend()
+    same_backend = same._backend()
+    larger_backend = larger._backend()
+    assert first_backend[2] is same_backend[2]
+    assert first_backend[3] is same_backend[3]
+    assert first_backend[4] is same_backend[4]
+    assert first_backend[4] is not larger_backend[4]
 
 
 @pytest.mark.parametrize("batch_size", [0, -1, True, 1.5])

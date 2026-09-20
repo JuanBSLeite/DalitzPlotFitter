@@ -6,7 +6,8 @@ dynamics higher waves whose complex coefficients may float.
 
 Example
 -------
-python benchmarks/benchmark_qmi_memory_speed.py --events 250000 --normalization-resolution 500
+python benchmarks/benchmark_qmi_memory_speed.py --events 250000 \
+    --normalization-resolution 500
 """
 
 from __future__ import annotations
@@ -248,7 +249,9 @@ def main() -> None:
         "prepared_data": _array_payload_bytes(cache.data),
         "prepared_normalization_data": _array_payload_bytes(cache.normalization_data),
         "data_components": _array_payload_bytes(cache.data_components),
-        "normalization_components": _array_payload_bytes(cache.normalization_components),
+        "normalization_components": _array_payload_bytes(
+            cache.normalization_components
+        ),
         "normalization_chunks": _array_payload_bytes(cache.normalization_chunks),
         "normalization_weights": _array_payload_bytes(cache.normalization_weights),
         "normalization_matrix": _array_payload_bytes(cache.normalization_matrix_fixed),

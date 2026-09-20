@@ -177,15 +177,9 @@ class Minimizer:
         shared_key, shared = self._shared_backend()
         if shared is not None:
             # Only compiled callbacks are reusable. Defaults, limits and steps
-            # belong to this Minimizer, not the instance that compiled them --
-            # but when this instance's free parameters are value-identical to
-            # the ones already cached, reuse the cached tuple as-is so that
-            # Minimizer instances sharing a backend also share its identity.
-            cached_free, names, fcn, grad, hessian = shared
-            if free == cached_free:
-                self._backend_cache = shared
-            else:
-                self._backend_cache = (free, names, fcn, grad, hessian)
+            # belong to this Minimizer, not the instance that compiled them.
+            _, names, fcn, grad, hessian = shared
+            self._backend_cache = (free, names, fcn, grad, hessian)
             return self._backend_cache
 
         fixed = {

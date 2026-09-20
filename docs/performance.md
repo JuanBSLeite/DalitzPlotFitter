@@ -258,6 +258,13 @@ same object.
 
 ### AD microbatching for floating-dynamics normalization on constrained GPUs
 
+A follow-up review fixed the compatibility helper `_matrix_from_dynamic` for the
+chunked cache representation, corrected retained-memory accounting, and made
+the shared Hessian callback capture its configured batch size. It also replaced
+an invalid test assertion about private backend-tuple identity with checks that
+the compiled callbacks are actually shared; see
+[the 2026-09-19 review](reviews/20260919_dynamics_chunking_and_hessian_review.md).
+
 `normalization_chunk_size` (default 100,000) is chosen to amortize XLA
 compilation and geometry-storage cost, not to bound the memory of the reverse-AD
 pass through several floating `DYNAMICS` lineshapes at once. On a memory-constrained
@@ -350,6 +357,20 @@ for the repeatedly evaluated likelihood/gradient, then benchmark
 `hessian_batch_size` for automatic-Hessian calls. If either setting exhausts
 VRAM, reduce it. The defaults (`20_000` and `1`) retain the validated 4 GiB
 behavior.
+
+To compare macro- and microbatch combinations on a target GPU, run:
+
+```bash
+python benchmarks/benchmark_dynamics_chunking_sweep.py \
+  --events 100000 --normalization-resolution 500 \
+  --chunk-sizes 50000,100000,200000 \
+  --microbatch-sizes 20000,25000,40000,50000,100000
+```
+
+The reported padding fraction includes both the final padded macro-chunk and
+inner microbatch padding. Compare steady objective time as well as compilation
+and preparation time; retained cache size is controlled mainly by the macro
+chunk representation and need not fall with a smaller microbatch.
 
 Coefficient-only fits keep the previous single-linearization program. They do
 not need the extra memory boundary, and a small eight-parameter GPU benchmark

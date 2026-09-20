@@ -183,6 +183,14 @@ def test_chunked_mass_width_values_gradients_and_hessian(
             strict=True,
         ):
             np.testing.assert_allclose(actual, expected, rtol=2e-12, atol=1e-12)
+        _, full_dynamic_norm = full._evaluate_dynamic_components(mapping(x))
+        _, chunked_dynamic_norm = chunked._evaluate_dynamic_components(mapping(x))
+        np.testing.assert_allclose(
+            chunked._matrix_from_dynamic(chunked_dynamic_norm),
+            full._matrix_from_dynamic(full_dynamic_norm),
+            rtol=2e-12,
+            atol=1e-12,
+        )
 
 
 def test_chunked_dynamics_microbatching_matches_unchunked():
