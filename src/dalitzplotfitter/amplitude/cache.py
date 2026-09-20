@@ -19,6 +19,7 @@ from dalitzplotfitter.observables import (
 from .components import AmplitudeComponent, coefficient_value
 
 DEFAULT_NORMALIZATION_CHUNK_SIZE = 100_000
+DEFAULT_DYNAMICS_MICROBATCH_PARALLELISM = 1
 
 
 def _component_normalization_mask(
@@ -231,6 +232,32 @@ def _value_padded(array: Array, micro_size: int, padding_value: float) -> Array:
         )
         array = jnp.concatenate((array, filler), axis=0)
     return array.reshape((-1, micro_size) + array.shape[1:])
+
+
+def _repeat_first_axis(array: Array, target_size: int) -> Array:
+    """Pad the leading axis by repeating its first entry."""
+    padding = target_size - array.shape[0]
+    if padding <= 0:
+        return array
+    filler = jnp.broadcast_to(array[:1], (padding,) + array.shape[1:])
+    return jnp.concatenate((array, filler), axis=0)
+
+
+def _constant_pad_axis(
+    array: Array,
+    target_size: int,
+    padding_value: float,
+) -> Array:
+    """Pad the leading axis with a constant value."""
+    padding = target_size - array.shape[0]
+    if padding <= 0:
+        return array
+    filler = jnp.full(
+        (padding,) + array.shape[1:],
+        padding_value,
+        dtype=array.dtype,
+    )
+    return jnp.concatenate((array, filler), axis=0)
 
 
 def _compact_normalization_chunk_kernel(
@@ -454,8 +481,10 @@ class PreparedAmplitudeCache:
     normalization_chunks: tuple | None = None
     normalization_chunk_size: int | None = None
     dynamics_microbatch_size: int = DEFAULT_DYNAMICS_MICROBATCH_SIZE
+    dynamics_microbatch_parallelism: int = DEFAULT_DYNAMICS_MICROBATCH_PARALLELISM
     effective_normalization_chunk_size: int | None = None
     effective_dynamics_microbatch_size: int | None = None
+    effective_dynamics_microbatch_parallelism: int | None = None
 
     @property
     def normalization_padding_points(self) -> int:
@@ -564,6 +593,7 @@ class PreparedAmplitudeCache:
         compact_prepare_kernel=None,
         normalization_chunk_size: int = DEFAULT_NORMALIZATION_CHUNK_SIZE,
         dynamics_microbatch_size: int = DEFAULT_DYNAMICS_MICROBATCH_SIZE,
+        dynamics_microbatch_parallelism: int = DEFAULT_DYNAMICS_MICROBATCH_PARALLELISM,
     ) -> PreparedAmplitudeCache:
         """Evaluate components and the normalization matrix once, from scratch.
 
@@ -585,6 +615,14 @@ class PreparedAmplitudeCache:
             or dynamics_microbatch_size < 1
         ):
             raise ValueError("dynamics_microbatch_size must be a positive integer")
+        if (
+            isinstance(dynamics_microbatch_parallelism, bool)
+            or not isinstance(dynamics_microbatch_parallelism, int)
+            or dynamics_microbatch_parallelism < 1
+        ):
+            raise ValueError(
+                "dynamics_microbatch_parallelism must be a positive integer"
+            )
         weights = jnp.asarray(normalization_weights)
         if weights.size < 1:
             raise ValueError("normalization sample must contain at least one point")
@@ -629,6 +667,7 @@ class PreparedAmplitudeCache:
                 efficiency_normalization=efficiency_normalization,
                 normalize_components=normalize_components,
                 component_scales=scales,
+                dynamics_microbatch_parallelism=dynamics_microbatch_parallelism,
             )
 
         # Floating-dynamics fits (notably QMI) must keep the normalization
@@ -688,6 +727,7 @@ class PreparedAmplitudeCache:
                 dynamic_chunk_size,
                 dynamics_microbatch_size,
                 int(normalization_chunk_size),
+                dynamics_microbatch_parallelism,
             )
 
         fixed_components = tuple(components[index] for index in fixed_indices)
@@ -802,6 +842,7 @@ class PreparedAmplitudeCache:
             fixed_component_indices=fixed_indices,
             dynamic_component_indices=dynamic_indices,
             dynamics_microbatch_size=dynamics_microbatch_size,
+            dynamics_microbatch_parallelism=dynamics_microbatch_parallelism,
         )
 
     @classmethod
@@ -819,6 +860,7 @@ class PreparedAmplitudeCache:
         chunk_size,
         dynamics_microbatch_size,
         requested_chunk_size,
+        dynamics_microbatch_parallelism,
     ):
         """Prepare geometry independently in each normalization block.
 
@@ -836,6 +878,15 @@ class PreparedAmplitudeCache:
             )
             if can_microbatch
             else int(chunk_size)
+        )
+        microbatch_count = (
+            (int(chunk_size) + effective_microbatch_size - 1)
+            // effective_microbatch_size
+        )
+        effective_parallelism = (
+            min(int(dynamics_microbatch_parallelism), microbatch_count)
+            if can_microbatch
+            else 1
         )
         efficiency_array = (
             jnp.ones_like(weights) if efficiency is None else jnp.asarray(efficiency)
@@ -928,8 +979,10 @@ class PreparedAmplitudeCache:
             normalization_chunks=chunk_arrays,
             normalization_chunk_size=requested_chunk_size,
             dynamics_microbatch_size=dynamics_microbatch_size,
+            dynamics_microbatch_parallelism=dynamics_microbatch_parallelism,
             effective_normalization_chunk_size=chunk_size,
             effective_dynamics_microbatch_size=effective_microbatch_size,
+            effective_dynamics_microbatch_parallelism=effective_parallelism,
         )
 
     def _chunked_dynamic_normalization(self, fit_values):
@@ -967,8 +1020,7 @@ class PreparedAmplitudeCache:
             tuple(self.components[i] for i in dynamic)
         )
 
-        def evaluate_microbatch(carry, micro_chunk):
-            diagonal, cross, block = carry
+        def evaluate_microbatch_values(micro_chunk):
             events, weights, efficiency, fixed_columns = micro_chunk
             values = jnp.stack(
                 [
@@ -978,8 +1030,8 @@ class PreparedAmplitudeCache:
                 axis=1,
             )
             pdf_weights = weights * efficiency
-            diagonal = diagonal + jnp.einsum("n,nd->d", weights, jnp.abs(values) ** 2)
-            block = block + jnp.einsum(
+            diagonal = jnp.einsum("n,nd->d", weights, jnp.abs(values) ** 2)
+            block = jnp.einsum(
                 "n,nd,ne->de",
                 pdf_weights,
                 values.conj(),
@@ -988,13 +1040,27 @@ class PreparedAmplitudeCache:
             if fixed:
                 fixed_values = jnp.stack(fixed_columns, axis=1)
                 fixed_values = fixed_values * self.component_scales[jnp.asarray(fixed)]
-                cross = cross + jnp.einsum(
+                cross = jnp.einsum(
                     "n,nd,nf->df",
                     pdf_weights,
                     values.conj(),
                     fixed_values,
                 )
-            return (diagonal, cross, block), None
+            else:
+                cross = jnp.zeros((n_dynamic, 0), dtype=dtype)
+            return diagonal, cross, block
+
+        def add_microbatch_values(carry, partial):
+            return tuple(
+                previous + current
+                for previous, current in zip(carry, partial, strict=True)
+            )
+
+        def evaluate_microbatch(carry, micro_chunk):
+            return add_microbatch_values(
+                carry,
+                evaluate_microbatch_values(micro_chunk),
+            ), None
 
         def accumulate(carry, chunk):
             events, weights, efficiency, fixed_columns = chunk
@@ -1015,11 +1081,64 @@ class PreparedAmplitudeCache:
             micro_fixed_columns = tuple(
                 _repeat_first_padded(column, micro_size) for column in fixed_columns
             )
-            carry, _ = jax.lax.scan(
-                jax.checkpoint(evaluate_microbatch),
-                carry,
-                (micro_events, micro_weights, micro_efficiency, micro_fixed_columns),
-            )
+            parallelism = self.effective_dynamics_microbatch_parallelism or 1
+            if parallelism == 1:
+                carry, _ = jax.lax.scan(
+                    jax.checkpoint(evaluate_microbatch),
+                    carry,
+                    (
+                        micro_events,
+                        micro_weights,
+                        micro_efficiency,
+                        micro_fixed_columns,
+                    ),
+                )
+            else:
+                micro_count = micro_weights.shape[0]
+                group_count = (micro_count + parallelism - 1) // parallelism
+                padded_count = group_count * parallelism
+                grouped_events = jax.tree_util.tree_map(
+                    lambda array: _repeat_first_axis(array, padded_count).reshape(
+                        (group_count, parallelism) + array.shape[1:]
+                    ),
+                    micro_events,
+                )
+                grouped_weights = _constant_pad_axis(
+                    micro_weights,
+                    padded_count,
+                    0.0,
+                ).reshape(
+                    (group_count, parallelism) + micro_weights.shape[1:]
+                )
+                grouped_efficiency = _constant_pad_axis(
+                    micro_efficiency,
+                    padded_count,
+                    1.0,
+                ).reshape(
+                    (group_count, parallelism) + micro_efficiency.shape[1:]
+                )
+                grouped_fixed_columns = tuple(
+                    _repeat_first_axis(column, padded_count).reshape(
+                        (group_count, parallelism) + column.shape[1:]
+                    )
+                    for column in micro_fixed_columns
+                )
+
+                def evaluate_group(carry, group_chunk):
+                    partials = jax.vmap(evaluate_microbatch_values)(group_chunk)
+                    partial = tuple(jnp.sum(part, axis=0) for part in partials)
+                    return add_microbatch_values(carry, partial), None
+
+                carry, _ = jax.lax.scan(
+                    jax.checkpoint(evaluate_group),
+                    carry,
+                    (
+                        grouped_events,
+                        grouped_weights,
+                        grouped_efficiency,
+                        grouped_fixed_columns,
+                    ),
+                )
             return carry, None
 
         initial = (

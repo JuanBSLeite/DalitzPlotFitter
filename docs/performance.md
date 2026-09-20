@@ -301,6 +301,16 @@ memory. Smaller values reduce peak gradient and Hessian memory. Changing this
 option changes only evaluation partitioning, not the normalization integral or
 its quadrature resolution.
 
+For ordinary floating-dynamics lineshapes, `dynamics_microbatch_parallelism`
+evaluates several microbatches concurrently with `jax.vmap` and reduces their
+partial normalization blocks. Its default is 1, preserving the sequential
+bounded-memory path. Values of 2 or 4 can improve throughput on larger GPUs,
+but increase peak AD memory approximately with the number of concurrent
+microbatches. The effective value is reported by
+`cache.effective_dynamics_microbatch_parallelism`; it is capped by the number
+of microbatches in one macro-chunk. QMI keeps the effective value at 1 because
+its prepared sort order is local to the complete block.
+
 For a floating component whose lineshape sets
 `prepared_mass_is_order_dependent = True` (currently only `QMI`), preparation
 itself uses blocks no larger than `dynamics_microbatch_size`. `QMI.prepare_mass`
