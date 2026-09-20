@@ -1130,6 +1130,8 @@ class PreparedAmplitudeCache:
         if not owners:
             return None, None
         if self.normalization_chunks is not None:
+            if self.data is None:
+                raise RuntimeError("Dynamic cache is missing prepared event data")
             _, scales = self._chunked_dynamic_normalization(fit_values)
             data_values = self._dynamic_data_with_scales(fit_values, scales)
             _, dynamic = self._component_partitions()
@@ -1204,7 +1206,7 @@ class PreparedAmplitudeCache:
             return self.normalization_matrix_fixed
         if dynamic_norm is None:
             raise RuntimeError("Dynamic normalization components are required")
-        if self.normalization_components is None:
+        if self.normalization_components is None and self.normalization_chunks is None:
             raise RuntimeError(
                 "Dynamic cache is missing fixed normalization components"
             )
@@ -1217,7 +1219,14 @@ class PreparedAmplitudeCache:
 
         if fixed_indices:
             fixed_index = jnp.asarray(fixed_indices, dtype=jnp.int32)
-            if isinstance(self.normalization_components, tuple):
+            if self.normalization_chunks is not None:
+                fixed_columns = tuple(
+                    self.normalization_chunks[3][column].reshape(-1)[
+                        : self.normalization_weights.size
+                    ]
+                    for column in range(len(fixed_indices))
+                )
+            elif isinstance(self.normalization_components, tuple):
                 fixed_columns = self.normalization_components
             else:
                 fixed_columns = tuple(

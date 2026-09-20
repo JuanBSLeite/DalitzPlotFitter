@@ -177,9 +177,15 @@ class Minimizer:
         shared_key, shared = self._shared_backend()
         if shared is not None:
             # Only compiled callbacks are reusable. Defaults, limits and steps
-            # belong to this Minimizer, not the instance that compiled them.
-            _, names, fcn, grad, hessian = shared
-            self._backend_cache = (free, names, fcn, grad, hessian)
+            # belong to this Minimizer, not the instance that compiled them --
+            # but when this instance's free parameters are value-identical to
+            # the ones already cached, reuse the cached tuple as-is so that
+            # Minimizer instances sharing a backend also share its identity.
+            cached_free, names, fcn, grad, hessian = shared
+            if free == cached_free:
+                self._backend_cache = shared
+            else:
+                self._backend_cache = (free, names, fcn, grad, hessian)
             return self._backend_cache
 
         fixed = {
@@ -289,6 +295,11 @@ class Minimizer:
 
         hessian_point = None
         hessian_value = None
+        # Snapshot now: this closure may later be reused by another Minimizer
+        # instance sharing the same backend (see `_shared_backend`), and must
+        # not follow whatever `self.hessian_batch_size` is mutated to on the
+        # instance that happened to compile it.
+        configured_hessian_batch_size = self.hessian_batch_size
 
         def hessian(*values):
             nonlocal hessian_point, hessian_value
@@ -301,7 +312,7 @@ class Minimizer:
                     # batches. The default batch size of one is the validated
                     # bounded-memory path for a 4 GiB GPU.
                     basis = np.eye(len(names), dtype=point.dtype)
-                    batch_size = min(self.hessian_batch_size, len(names))
+                    batch_size = min(configured_hessian_batch_size, len(names))
                     columns = []
                     for start in range(0, len(names), batch_size):
                         stop = min(start + batch_size, len(names))

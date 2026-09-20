@@ -162,6 +162,7 @@ def main() -> None:
     cache = session.signal_cache
     _block(cache.data_components)
     _block(cache.normalization_components)
+    _block(cache.normalization_chunks)
     cache_prepare_seconds = time.perf_counter() - start
 
     # Use the exact compiled value+gradient backend used by Minimizer rather
@@ -248,6 +249,7 @@ def main() -> None:
         "prepared_normalization_data": _array_payload_bytes(cache.normalization_data),
         "data_components": _array_payload_bytes(cache.data_components),
         "normalization_components": _array_payload_bytes(cache.normalization_components),
+        "normalization_chunks": _array_payload_bytes(cache.normalization_chunks),
         "normalization_weights": _array_payload_bytes(cache.normalization_weights),
         "normalization_matrix": _array_payload_bytes(cache.normalization_matrix_fixed),
     }
