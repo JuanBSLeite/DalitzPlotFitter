@@ -59,9 +59,12 @@ If a mass, width, radius, lineshape parameter, or other `ParameterKind.DYNAMICS`
 For multiple floating dynamical components, all affected normalization-matrix rows are updated in one batched accelerator reduction rather than one full normalization-grid reduction per component.
 
 For floating dynamics, `normalization_chunk_size` also bounds the prepared
-normalization blocks. Each block is accumulated with `jax.lax.scan` and
-checkpointed so gradients do not retain the whole grid. Ordinary parametric
-lineshapes use the additional `dynamics_microbatch_size` bound (default 20,000).
+normalization blocks. The requested size is a maximum: the cache balances the
+effective static width below it to minimize tail padding. Each block is
+accumulated with `jax.lax.scan` and checkpointed so gradients do not retain the
+whole grid. Ordinary parametric lineshapes use the additional
+`dynamics_microbatch_size` bound (default 20,000), which is balanced in the
+same way inside each macroblock.
 QMI is prepared directly in blocks no larger than that bound because its cached
 sort indices cannot be sliced after preparation. The grid resolution still
 controls quadrature accuracy and should not be reduced without a normalization-
@@ -367,10 +370,20 @@ python benchmarks/benchmark_dynamics_chunking_sweep.py \
   --microbatch-sizes 20000,25000,40000,50000,100000
 ```
 
-The reported padding fraction includes both the final padded macro-chunk and
-inner microbatch padding. Compare steady objective time as well as compilation
-and preparation time; retained cache size is controlled mainly by the macro
-chunk representation and need not fall with a smaller microbatch.
+Both size options are upper bounds. For `N=250000`, for example, a requested
+macro limit of 200000 becomes two effective blocks of 125000 instead of two
+fixed blocks totaling 400000 positions; an inner limit of 100000 then becomes
+62500, giving exact division at both levels. When exact division is impossible
+with one static XLA shape, the balanced layout leaves fewer padded positions
+than the number of blocks rather than a large partial tail. Inspect
+`cache.effective_normalization_chunk_size`,
+`cache.effective_dynamics_microbatch_size`,
+`cache.normalization_padding_points`, and
+`cache.normalization_padding_fraction` after preparation. The sweep benchmark
+reports the requested and effective sizes plus the residual fraction. Compare
+steady objective time as well as compilation and preparation time; retained
+cache size is controlled mainly by the macro chunk representation and need not
+fall with a smaller microbatch.
 
 Coefficient-only fits keep the previous single-linearization program. They do
 not need the extra memory boundary, and a small eight-parameter GPU benchmark

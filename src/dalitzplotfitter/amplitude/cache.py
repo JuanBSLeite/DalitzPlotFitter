@@ -173,6 +173,19 @@ def _padded_vector_chunk(
 DEFAULT_DYNAMICS_MICROBATCH_SIZE = 20_000
 
 
+def _balanced_block_size(point_count: int, maximum_size: int) -> int:
+    """Choose an almost-even static block size no larger than ``maximum_size``.
+
+    XLA scans require every block to have the same shape.  Treating the public
+    setting as that exact shape can waste nearly one complete block when the
+    sample is just over a multiple of it.  Instead, first choose the minimum
+    number of blocks allowed by the memory cap, then distribute the points as
+    evenly as a single static shape permits.
+    """
+    block_count = (point_count + maximum_size - 1) // maximum_size
+    return (point_count + block_count - 1) // block_count
+
+
 def _has_order_dependent_preparation(
     components: Sequence[AmplitudeComponent],
 ) -> bool:
@@ -439,7 +452,29 @@ class PreparedAmplitudeCache:
     fixed_component_indices: tuple[int, ...] | None = None
     dynamic_component_indices: tuple[int, ...] | None = None
     normalization_chunks: tuple | None = None
+    normalization_chunk_size: int | None = None
     dynamics_microbatch_size: int = DEFAULT_DYNAMICS_MICROBATCH_SIZE
+    effective_normalization_chunk_size: int | None = None
+    effective_dynamics_microbatch_size: int | None = None
+
+    @property
+    def normalization_padding_points(self) -> int:
+        """Number of zero-weight positions evaluated by dynamic normalization."""
+        if self.normalization_chunks is None:
+            return 0
+        leaves = jax.tree_util.tree_leaves(self.normalization_chunks)
+        if not leaves:
+            return 0
+        macro_count, macro_size = map(int, leaves[0].shape[:2])
+        micro_size = self.effective_dynamics_microbatch_size or macro_size
+        micro_count = (macro_size + micro_size - 1) // micro_size
+        processed = macro_count * micro_count * micro_size
+        return processed - int(self.normalization_weights.size)
+
+    @property
+    def normalization_padding_fraction(self) -> float:
+        """Fraction of dynamic-normalization work spent on padded positions."""
+        return self.normalization_padding_points / int(self.normalization_weights.size)
 
     @staticmethod
     def build_compact_prepare_kernel(
@@ -620,7 +655,7 @@ class PreparedAmplitudeCache:
             index for index in range(len(components)) if index not in dynamic_indices
         )
         dynamic_components = tuple(components[index] for index in dynamic_indices)
-        dynamic_chunk_size = int(normalization_chunk_size)
+        dynamic_chunk_limit = min(int(normalization_chunk_size), int(weights.size))
         order_dependent_preparation = _has_order_dependent_preparation(
             dynamic_components
         )
@@ -628,18 +663,18 @@ class PreparedAmplitudeCache:
             # QMI's sort indices belong to the exact block passed to
             # prepare_mass. Prepare smaller blocks up front rather than
             # slicing that state later in the inner AD microbatch scan.
-            dynamic_chunk_size = min(
-                dynamic_chunk_size,
+            dynamic_chunk_limit = min(
+                dynamic_chunk_limit,
                 dynamics_microbatch_size,
             )
         needs_inner_microbatch = (
             not order_dependent_preparation
             and weights.size > dynamics_microbatch_size
         )
-        if weights.size > dynamic_chunk_size or needs_inner_microbatch:
-            # Avoid padding a one-macroblock sample up to a larger configured
-            # normalization chunk merely to activate its inner microbatches.
-            dynamic_chunk_size = min(dynamic_chunk_size, int(weights.size))
+        if weights.size > dynamic_chunk_limit or needs_inner_microbatch:
+            dynamic_chunk_size = _balanced_block_size(
+                int(weights.size), dynamic_chunk_limit
+            )
             return cls._prepare_chunked_dynamics(
                 components,
                 data,
@@ -652,6 +687,7 @@ class PreparedAmplitudeCache:
                 dynamic_indices,
                 dynamic_chunk_size,
                 dynamics_microbatch_size,
+                int(normalization_chunk_size),
             )
 
         fixed_components = tuple(components[index] for index in fixed_indices)
@@ -782,6 +818,7 @@ class PreparedAmplitudeCache:
         dynamic_indices,
         chunk_size,
         dynamics_microbatch_size,
+        requested_chunk_size,
     ):
         """Prepare geometry independently in each normalization block.
 
@@ -792,6 +829,14 @@ class PreparedAmplitudeCache:
         fixed = tuple(components[i] for i in fixed_indices)
         dynamic = tuple(components[i] for i in dynamic_indices)
         n_points = weights.shape[0]
+        can_microbatch = not _has_order_dependent_preparation(dynamic)
+        effective_microbatch_size = (
+            _balanced_block_size(
+                int(chunk_size), min(int(dynamics_microbatch_size), int(chunk_size))
+            )
+            if can_microbatch
+            else int(chunk_size)
+        )
         efficiency_array = (
             jnp.ones_like(weights) if efficiency is None else jnp.asarray(efficiency)
         )
@@ -881,7 +926,10 @@ class PreparedAmplitudeCache:
             fixed_component_indices=fixed_indices,
             dynamic_component_indices=dynamic_indices,
             normalization_chunks=chunk_arrays,
+            normalization_chunk_size=requested_chunk_size,
             dynamics_microbatch_size=dynamics_microbatch_size,
+            effective_normalization_chunk_size=chunk_size,
+            effective_dynamics_microbatch_size=effective_microbatch_size,
         )
 
     def _chunked_dynamic_normalization(self, fit_values):
@@ -952,7 +1000,12 @@ class PreparedAmplitudeCache:
             events, weights, efficiency, fixed_columns = chunk
             if not can_microbatch:
                 return evaluate_microbatch(carry, chunk)
-            micro_size = min(self.dynamics_microbatch_size, weights.shape[0])
+            micro_size = self.effective_dynamics_microbatch_size
+            if micro_size is None:
+                micro_size = _balanced_block_size(
+                    int(weights.shape[0]),
+                    min(self.dynamics_microbatch_size, int(weights.shape[0])),
+                )
             micro_events = jax.tree_util.tree_map(
                 lambda a: _repeat_first_padded(a, micro_size),
                 events,

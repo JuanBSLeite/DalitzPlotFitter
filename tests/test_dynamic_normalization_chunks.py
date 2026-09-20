@@ -229,6 +229,26 @@ def test_chunked_dynamics_microbatching_matches_unchunked():
     )
 
 
+def test_chunk_and_microbatch_limits_are_balanced_to_minimize_padding():
+    _, cache = prepare_pair(
+        all_dynamic=True,
+        dynamics_microbatch_size=30,
+        chunk_size=50,
+    )
+    # 81 points need two macroblocks under the requested limit of 50. Their
+    # balanced static width is 41 rather than 50. Each 41-point macroblock is
+    # then split into two 21-point microbatches rather than two of width 30.
+    assert cache.normalization_chunk_size == 50
+    assert cache.dynamics_microbatch_size == 30
+    assert cache.effective_normalization_chunk_size == 41
+    assert cache.effective_dynamics_microbatch_size == 21
+    assert cache.normalization_chunks[1].shape[:2] == (2, 41)
+    assert cache.normalization_padding_points == 3
+    assert cache.normalization_padding_fraction == pytest.approx(3 / 81)
+    assert cache.effective_normalization_chunk_size <= cache.normalization_chunk_size
+    assert cache.effective_dynamics_microbatch_size <= cache.dynamics_microbatch_size
+
+
 @pytest.mark.parametrize("interpolation", ["linear", "cubic", "hermite", "natural"])
 def test_chunked_qmi_preparation_and_second_derivatives(interpolation):
     # QMI's prepared order/starts/ends are valid only for their exact block.

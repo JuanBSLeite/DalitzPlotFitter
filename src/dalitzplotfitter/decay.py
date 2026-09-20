@@ -347,15 +347,18 @@ class DecayModel:
         conventions across components and charge samples.
     normalization_chunk_size:
         Maximum number of normalization points in one prepared macro-chunk.
-        Smaller values reduce preparation memory at the cost of more chunk
-        executions. Floating-dynamics evaluation may subdivide these blocks
-        further to bound automatic-differentiation memory. Default: 100000.
+        The effective static width is balanced automatically below this limit
+        to minimize padding. Smaller values reduce preparation memory at the
+        cost of more chunk executions. Floating-dynamics evaluation may
+        subdivide these blocks further to bound automatic-differentiation
+        memory. Default: 100000.
     dynamics_microbatch_size:
         Maximum number of normalization points differentiated together inside
-        each floating-dynamics macro-chunk. Larger values can improve throughput
-        on GPUs with more VRAM; smaller values lower peak AD memory. QMI is
-        prepared directly with this block size because its cached order is
-        block-local. Default: 20000.
+        each floating-dynamics macro-chunk. The effective static width is
+        balanced automatically below this limit to minimize padding. Larger
+        values can improve throughput on GPUs with more VRAM; smaller values
+        lower peak AD memory. QMI is prepared directly under this limit because
+        its cached order is block-local. Default: 20000.
 
     Notes
     -----

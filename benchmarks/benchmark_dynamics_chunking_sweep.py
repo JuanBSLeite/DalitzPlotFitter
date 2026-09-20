@@ -8,13 +8,10 @@ see "AD microbatching for floating-dynamics normalization on constrained GPUs"
 in docs/performance.md) is exercised without QMI's extra order-dependent
 preparation constraint.
 
-Each combination is padded internally the same way the real cache pads a
-macro-chunk to a multiple of the microbatch size (see
-``dalitzplotfitter.amplitude.cache._repeat_first_padded``): when
-``dynamics_microbatch_size`` does not evenly divide ``normalization_chunk_size``,
-part of every macro-chunk's reverse-AD pass is spent on discarded padding
-rather than real points. ``padding_overhead_fraction`` in each result reports
-that waste so it is not confused with genuine scan/checkpoint overhead.
+The requested values are memory limits. The cache chooses effective static
+widths at or below them that balance the real point count across the minimum
+number of blocks. ``padding_overhead_fraction`` reports the small residual
+waste when exact division is arithmetically impossible.
 
 Example
 -------
@@ -29,7 +26,6 @@ from __future__ import annotations
 import argparse
 import gc
 import json
-import math
 import time
 
 import jax
@@ -135,25 +131,6 @@ def _block(value):
     return value
 
 
-def _padding_overhead_fraction(
-    point_count: int,
-    chunk_size: int,
-    microbatch_size: int,
-) -> float:
-    """Fraction of all microbatched work spent on inner and outer padding.
-
-    The final macro-chunk is padded to the configured macro width, then every
-    macro-chunk is padded to a multiple of its inner microbatch width.
-    """
-
-    macro = min(chunk_size, point_count)
-    macro_count = math.ceil(point_count / macro)
-    micro = min(microbatch_size, macro)
-    microbatch_count = math.ceil(macro / micro)
-    processed = macro_count * microbatch_count * micro
-    return processed / point_count - 1.0
-
-
 def _parse_int_list(text: str) -> list[int]:
     return [int(token) for token in text.split(",") if token.strip()]
 
@@ -219,11 +196,13 @@ def run_one(
         "normalization_resolution": normalization_resolution,
         "normalization_chunk_size": normalization_chunk_size,
         "dynamics_microbatch_size": dynamics_microbatch_size,
-        "padding_overhead_fraction": _padding_overhead_fraction(
-            int(cache.normalization_weights.size),
-            normalization_chunk_size,
-            dynamics_microbatch_size,
+        "effective_normalization_chunk_size": (
+            cache.effective_normalization_chunk_size
         ),
+        "effective_dynamics_microbatch_size": (
+            cache.effective_dynamics_microbatch_size
+        ),
+        "padding_overhead_fraction": cache.normalization_padding_fraction,
         "cache_prepare_seconds": cache_prepare_seconds,
         "first_jitted_objective_seconds": first_seconds,
         "steady_objective_seconds_mean": sum(times) / len(times),
@@ -285,7 +264,8 @@ def main() -> None:
             jax.clear_caches()
 
     header = (
-        f"{'chunk':>10}  {'microbatch':>10}  {'pad_%':>7}  "
+        f"{'chunk':>10}  {'eff_chunk':>10}  {'microbatch':>10}  "
+        f"{'eff_micro':>10}  {'pad_%':>7}  "
         f"{'prepare_s':>10}  {'first_s':>9}  {'steady_s_mean':>14}  "
         f"{'total_s':>9}  {'retained_MB':>12}"
     )
@@ -295,7 +275,9 @@ def main() -> None:
     for result in results:
         print(
             f"{result['normalization_chunk_size']:>10}  "
+            f"{result['effective_normalization_chunk_size']:>10}  "
             f"{result['dynamics_microbatch_size']:>10}  "
+            f"{result['effective_dynamics_microbatch_size']:>10}  "
             f"{100 * result['padding_overhead_fraction']:>6.1f}%  "
             f"{result['cache_prepare_seconds']:>10.3f}  "
             f"{result['first_jitted_objective_seconds']:>9.3f}  "

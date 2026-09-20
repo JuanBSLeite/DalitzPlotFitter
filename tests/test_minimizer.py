@@ -317,7 +317,7 @@ def test_dynamic_hessian_dispatches_columns_as_separate_hvps(monkeypatch):
 
 
 @pytest.mark.parametrize("batch_size", [1, 2, 3, 10])
-def test_dynamic_hessian_batch_size_preserves_result(batch_size):
+def test_dynamic_hessian_batch_size_preserves_result(batch_size, monkeypatch):
     parameters = tuple(
         Parameter.dynamics(f"shape.{name}", value, owner="shape")
         for name, value in (("x", 1.0), ("y", 2.0), ("z", 3.0))
@@ -333,6 +333,14 @@ def test_dynamic_hessian_batch_size_preserves_result(batch_size):
         hessian="jax",
         hessian_batch_size=batch_size,
     )._backend()[4]
+    if batch_size == 2:
+        monkeypatch.setattr(
+            np,
+            "pad",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("the Hessian remainder must not be padded")
+            ),
+        )
     np.testing.assert_allclose(
         hessian(1.0, 2.0, 3.0),
         [[2.0, 1.0, 0.0], [1.0, 12.0, 1.0], [0.0, 1.0, 2.0]],

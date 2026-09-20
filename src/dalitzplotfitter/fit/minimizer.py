@@ -308,15 +308,10 @@ class Minimizer:
                     basis = np.eye(len(names), dtype=point.dtype)
                     batch_size = min(configured_hessian_batch_size, len(names))
                     columns = []
-                    for start in range(0, len(names), batch_size):
-                        stop = min(start + batch_size, len(names))
+                    full_stop = len(names) - len(names) % batch_size
+                    for start in range(0, full_stop, batch_size):
+                        stop = start + batch_size
                         tangents = basis[start:stop]
-                        count = stop - start
-                        if count < batch_size:
-                            tangents = np.pad(
-                                tangents,
-                                ((0, batch_size - count), (0, 0)),
-                            )
                         if batch_size == 1:
                             products = jax.device_get(
                                 hessian_vector_product(
@@ -331,7 +326,18 @@ class Minimizer:
                                     jnp.asarray(tangents, dtype=device_point.dtype),
                                 )
                             )
-                        columns.extend(np.asarray(products[:count], dtype=float))
+                        columns.extend(np.asarray(products, dtype=float))
+                    # A partial vector batch would either execute padded HVPs
+                    # or compile another vmap width. Reuse the scalar program
+                    # for the few remaining basis vectors instead.
+                    for tangent in basis[full_stop:]:
+                        product = jax.device_get(
+                            hessian_vector_product(
+                                device_point,
+                                jnp.asarray(tangent, dtype=device_point.dtype),
+                            )
+                        )
+                        columns.append(np.asarray(product, dtype=float))
                     matrix = np.column_stack(columns)
                 else:
                     matrix = np.asarray(
