@@ -701,6 +701,20 @@ class QMI:
         """Whether knots are "cartesian" (real/imag) or "polar" (magnitude/phase)."""
         return "cartesian" if self.real_parts is not None else "polar"
 
+    def smoothness_constraint(self, strength=0.0, *, weights=None):
+        """Build an optional complex-knot curvature penalty for any interpolation.
+
+        Attach it explicitly with ``session.with_constraint(...)`` or
+        ``ConstrainedNLL``. Merely creating it does not change this lineshape
+        or its normalization. ``strength=0`` is an exact no-op; ``weights``
+        optionally scales each interior knot's three-knot stencil.
+        See :class:`dalitzplotfitter.constraints.QMISmoothnessConstraint`
+        for the nonuniform-s convention and the required fixed QMI scale.
+        """
+        from dalitzplotfitter.constraints import QMISmoothnessConstraint
+
+        return QMISmoothnessConstraint(self, strength=strength, weights=weights)
+
     def _interpolate(self, s, knot_s, values, prepared_index=None):
         index, fraction = _interval_index_and_fraction(
             s,

@@ -260,7 +260,8 @@ Docs: `docs/toy_generation.md`. Notebooks: `18_user_friendly_toy_generation.ipyn
 | `LineshapeIntensity1D` | class | Turn an existing complex dynamics lineshape (e.g. `RelativisticBreitWigner`) into a normalized 1D intensity PDF. |
 | `FactorizedDensity` | class | Multiply a base Dalitz density by independent 1D discriminant PDFs (mass, BDT, PID, ...). |
 | `GaussianConstraint` | class | Gaussian penalty `0.5*((x-mu)/sigma)^2` on one parameter. |
-| `ConstrainedNLL` | class | Add one or more `GaussianConstraint`s to an existing NLL. |
+| `QMISmoothnessConstraint` | class | Optional complex-node curvature penalty in mass squared for any 1D QMI interpolation; also built by `qmi.smoothness_constraint(...)`. |
+| `ConstrainedNLL` | class | Add callable penalties, including Gaussian or QMI smoothness constraints, to an existing NLL. |
 
 Docs: `docs/discriminants_and_constraints.md`. Notebooks: `10_b2kpipi_discriminating_variables.ipynb`, `11_b2kpipi_gaussian_constraints.ipynb`.
 

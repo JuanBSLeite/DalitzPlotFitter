@@ -29,7 +29,7 @@ from .background import (
 )
 from .coefficients import CPRealImag, RealImag
 from .config import enable_x64
-from .constraints import ConstrainedNLL, GaussianConstraint
+from .constraints import ConstrainedNLL, GaussianConstraint, QMISmoothnessConstraint
 from .cp_workflow import CPBackgroundSpec, CPFitSession
 from .decay import DalitzAmplitude, DecayChannel, DecayModel, NonResonant, Resonance
 from .discriminants import (
@@ -160,7 +160,7 @@ __all__ = [
     "GooFitLegacyAngular", "GounarisSakurai", "Histogram1D", "KMatrix", "LASS", "LineshapeIntensity1D", "DalitzGaussLegendreGrid",
     "MassWindowVeto", "Minimizer", "MultiBackgroundNLL", "MultiStartResult", "NesterovResult", "NonResonant",
     "Parameter", "ParameterKind", "PhaseSpaceMC", "PhaseSpaceSample", "Pole", "PointToPointResult",
-    "PreparedAmplitudeCache", "PreparedInverseToyGenerator", "PipiKKRescattering", "QMI", "QMI2D", "RealImag", "RelativisticBreitWigner", "RhoOmegaMixing", "Rescattering2", "SigmaPole", "SympyLineshape",
+    "PreparedAmplitudeCache", "PreparedInverseToyGenerator", "PipiKKRescattering", "QMI", "QMI2D", "QMISmoothnessConstraint", "RealImag", "RelativisticBreitWigner", "RhoOmegaMixing", "Rescattering2", "SigmaPole", "SympyLineshape",
     "Resonance", "ResonanceAmplitude", "ResonanceContext", "SCFSignalPDF", "SignalPDF",
     "SparseMigration", "SquareDalitzGrid", "SquareDalitzHistogramBackground", "SquareDalitzHistogramEfficiency",
     "SquareDalitzSCFMap", "ToyBackground", "VetoMap", "VetoedDensity", "ZemachP", "ZemachPstar",
