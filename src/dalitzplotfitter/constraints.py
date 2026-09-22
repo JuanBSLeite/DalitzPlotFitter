@@ -79,6 +79,11 @@ class QMISmoothnessConstraint:
             raise ValueError("QMI smoothness strength must be a fixed number") from exc
         if not isfinite(strength) or strength < 0:
             raise ValueError("QMI smoothness strength must be finite and nonnegative")
+        if self.qmi.interpolation == "none" and strength != 0:
+            raise ValueError(
+                "QMI smoothness requires interpolated knots; "
+                "use strength=0 for constant bins"
+            )
         object.__setattr__(self, "strength", strength)
         if self.weights is not None:
             try:

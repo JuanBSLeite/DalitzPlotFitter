@@ -544,3 +544,33 @@ See [the runnable SymPy tutorial](../notebooks/tutorials/tutorial_11_sympy_lines
 for plots, an Asimov parameter-recovery fit, gradient validation and JSON roundtrip.
 See also [the B → 3π Dalitz example](../notebooks/tutorials/tutorial_12_sympy_b3pi_dalitz.ipynb)
 for a complete symmetrized Dalitz model with a user-defined pole.
+
+### Constant-bin QMI (no interpolation)
+
+`QMI(interpolation="none")` uses `knots` as **mass bin edges**. Supply one
+complex value per interval, not per edge, in either Cartesian or polar form:
+
+```python
+qmi = QMI(knots=(0.28, 0.50, 0.80, 1.20),
+          real_parts=(1.0, 0.7, 0.3), imaginary_parts=(0.0, 0.2, -0.1),
+          interpolation="none")
+```
+
+Bins are `[left, right)`, with the final edge included in the last bin;
+outside the edge range the first/last bin value is held constant. Values
+jump at interior edges. AD differentiates the bin amplitudes; the mass
+derivative is zero within bins and does not represent a derivative at a jump.
+Prepared evaluation reuses bin assignments and grouped reductions for its VJP,
+including polar/Cartesian gradients and Hessians. `size` counts edges in this mode.
+The existing knot-curvature constraint is not defined for constant bins:
+use `strength=0` (nonzero strength raises an error).
+
+Use `Parameter.dynamics` for floating bin values. With a free global complex
+coefficient, fix one bin to `1+0j` to remove the redundant scale and phase.
+Bins completely removed by vetoes should also be fixed: their parameters have
+no likelihood sensitivity. Discontinuous bins require checking normalization
+quadrature convergence near their boundaries. No component normalization is
+implicitly enabled by selecting this mode.
+
+`notebooks/data_analyses/26_b2pipipi_cpvfit_qmi_step_global_cpv.ipynb` applies
+this parameterization to the 25 reference mass bins with global CPV coefficients.

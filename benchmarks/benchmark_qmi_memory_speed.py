@@ -21,17 +21,16 @@ import jax.numpy as jnp
 import numpy as np
 
 from dalitzplotfitter import (
+    QMI,
     DecayChannel,
     DecayModel,
     FitSession,
     GounarisSakurai,
     Parameter,
-    QMI,
     RealImag,
     Resonance,
     enable_x64,
 )
-
 
 enable_x64()
 
@@ -43,7 +42,9 @@ def _coefficient(name: str, x: float, y: float, *, fixed: bool = False):
     )
 
 
-def make_model(normalization_resolution: int) -> DecayModel:
+def make_model(
+    normalization_resolution: int, interpolation: str = "linear"
+) -> DecayModel:
     channel = DecayChannel("B+", ("pi+", "pi+", "pi-"))
     threshold = channel.daughter_masses[0] + channel.daughter_masses[2]
     maximum = channel.parent_mass - channel.daughter_masses[1]
@@ -71,7 +72,9 @@ def make_model(normalization_resolution: int) -> DecayModel:
         )
         for i in range(len(knots))
     )
-    qmi = QMI(knots, magnitudes, phases, interpolation="linear")
+    if interpolation == "none":
+        magnitudes, phases = magnitudes[:-1], phases[:-1]
+    qmi = QMI(knots, magnitudes, phases, interpolation=interpolation)
 
     return DecayModel(
         channel,
@@ -149,9 +152,10 @@ def main() -> None:
     parser.add_argument("--normalization-resolution", type=int, default=500)
     parser.add_argument("--repeats", type=int, default=20)
     parser.add_argument("--seed", type=int, default=260905)
+    parser.add_argument("--interpolation", choices=("linear", "none"), default="linear")
     args = parser.parse_args()
 
-    model = make_model(args.normalization_resolution)
+    model = make_model(args.normalization_resolution, args.interpolation)
     data = model.generate_phase_space(
         args.events,
         seed=args.seed,
@@ -262,6 +266,7 @@ def main() -> None:
         "normalization_points": model.normalization_sample.size,
         "normalization_resolution": args.normalization_resolution,
         "qmi_knots": 20,
+        "qmi_interpolation": args.interpolation,
         "cache_prepare_seconds": cache_prepare_seconds,
         "first_jitted_objective_seconds": first_seconds,
         "first_value_only_seconds": first_value_only_seconds,

@@ -14,6 +14,27 @@ from ..context import ResonanceContext
 
 
 @jax.custom_vjp
+def _step_qmi_prepared(values, index, order, starts, ends):
+    """Gather one value per bin; reverse AD uses grouped sums, not atomics."""
+    return values[jnp.asarray(index, dtype=jnp.int32)]
+
+
+def _step_qmi_prepared_fwd(values, index, order, starts, ends):
+    return values[jnp.asarray(index, dtype=jnp.int32)], (order, starts, ends)
+
+
+def _step_qmi_prepared_bwd(residual, cotangent):
+    order, starts, ends = residual
+    gradient = _grouped_interval_sums(
+        cotangent[jnp.asarray(order, dtype=jnp.int32)], starts, ends
+    )
+    return gradient, None, None, None, None
+
+
+_step_qmi_prepared.defvjp(_step_qmi_prepared_fwd, _step_qmi_prepared_bwd)
+
+
+@jax.custom_vjp
 def _linear_qmi_prepared(
     magnitudes,
     phases,
@@ -280,9 +301,7 @@ def _cubic_qmi_prepared_impl(values, index, fraction):
     index32 = jnp.asarray(index, dtype=jnp.int32)
     fraction = jnp.asarray(fraction, dtype=values.dtype)
     weight = _cubic_blend(fraction)
-    return values[index32] + weight * (
-        values[index32 + 1] - values[index32]
-    )
+    return values[index32] + weight * (values[index32 + 1] - values[index32])
 
 
 @jax.custom_vjp
@@ -377,9 +396,13 @@ def _natural_cubic(values, index, fraction, knots):
     index = jnp.asarray(index, dtype=jnp.int32)
     b = jnp.asarray(fraction, dtype=values.dtype)
     a = 1 - b
-    return (a * values[index] + b * values[index + 1]
-            + h[index]**2 / 6 * ((a**3 - a) * second[index]
-                                + (b**3 - b) * second[index + 1]))
+    return (
+        a * values[index]
+        + b * values[index + 1]
+        + h[index] ** 2
+        / 6
+        * ((a**3 - a) * second[index] + (b**3 - b) * second[index + 1])
+    )
 
 
 def _hermite_slopes(values, knot_s):
@@ -516,21 +539,16 @@ def _hermite_qmi_prepared_bwd(residual, cotangent):
     n_knots = knot_s.shape[0]
     first_scaled = slope_gradient[0] / (knot_s[1] - knot_s[0])
     last_scaled = slope_gradient[-1] / (knot_s[-1] - knot_s[-2])
-    endpoint_gradient = (
-        jnp.pad(
-            jnp.stack((-first_scaled, first_scaled)),
-            (0, n_knots - 2),
-        )
-        + jnp.pad(
-            jnp.stack((-last_scaled, last_scaled)),
-            (n_knots - 2, 0),
-        )
+    endpoint_gradient = jnp.pad(
+        jnp.stack((-first_scaled, first_scaled)),
+        (0, n_knots - 2),
+    ) + jnp.pad(
+        jnp.stack((-last_scaled, last_scaled)),
+        (n_knots - 2, 0),
     )
 
     if n_knots > 2:
-        interior_scaled = slope_gradient[1:-1] / (
-            knot_s[2:] - knot_s[:-2]
-        )
+        interior_scaled = slope_gradient[1:-1] / (knot_s[2:] - knot_s[:-2])
         slope_value_gradient = (
             endpoint_gradient
             + jnp.pad(-interior_scaled, (0, 2))
@@ -555,6 +573,7 @@ _hermite_qmi_prepared.defvjp(
     _hermite_qmi_prepared_fwd,
     _hermite_qmi_prepared_bwd,
 )
+
 
 def _interval_index_and_fraction(x, xp, prepared_index=None):
     """Return the interpolation interval and local fraction.
@@ -637,6 +656,14 @@ def _local_hermite_spline(x, xp, fp):
 
 @dataclass(frozen=True)
 class QMI:
+    """Scalar amplitude with interpolation or constant mass bins.
+
+    With ``interpolation="none"``, ``knots`` are bin edges and each
+    parameter array has ``len(knots)-1`` entries. Bins are left-closed,
+    right-open, with the final edge in the last bin. Outside the supplied
+    range the endpoint bin value is held constant, as for interpolated QMI.
+    """
+
     knots: tuple[float, ...]
     magnitudes: tuple[object, ...] | None = None
     phases: tuple[object, ...] | None = None
@@ -653,26 +680,35 @@ class QMI:
             raise ValueError(
                 "QMI requires exactly one complete polar or Cartesian parameter set"
             )
-        if polar:
-            if self.magnitudes is None or len(self.magnitudes) != len(self.knots):
-                raise ValueError("QMI magnitudes must have the same length as knots")
-            if self.phases is None or len(self.phases) != len(self.knots):
-                raise ValueError("QMI phases must have the same length as knots")
-        else:
-            if self.real_parts is None or len(self.real_parts) != len(self.knots):
-                raise ValueError("QMI real parts must have the same length as knots")
-            if self.imaginary_parts is None or len(self.imaginary_parts) != len(
-                self.knots
-            ):
-                raise ValueError(
-                    "QMI imaginary parts must have the same length as knots"
+        expected = len(self.knots) - (self.interpolation == "none")
+        groups = (
+            (("magnitudes", self.magnitudes), ("phases", self.phases))
+            if polar
+            else (
+                ("real parts", self.real_parts),
+                ("imaginary parts", self.imaginary_parts),
+            )
+        )
+        for label, group in groups:
+            if group is None or len(group) != expected:
+                convention = (
+                    "one entry per bin (len(knots)-1)"
+                    if self.interpolation == "none"
+                    else "the same length as knots"
                 )
-        values = ((self.magnitudes, self.phases) if polar
-                  else (self.real_parts, self.imaginary_parts))
+                raise ValueError(f"QMI {label} must have {convention}")
+        values = (
+            (self.magnitudes, self.phases)
+            if polar
+            else (self.real_parts, self.imaginary_parts)
+        )
         for group in values:
             for value in group:
-                if (isinstance(value, Parameter) and not value.fixed
-                        and value.kind is not ParameterKind.DYNAMICS):
+                if (
+                    isinstance(value, Parameter)
+                    and not value.fixed
+                    and value.kind is not ParameterKind.DYNAMICS
+                ):
                     raise ValueError(
                         f"QMI knot {value.name!r} must use Parameter.dynamics "
                         "with the component owner"
@@ -686,14 +722,14 @@ class QMI:
             raise ValueError("QMI knots must be strictly increasing")
         if knots[0] <= 0.0:
             raise ValueError("QMI knot masses must be positive")
-        if self.interpolation not in {"linear", "cubic", "hermite", "natural"}:
+        if self.interpolation not in {"none", "linear", "cubic", "hermite", "natural"}:
             raise ValueError(
-                "QMI interpolation must be linear, cubic, hermite, or natural"
+                "QMI interpolation must be none, linear, cubic, hermite, or natural"
             )
 
     @property
     def size(self) -> int:
-        """Number of mass knots."""
+        """Number of mass knots (bin edges for interpolation="none")."""
         return len(self.knots)
 
     @property
@@ -774,13 +810,24 @@ class QMI:
         magnitudes = jnp.asarray(first_values, dtype=knot_s.dtype)
         phases = jnp.asarray(second_values, dtype=knot_s.dtype)
 
+        if self.interpolation == "none":
+            if prepared_index is None:
+                index, _ = _interval_index_and_fraction(s, knot_s)
+            else:
+                index = jnp.asarray(prepared_index, dtype=jnp.int32)
+            return magnitudes[index], phases[index]
+
         if self.interpolation == "natural":
             if prepared_fraction is None:
-                index, fraction = _interval_index_and_fraction(s, knot_s, prepared_index)
+                index, fraction = _interval_index_and_fraction(
+                    s, knot_s, prepared_index
+                )
             else:
                 index, fraction = prepared_index, prepared_fraction
-            return (_natural_cubic(magnitudes, index, fraction, knot_s),
-                    _natural_cubic(phases, index, fraction, knot_s))
+            return (
+                _natural_cubic(magnitudes, index, fraction, knot_s),
+                _natural_cubic(phases, index, fraction, knot_s),
+            )
 
         if self.interpolation == "linear":
             if prepared_fraction is None:
@@ -820,9 +867,7 @@ class QMI:
             magnitude = magnitudes[index] + weight * (
                 magnitudes[index + 1] - magnitudes[index]
             )
-            phase = phases[index] + weight * (
-                phases[index + 1] - phases[index]
-            )
+            phase = phases[index] + weight * (phases[index + 1] - phases[index])
             return magnitude, phase
 
         return (
@@ -916,6 +961,26 @@ class QMI:
         """Evaluate the complex amplitude from a cached knot interval/fraction."""
         if int(context.spin) != 0:
             raise ValueError("QMI is defined for a scalar S-wave")
+
+        if (
+            self.interpolation == "none"
+            and isinstance(prepared_index, tuple)
+            and len(prepared_index) >= 5
+        ):
+            index, fraction, order, starts, ends = prepared_index[:5]
+
+            def step(values):
+                return _step_qmi_prepared(
+                    jnp.asarray(values, dtype=jnp.asarray(fraction).dtype),
+                    index,
+                    order,
+                    starts,
+                    ends,
+                )
+
+            if self.parameterization == "cartesian":
+                return step(self.real_parts) + 1j * step(self.imaginary_parts)
+            return step(self.magnitudes) * jnp.exp(1j * step(self.phases))
 
         if (
             self.interpolation == "hermite"

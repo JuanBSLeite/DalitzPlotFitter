@@ -55,7 +55,7 @@ Each is passed as `Resonance(..., lineshape=...)`; all implement `lineshape(mass
 | `BaBarFlatte` | class | Flatte form as parameterized in the BaBar `B± -> K± pi∓ pi±` analysis (arXiv:0803.4451). |
 | `LASS` | class | Effective-range + `K0*(1430)` coherent S-wave form for `K pi`. |
 | `KMatrix` | class | Five-pole, five-channel Anisovich-Sarantsev pi-pi S-wave K-matrix; exposes `scattering_amplitude()`/`s_matrix()` for unitarity checks. |
-| `QMI` | class | Quasi-model-independent S-wave specified at fixed mass knots; `interpolation=` selects `linear`/`cubic`/`hermite`/`natural`, polar or Cartesian knot parameters. |
+| `QMI` | class | Quasi-model-independent S-wave specified at fixed mass knots; `interpolation=` selects constant bins (`none`) or `linear`/`cubic`/`hermite`/`natural`, polar or Cartesian knot parameters. |
 | `Rescattering2` | class | Port of Laura++ `LauRescattering2Res`: two-region Chebyshev pi-pi/KK rescattering S-wave, zero below the `2*m_K` threshold. |
 
 Docs: `docs/lineshapes.md` (formulas + references). Notebooks: `notebooks/data_analyses/22_rescattering2_toy.ipynb`
