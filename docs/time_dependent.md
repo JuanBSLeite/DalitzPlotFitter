@@ -614,6 +614,68 @@ phase-space proposal and an exponential lifetime proposal, then resamples using
 the session's own time-dependent signal density. The generated Dalitz shape and
 time distribution are therefore correlated through mixing.
 
+The public return type is `TimeDependentToy`. The four arrays have the same
+length and the tag convention is the one used by the likelihood:
+
+| field | meaning |
+|---|---|
+| `data` | Dalitz coordinates, returned as a `PhaseSpaceSample`; momenta are omitted by default. |
+| `times` | generated true decay times in the session's `time_range`. |
+| `true_tags` | latent production flavour: `+1` for D0 and `-1` for D0bar. |
+| `tags` | observed tags after the wrong-tag process, also `+1` or `-1`. |
+
+For a production fraction $f=P(D^0)$ and a scalar wrong-tag probability $w$,
+the latent and observed tags are drawn according to
+
+$$
+P(q_{\rm true}=+1)=f,\qquad
+P(q_{\rm obs}=q_{\rm true})=1-w,
+$$
+
+so that
+
+$$
+\pi_+ = P(q_{\rm obs}=+1)=f(1-w)+(1-f)w,
+$$
+
+$$
+\pi_- = P(q_{\rm obs}=-1)=fw+(1-f)(1-w).
+$$
+
+For each observed tag, the signal kernel is the same conditional density used
+by `TimeDependentDalitzNLL.densities`:
+
+$$
+p_{\rm obs}(z,t\mid q=+1)=(1-w)p_+(z,t)+wp_-(z,t),
+$$
+
+$$
+p_{\rm obs}(z,t\mid q=-1)=(1-w)p_-(z,t)+wp_+(z,t),
+$$
+
+where $p_+$ and $p_-$ are the separately normalised rates from the mixing
+equations above. The intended joint signal target is therefore
+
+$$
+p(z,t,q)=\pi_q\,p_{\rm obs}(z,t\mid q).
+$$
+
+The implementation draws proposal times from the truncated exponential
+
+$$
+g_t(t)=\frac{\tau^{-1}e^{-t/\tau}}
+ {e^{-t_{\min}/\tau}-e^{-t_{\max}/\tau}},
+ \qquad t_{\min}\le t\le t_{\max},
+$$
+
+and draws Dalitz points from the model's phase-space generator. Candidate
+weights are formed from the session density, the observed-tag probability and
+the inverse proposal-time density. The candidates are then sampled with
+replacement. This is importance resampling: increasing `proposal_size` reduces
+the finite-proposal approximation, but does not turn the method into an exact
+rejection sampler. Use a fixed `seed` for reproducible candidates and increase
+`proposal_size` when validating small mixing or narrow Dalitz structures.
+
 ```python
 from dalitzplotfitter import generate_time_dependent_toy
 
@@ -628,8 +690,22 @@ toy = generate_time_dependent_toy(
 )
 ```
 
-This first sampler targets true time with perfect resolution and unit temporal
-acceptance. It rejects sessions configured with `time_nodes`, `time_acceptance`
-or `sigma_t`; those require sampling the detector response after the true-time
-draw. Background generation remains separate and can use the existing
-`ToyBackground` and `TimeDependentBackgroundSpec` APIs.
+`production_fraction` must be in $[0,1]$. If `wrong_tag=None`, the generator
+uses `session.wrong_tag`; otherwise the supplied scalar overrides it. Set
+`include_momenta=True` only when downstream code needs four-momenta. The default
+compact sample contains only `s12`, `s13` and `s23`, which is enough for the
+likelihood and the standard Dalitz plots.
+
+This sampler currently requires perfect time resolution and unit temporal
+acceptance. Sessions configured with `time_nodes`, `time_acceptance` or
+`sigma_t` raise `NotImplementedError`; sampling those detector effects requires
+an additional true-time to observed-time response step. Background generation
+is separate and remains the responsibility of `ToyBackground`,
+`TimeDependentBackgroundSpec` or `TimeDependentBackgroundCategory`.
+
+The production-and-tag example
+[`time_dependent_toy_production_tags.ipynb`](../notebooks/benchmark/time_dependent_toy_production_tags.ipynb)
+also provides four diagnostics: the Dalitz population, time distributions by
+observed tag, the true/observed tag migration matrix, and the wrong-tag rate in
+time bins. These plots diagnose the generated sample; they are not substitutes
+for the likelihood projections, which evaluate the analytic model curves.

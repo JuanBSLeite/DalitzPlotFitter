@@ -248,6 +248,8 @@ part of the specification. None of these capture a session's `data`/`efficiency`
 | `generate_toy` | function | Generate signal/background pseudo-data; `method="inverse-transform"` (default) or `"accept-reject"`. |
 | `generate_signal_toy` | function | Generate an unweighted signal-only toy. |
 | `generate_cp_toy` | function | Generate a CP toy for both charges at once, with the accepted-integral charge split and optional single-ROOT-file output. |
+| `generate_time_dependent_toy` | function | Generate a tagged neutral-meson Dalitz/time toy with latent true tags, observed wrong-tagged tags, and importance resampling; see [time-dependent toy generation](time_dependent.md#joint-time-dependent-toy-generation). |
+| `TimeDependentToy` | class | Immutable container for the generated `data`, `times`, `tags` and `true_tags` arrays. |
 | `prepare_inverse_toy_generator` | function | Precompute the inverse-CDF tables once for repeated toys at fixed model parameters. |
 | `PreparedInverseToyGenerator` | class | The reusable object `prepare_inverse_toy_generator` returns; `.generate(n, seed=...)`. |
 | `weighted_resample` | function | Draw unweighted events from a weighted phase-space sample (the resampling building block behind `method="resample"`). |
