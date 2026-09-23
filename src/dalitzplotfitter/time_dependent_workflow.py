@@ -1,0 +1,481 @@
+"""User-facing high-level workflow for time-dependent tagged Dalitz fits.
+
+Composes ``TimeDependentDalitzNLL``/``NeutralMesonMixing`` the same way
+``FitSession``/``CPFitSession`` compose their lower-level likelihoods (see
+``docs/user_friendly_api.md``, "Design principle"): this module adds no new
+physics, only less boilerplate around building the shared A/Abar
+``PreparedAmplitudeCache`` and collecting fit parameters. See
+``docs/time_dependent.md``.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass, fields, is_dataclass, replace
+from functools import cached_property
+
+import jax.numpy as jnp
+import numpy as np
+
+from dalitzplotfitter.amplitude import AmplitudeComponent, PreparedAmplitudeCache
+from dalitzplotfitter.constraints import ConstrainedNLL
+from dalitzplotfitter.decay import DecayModel
+from dalitzplotfitter.fit import Minimizer, Parameter
+from dalitzplotfitter.io import model_with_fitted_values
+from dalitzplotfitter.kinematics import PhaseSpaceSample
+from dalitzplotfitter.likelihood.time_dependent import (
+    NeutralMesonMixing,
+    TimeDependentDalitzNLL,
+)
+
+
+def _collect_parameters(value: object) -> tuple[Parameter, ...]:
+    if isinstance(value, Parameter):
+        return (value,)
+    if value is None:
+        return ()
+    parameters = getattr(value, "parameters", None)
+    if parameters is not None and not callable(parameters):
+        try:
+            return tuple(item for item in parameters if isinstance(item, Parameter))
+        except TypeError:
+            pass
+    if is_dataclass(value) and not isinstance(value, type):
+        found: list[Parameter] = []
+        for field in fields(value):
+            found.extend(_collect_parameters(getattr(value, field.name)))
+        return tuple(found)
+    if isinstance(value, Mapping):
+        return tuple(
+            parameter
+            for item in value.values()
+            for parameter in _collect_parameters(item)
+        )
+    if isinstance(value, (tuple, list)):
+        return tuple(
+            parameter for item in value for parameter in _collect_parameters(item)
+        )
+    return ()
+
+
+def _acceptance(efficiency, veto, data: dict[str, object]) -> jnp.ndarray:
+    """Evaluate the parameter-independent event acceptance once."""
+
+    size = int(jnp.asarray(next(iter(data.values()))).shape[0])
+    values = jnp.ones((size,), dtype=jnp.float64)
+    for label, function in (("efficiency", efficiency), ("veto", veto)):
+        if function is not None:
+            array = jnp.asarray(function(data))
+            if array.ndim == 0:
+                array = jnp.full((size,), array)
+            if array.shape != (size,):
+                raise ValueError(f"{label} must have shape ({size},)")
+            if bool(jnp.any(~jnp.isfinite(array) | (array < 0))):
+                raise ValueError(f"{label} must be finite and non-negative")
+            values = values * array
+    return values
+
+
+@dataclass(frozen=True)
+class _ReflectedAmplitude:
+    """No-direct-CPV default: Abar(s12,s13) = A(s13,s12), same s23.
+
+    Passes only raw reflected invariants to the wrapped component's dynamics
+    function -- any *prepared* kinematic arrays from the unreflected point
+    would silently evaluate the wrong amplitude (see docs/time_dependent.md,
+    "Preparing A and Abar").
+    """
+
+    function: object
+
+    def __call__(self, data, parameters=None):
+        reflected = {"s12": data["s13"], "s13": data["s12"], "s23": data["s23"]}
+        return self.function(reflected, parameters)
+
+
+@dataclass(frozen=True)
+class TimeDependentFitSession:
+    """Signal-only, non-extended time-dependent tagged Dalitz fit session.
+
+    A composition layer over ``TimeDependentDalitzNLL``: it builds the single
+    shared A+Abar ``PreparedAmplitudeCache`` (same final-state coordinates,
+    same integration sample, per ``docs/time_dependent.md``) and collects fit
+    parameters from ``model`` (and ``abar_model``, if given) plus ``mixing``.
+    It does not replace the low-level classes; use them directly for
+    workflows this session does not cover.
+
+    ``abar_model`` is optional. When ``None`` (the default, no-direct-CPV
+    convention used by the Belle-style reproduction in
+    ``notebooks/benchmark/belle_2014_d0_kspipi_time_dependent.ipynb``), the
+    D0bar amplitude is derived by reflecting ``model``'s own components:
+    ``Abar(s12,s13) = A(s13,s12)``. Pass an independently built
+    ``abar_model`` for direct CP violation; reference phases/scales must be
+    fixed by the caller to remove unidentifiable directions, exactly as
+    documented for the low-level classes. Only ``abar_model``'s dynamics and
+    coefficients are used -- its own ``channel``/``normalization_sample`` are
+    ignored, since the cache is built once on ``model``'s ``data``/
+    ``normalization_sample`` for both flavours (``__post_init__`` checks that
+    the two channels at least share daughter masses).
+
+    Scope matches ``TimeDependentDalitzNLL`` exactly: signal-only,
+    non-extended, no backgrounds, no fitted production/tag-count asymmetry.
+    ``plot_time_projection`` overlays each tag's decay-time histogram against
+    the exact Dalitz-integrated curve (unit acceptance/perfect resolution
+    only); a Dalitz-by-tag projection plot is not yet provided. See
+    ``docs/time_dependent.md``.
+    """
+
+    model: DecayModel
+    data: PhaseSpaceSample
+    times: object
+    tags: object
+    mixing: NeutralMesonMixing
+    abar_model: DecayModel | None = None
+    efficiency: object | None = None
+    veto: object | None = None
+    wrong_tag: object = 0.0
+    time_range: tuple = (0.0, np.inf)
+    time_nodes: object = None
+    time_weights: object = None
+    time_acceptance: object = None
+    sigma_t: object = None
+    constraints: tuple[object, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.abar_model is not None:
+            own = tuple(float(m) for m in self.model.channel.daughter_masses)
+            other = tuple(float(m) for m in self.abar_model.channel.daughter_masses)
+            if own != other:
+                raise ValueError(
+                    "abar_model must share model's daughter masses: the cache "
+                    "is built once on model's data/normalization_sample for "
+                    "both flavours, so an unrelated channel would silently "
+                    "evaluate abar_model's dynamics at the wrong kinematics"
+                )
+
+    def with_efficiency(self, efficiency) -> TimeDependentFitSession:
+        """Return a copy with a data/normalization-sample efficiency set."""
+        return replace(self, efficiency=efficiency)
+
+    def with_veto(self, veto) -> TimeDependentFitSession:
+        """Return a copy with a data/normalization-sample veto set."""
+        return replace(self, veto=veto)
+
+    def with_constraint(self, constraint) -> TimeDependentFitSession:
+        """Return a copy with an added constraint applied to the objective."""
+        return replace(self, constraints=self.constraints + (constraint,))
+
+    @cached_property
+    def acceptance_data(self) -> jnp.ndarray:
+        return _acceptance(self.efficiency, self.veto, self.data.as_dict())
+
+    @cached_property
+    def acceptance_normalization(self) -> jnp.ndarray:
+        sample = self.model.normalization_sample
+        return _acceptance(self.efficiency, self.veto, sample.as_dict())
+
+    @cached_property
+    def _abar_components(self) -> tuple[AmplitudeComponent, ...]:
+        if self.abar_model is not None:
+            return tuple(
+                AmplitudeComponent("bar_" + c.name, c.function, c.coefficient, False)
+                for c in self.abar_model.amplitude_model.components
+            )
+        return tuple(
+            AmplitudeComponent(
+                "bar_" + c.name, _ReflectedAmplitude(c.function), c.coefficient, False
+            )
+            for c in self.model.amplitude_model.components
+        )
+
+    @cached_property
+    def n_particle_components(self) -> int:
+        return len(self.model.amplitude_model.components)
+
+    @cached_property
+    def cache(self) -> PreparedAmplitudeCache:
+        components = self.model.amplitude_model.components + self._abar_components
+        sample = self.model.normalization_sample
+        return PreparedAmplitudeCache.prepare(
+            components,
+            data=self.data.as_dict(),
+            normalization_data=sample.as_dict(),
+            normalization_weights=sample.weights,
+            efficiency_normalization=(
+                None
+                if self.efficiency is None and self.veto is None
+                else self.acceptance_normalization
+            ),
+            normalize_components=False,
+        )
+
+    @cached_property
+    def base_objective(self) -> TimeDependentDalitzNLL:
+        return TimeDependentDalitzNLL(
+            self.cache,
+            self.n_particle_components,
+            self.times,
+            self.tags,
+            self.mixing,
+            efficiency=(
+                1.0
+                if self.efficiency is None and self.veto is None
+                else self.acceptance_data
+            ),
+            wrong_tag=self.wrong_tag,
+            time_range=self.time_range,
+            time_nodes=self.time_nodes,
+            time_weights=self.time_weights,
+            time_acceptance=self.time_acceptance,
+            sigma_t=self.sigma_t,
+        )
+
+    @cached_property
+    def objective(self):
+        return (
+            ConstrainedNLL(self.base_objective, *self.constraints)
+            if self.constraints
+            else self.base_objective
+        )
+
+    @property
+    def parameters(self) -> tuple[Parameter, ...]:
+        """All fit parameters, deduplicated across model(s) and mixing.
+
+        Raises if two sources give conflicting definitions for the same name.
+        """
+        candidates = list(self.model.parameters)
+        if self.abar_model is not None:
+            candidates += list(self.abar_model.parameters)
+        candidates += list(self.mixing.parameters)
+        candidates += _collect_parameters(self.wrong_tag)
+        candidates += _collect_parameters(self.constraints)
+        unique: dict[str, Parameter] = {}
+        for p in candidates:
+            if p.name in unique and unique[p.name] != p:
+                raise ValueError(
+                    f"conflicting definitions for fit parameter {p.name!r}"
+                )
+            unique[p.name] = p
+        return tuple(unique.values())
+
+    def minimizer(
+        self, *, tolerance: float = 1e-4, verbose: int = 0,
+        hessian: str = "numerical", hessian_batch_size: int = 1,
+    ) -> Minimizer:
+        """Build a Minimizer over the (optionally constrained) objective."""
+        return Minimizer(
+            self.objective, self.parameters,
+            tolerance=tolerance, verbose=verbose, hessian=hessian,
+            hessian_batch_size=hessian_batch_size,
+        )
+
+    def fit(
+        self, start_values=None, *, simplex: bool = False, ncall=None,
+        strategy: int = 2, hesse: bool = True, tolerance: float = 1e-4,
+        verbose: int = 0, hessian: str = "numerical", hessian_batch_size: int = 1,
+        method: str = "minuit", nesterov_max_iter: int = 1000,
+        nesterov_gtol: float = 1e-4, update_model: bool = False,
+    ):
+        """Fit the tagged time-dependent likelihood.
+
+        ``self.model``/``self.abar_model`` are frozen and never mutated by
+        this call. Pass ``update_model=True`` to also get a model (or a
+        ``(model, abar_model)`` pair, if ``abar_model`` was given) with every
+        free parameter's ``.value`` set to its fitted result (via
+        ``model_with_fitted_values``) -- the return value then becomes
+        ``(result, model)`` / ``(result, model, abar_model)`` instead of
+        plain ``result``.
+        """
+        result = self.minimizer(
+            tolerance=tolerance, verbose=verbose, hessian=hessian,
+            hessian_batch_size=hessian_batch_size,
+        ).fit(
+            start_values=start_values, simplex=simplex, ncall=ncall,
+            strategy=strategy, hesse=hesse, method=method,
+            nesterov_max_iter=nesterov_max_iter, nesterov_gtol=nesterov_gtol,
+        )
+        if not update_model:
+            return result
+        values = self.result_values(result)
+        fitted_model = model_with_fitted_values(self.model, values)
+        if self.abar_model is None:
+            return result, fitted_model
+        return result, fitted_model, model_with_fitted_values(self.abar_model, values)
+
+    def fit_multistart(
+        self, n_starts: int = 20, *, seed=None, include_default: bool = False,
+        simplex: bool = False, strategy: int = 1, tolerance: float = 1e-4,
+        verbose: int = 0, hessian: str = "numerical", hessian_batch_size: int = 1,
+    ):
+        """Fit from multiple random starts, keep the best fit."""
+        return self.minimizer(
+            tolerance=tolerance, verbose=verbose, hessian=hessian,
+            hessian_batch_size=hessian_batch_size,
+        ).fit_multistart(
+            n_starts=n_starts, seed=seed, include_default=include_default,
+            simplex=simplex, strategy=strategy,
+        )
+
+    def result_values(self, result) -> dict[str, float]:
+        """Map each parameter name to its fitted value (fixed value if not floated)."""
+        return {
+            p.name: (float(p.value) if p.fixed else float(result.values[p.name]))
+            for p in self.parameters
+        }
+
+    def print_result(self, result, *, precision: int = 6) -> dict[str, float]:
+        """Print validity, NLL and a value/error table, and return `result_values`."""
+        if precision < 0:
+            raise ValueError("precision must be non-negative")
+        values = self.result_values(result)
+        print(f"valid={bool(result.valid)}  NLL={float(result.fval):.{precision}f}")
+        print(f"{'parameter':24s} {'value':>16s} {'error':>16s}")
+        for p in self.parameters:
+            error = 0.0 if p.fixed else float(result.errors[p.name])
+            print(
+                f"{p.name:24s} {values[p.name]:16.{precision}g} "
+                f"{error:16.{precision}g}"
+            )
+        return values
+
+    def print_fit_fractions(
+        self, result, *, acceptance_weighted: bool = False,
+        include_interference: bool = False, precision: int = 3,
+    ) -> dict[str, float]:
+        """Print and return the A-model's (D0's) fit fractions at `result`'s values.
+
+        Delegates to ``self.model.print_fit_fractions`` -- the same c^dagger M
+        c convention used everywhere else in the package, evaluated on
+        ``model``'s own normalization_sample/method, independent of the
+        time-dependent likelihood wrapping it.
+        """
+        return self.model.print_fit_fractions(
+            self.result_values(result),
+            efficiency=self.efficiency if acceptance_weighted else None,
+            include_interference=include_interference,
+            precision=precision,
+        )
+
+    def fit_fraction_errors(
+        self, result, *, acceptance_weighted: bool = False,
+    ) -> dict[str, float]:
+        """Delta-method standard errors for `print_fit_fractions()`'s central values.
+
+        See ``DecayModel.fit_fraction_errors`` and
+        ``dalitzplotfitter.observables.delta_method_errors`` for the
+        propagation itself.
+        """
+        return self.model.fit_fraction_errors(
+            self.result_values(result),
+            result.covariance,
+            efficiency=self.efficiency if acceptance_weighted else None,
+        )
+
+    def report(
+        self, result, *, include_fit_fractions: bool = True,
+        acceptance_weighted_fractions: bool = False,
+        include_correlation: bool = True,
+    ) -> dict[str, object]:
+        """Assemble a summary dict of fit results: validity, NLL, EDM, values, errors.
+
+        Optionally includes the A-model's fit fractions
+        (`include_fit_fractions`) and the free-parameter correlation matrix
+        (`include_correlation`, only if a covariance is available).
+        """
+        values = self.print_result(result)
+        errors = {
+            p.name: (0.0 if p.fixed else float(result.errors[p.name]))
+            for p in self.parameters
+        }
+        report: dict[str, object] = {
+            "valid": bool(result.valid),
+            "nll": float(result.fval),
+            "edm": float(result.fmin.edm),
+            "nfcn": int(result.nfcn),
+            "values": values,
+            "errors": errors,
+        }
+        if include_fit_fractions:
+            report["fit_fractions"] = self.print_fit_fractions(
+                result, acceptance_weighted=acceptance_weighted_fractions,
+            )
+        if include_correlation and getattr(result, "covariance", None) is not None:
+            correlation = result.covariance.correlation()
+            free = [p.name for p in self.parameters if not p.fixed]
+            report["correlation"] = {
+                first: {second: float(correlation[first, second]) for second in free}
+                for first in free
+            }
+        return report
+
+    def plot_time_projection(
+        self, result, *, bins: int = 60, range: tuple[float, float] | None = None,
+        curve_points: int = 400, time_unit: str = "", log_scale: bool = False,
+        ax=None,
+    ):
+        """Overlay each tag's observed decay-time histogram against the
+        model's exact Dalitz-integrated prediction.
+
+        The curve comes from
+        ``TimeDependentDalitzNLL.dalitz_integrated_time_pdf`` -- an analytic
+        Dalitz marginal, not a rendering MC sample -- so it shares that
+        method's scope: requires unit temporal acceptance and perfect
+        resolution (no ``time_acceptance``/``sigma_t``) and a scalar
+        ``wrong_tag``. A tag with zero observed events is skipped. Does not
+        project onto a Dalitz variable; see ``docs/time_dependent.md`` for
+        what this session does not yet provide.
+        """
+        import matplotlib.pyplot as plt
+
+        from dalitzplotfitter.plotting import _bin_width_label, binned_data
+
+        values = self.result_values(result)
+        times = np.asarray(self.times)
+        tags = np.asarray(self.tags)
+        if range is not None:
+            hist_range = range
+        elif np.isfinite(self.time_range[0]) and np.isfinite(self.time_range[1]):
+            hist_range = self.time_range
+        else:
+            hist_range = (float(times.min()), float(times.max()))
+        edges = np.linspace(hist_range[0], hist_range[1], bins + 1)
+        bin_width = edges[1] - edges[0]
+        curve_times = np.linspace(hist_range[0], hist_range[1], curve_points)
+        plus_curve, minus_curve = self.base_objective.dalitz_integrated_time_pdf(
+            jnp.asarray(curve_times), values,
+        )
+        plus_curve = np.asarray(plus_curve)
+        minus_curve = np.asarray(minus_curve)
+
+        if ax is None:
+            _, ax = plt.subplots(figsize=(7, 5))
+        # Each tag gets its own colour, shared between its data points and its
+        # fit curve, so the two tags (both otherwise plotted as circular
+        # markers) stay visually distinguishable -- unlike plot_binned_data's
+        # single-dataset convention of always-black data points.
+        for color, tag, label, curve in (
+            ("C0", 1, "D0", plus_curve), ("C1", -1, "D0bar", minus_curve),
+        ):
+            mask = tags == tag
+            n = int(mask.sum())
+            if n == 0:
+                continue
+            centers, counts, errors, _ = binned_data(times[mask], bins=edges)
+            ax.errorbar(
+                centers, counts, yerr=errors, fmt="o", color=color, ecolor=color,
+                markersize=4.5, linestyle="none", label=f"data ({label})", zorder=10,
+            )
+            ax.plot(
+                curve_times, curve * n * bin_width, color=color,
+                label=f"fit ({label})",
+            )
+        ax.set_ylabel(_bin_width_label(edges, time_unit))
+        if log_scale:
+            ax.set_yscale("log")
+        ax.set_xlabel("t" + (f" [{time_unit}]" if time_unit else ""))
+        ax.legend()
+        return ax
+
+
+__all__ = ["TimeDependentFitSession"]

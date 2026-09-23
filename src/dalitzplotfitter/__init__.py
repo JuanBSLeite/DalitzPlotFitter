@@ -110,7 +110,13 @@ from .kinematics import (
     square_dalitz_jacobian,
     square_dalitz_to_invariants,
 )
-from .likelihood import CPJointNLL, MultiBackgroundNLL, YieldAsymmetry
+from .likelihood import (
+    CPJointNLL,
+    MultiBackgroundNLL,
+    NeutralMesonMixing,
+    TimeDependentDalitzNLL,
+    YieldAsymmetry,
+)
 from .observables import delta_method_covariance, delta_method_errors, delta_method_jacobian
 from .pdf import SCFSignalPDF, SignalPDF
 from .plotting import (
@@ -131,6 +137,7 @@ from .square_histograms import (
     SquareDalitzHistogramBackground,
     SquareDalitzHistogramEfficiency,
 )
+from .time_dependent_workflow import TimeDependentFitSession
 from .toy_api import (
     CPToyBackground,
     PreparedInverseToyGenerator,
@@ -151,6 +158,9 @@ from .veto import (
 from .workflow import BackgroundSpec, FitSession
 
 __all__ = [
+    "NeutralMesonMixing",
+    "TimeDependentDalitzNLL",
+    "TimeDependentFitSession",
     "AmplitudeComponent", "BackgroundCategory", "BackgroundSpec", "BinnedChi2Result", "BreitWigner1D", "CPBackgroundCategory", "kdtree_local_residuals",
     "CPBackgroundSpec", "CPFitSession", "CPJointNLL", "CPToyBackground", "BaBarFlatte", "CPRealImag",
     "CoherentAmplitudeModel", "CompositeVeto", "ConstrainedNLL", "ConstantAmplitude",

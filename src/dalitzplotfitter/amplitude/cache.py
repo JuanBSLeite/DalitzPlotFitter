@@ -1533,6 +1533,35 @@ class PreparedAmplitudeCache:
         )
         return intensity, normalization
 
+    def coherent_groups(self, fit_values, groups):
+        """Return coherent group amplitudes and their full overlap matrix.
+
+        ``groups`` is a fixed (n_components, n_groups) mixing matrix. Each
+        column selects a coherent sum, retaining cross-group interference.
+        Dynamics and normalization are evaluated once for all groups.
+        """
+        groups = jnp.asarray(groups)
+        if groups.ndim != 2 or groups.shape[0] != len(self.components):
+            raise ValueError("groups must have shape (n_components, n_groups)")
+        coefficients = self.coefficient_vector(fit_values)[:, None] * groups
+        if not self.floating_dynamic_owners:
+            amplitudes = self.data_components @ coefficients
+            matrix = self.normalization_matrix_fixed
+        else:
+            if self.normalization_chunks is not None:
+                matrix, scales = self._chunked_dynamic_normalization(fit_values)
+                dynamic_data = self._dynamic_data_with_scales(fit_values, scales)
+            else:
+                dynamic_data, dynamic_norm = self._evaluate_dynamic_components(
+                    fit_values
+                )
+                matrix = self._matrix_from_dynamic(dynamic_norm)
+            amplitudes = jnp.stack([
+                self._amplitude_from_dynamic(coefficients[:, i], dynamic_data)
+                for i in range(groups.shape[1])
+            ], axis=1)
+        return amplitudes, jnp.conj(coefficients.T) @ matrix @ coefficients
+
     def amplitude(self, fit_values: Mapping[str, object]) -> Array:
         """Coherent amplitude ``A(x) = sum_i c_i F_i(x)`` on the data sample."""
         coefficients = self.coefficient_vector(fit_values)

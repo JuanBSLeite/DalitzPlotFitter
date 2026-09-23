@@ -130,3 +130,11 @@ Phys. Rev. D 103 (2021) 092004, arXiv:2009.00025.
 
 LHCb Collaboration, *Amplitude analysis of the B<sup>±</sup> → π<sup>±</sup>π<sup>±</sup>π<sup>∓</sup> decay*,
 Phys. Rev. D 101 (2020) 012006, arXiv:1909.05212.
+
+### Time-dependent neutral-meson amplitudes
+
+Tagged D0 -> KS pi+ pi- fits are available through `NeutralMesonMixing` and
+`TimeDependentDalitzNLL`, with coherent mixing, JAX gradients, time acceptance
+and optional Gaussian time resolution, or through the higher-level
+`TimeDependentFitSession` composition layer. See [the API and validation scope](docs/time_dependent.md)
+and the runnable `benchmarks/benchmark_time_dependent.py` example.

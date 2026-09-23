@@ -544,3 +544,13 @@ The first compiled call should not be confused with steady-state fit throughput.
 ## Precision
 
 The project uses 64-bit real and 128-bit complex arithmetic when `enable_x64()` is enabled. This is deliberate for amplitude-analysis stability. Consumer GPUs can have much lower FP64 throughput than data-centre GPUs, but changing the default to float32/complex64 should only be done after explicit likelihood, parameter, fit-fraction, and toy-closure studies.
+
+## Time-dependent Dalitz fits
+
+`TimeDependentDalitzNLL` uses `PreparedAmplitudeCache.coherent_groups` to evaluate
+A and Abar and their cross-normalization in one dynamic pass. Mixing-only and
+coefficient-only fits reuse the fixed component basis and Gram matrix. Time
+normalization is analytic by default; acceptance/Gaussian response uses explicit
+true-time quadrature and a JAX scan with event-sized accumulators. See
+[time-dependent fits](time_dependent.md) and
+`benchmarks/benchmark_time_dependent.py` for a runnable D0 example and benchmark.
