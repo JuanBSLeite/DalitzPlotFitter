@@ -162,7 +162,14 @@ def test_explicit_abar_model_is_used_directly_not_reflected():
 
 
 def test_fit_update_model_returns_fitted_values():
+    from dalitzplotfitter import GaussianConstraint
+
     session = _session(mixing=_fixed_mixing())
+    # A lone NR coefficient is a global scale, unidentifiable in this PDF.
+    # Constrain it so this API test has a well-defined fit and covariance.
+    session = session.with_constraint(
+        GaussianConstraint(session.model.parameters[0], mean=1.1, sigma=.2)
+    )
     result, fitted_model = session.fit(
         {"NR.x": 0.9}, simplex=False, ncall=50, update_model=True,
     )
@@ -263,3 +270,133 @@ def test_plot_projection_rejects_event_wise_wrong_tag():
     result = session.fit({"NR.x": 0.9}, simplex=False, ncall=50)
     with pytest.raises(ValueError, match="scalar wrong_tag"):
         session.plot_projection(result, "s12", projection_size=2_000)
+
+
+def _resonant_model(name="rho", *, normalize=True, override=None):
+    from dalitzplotfitter import Resonance
+
+    return DecayModel(
+        _channel(),
+        [
+            Resonance(
+                name,
+                pair=(1, 2),
+                coefficient=RealImag(
+                    Parameter.coefficient(f"{name}.x", 0.8, owner=name), 0.2
+                ),
+                mass=Parameter.dynamics(
+                    f"{name}.mass", 0.76, owner=name, backend_name="mass"
+                ),
+                width=0.18,
+                spin=1,
+                normalize_component=override,
+            ),
+            NonResonant(RealImag(1.0, 0.0), name=f"{name}_nr"),
+        ],
+        normalize_components=normalize,
+        normalization_method="square-dalitz",
+        normalization_resolution=20,
+    )
+
+
+@pytest.mark.parametrize("explicit_abar", [False, True])
+def test_floating_dynamics_match_independent_model_caches_and_gradients(explicit_abar):
+    import jax
+
+    model = _resonant_model()
+    abar = _resonant_model("other", normalize=False) if explicit_abar else None
+    session = _session(model=model, abar_model=abar, mixing=_fixed_mixing())
+    particle = jnp.arange(4) < 2
+    groups = jnp.stack((particle, ~particle), axis=1)
+    values = {"rho.mass": 0.82, "rho.x": 1.2, "other.mass": 0.73, "other.x": 0.4}
+    amplitudes, _ = session.cache.coherent_groups(values, groups)
+    expected_a = model.prepare_cache(session.data).amplitude(values)
+    if explicit_abar:
+        expected_b = abar.prepare_cache(session.data).amplitude(values)
+    else:
+        reflected = PhaseSpaceSample(
+            s12=session.data.s13,
+            s13=session.data.s12,
+            s23=session.data.s23,
+            weights=session.data.weights,
+        )
+        expected_b = model.prepare_cache(reflected).amplitude(values)
+    np.testing.assert_allclose(amplitudes[:, 0], expected_a, rtol=1e-11)
+    np.testing.assert_allclose(amplitudes[:, 1], expected_b, rtol=1e-11)
+    for name in ["rho.mass", "other.mass"] if explicit_abar else ["rho.mass"]:
+
+        def f(mass, name=name):
+            return session.objective({**values, name: mass})
+
+        point, step = values[name], 1e-5
+        derivative = float(jax.grad(f)(point))
+        finite = float((f(point + step) - f(point - step)) / (2 * step))
+        assert abs(derivative) > 1e-3
+        np.testing.assert_allclose(derivative, finite, rtol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "normalize,override", [(True, None), (False, True), (True, False)]
+)
+def test_reflection_preserves_component_normalization(normalize, override):
+    session = _session(model=_resonant_model(normalize=normalize, override=override))
+    independent = session.model.prepare_cache(session.data)
+    matrix = session.cache.normalization_matrix({})
+    np.testing.assert_allclose(matrix[:2, :2], independent.normalization_matrix({}))
+    # rho(s13,s12) = -rho(s12,s13), whereas NR is unchanged. Compare
+    # complete matrix blocks, including interference. A coarse quadrature
+    # need not integrate the odd rho-NR interference to exactly zero.
+    signs = np.array([-1., 1.])
+    np.testing.assert_allclose(
+        matrix[2:, 2:], signs[:, None] * matrix[:2, :2] * signs[None, :],
+        atol=1e-12,
+    )
+
+
+def test_projection_matches_fitted_amplitudes_efficiency_and_veto():
+    from types import SimpleNamespace
+
+    import matplotlib.pyplot as plt
+
+    model = _resonant_model(normalize=True)
+
+    def efficiency(d):
+        return 0.2 + 0.2 * d["s12"]
+
+    def veto(d):
+        return d["s12"] > 1.0
+
+    session = _session(
+        model=model,
+        mixing=NeutralMesonMixing(0.0, 0.0, 0.4103),
+        efficiency=efficiency,
+        veto=veto,
+    )
+    values = {"rho.mass": 0.82, "rho.x": 2.0}
+    result = SimpleNamespace(values=values)
+    axes = session.plot_projection(
+        result,
+        "s12",
+        bins=10,
+        range=(0.4, 3.0),
+        projection_size=2000,
+        projection_seed=7,
+    )
+    sample = model.generate_phase_space(2000, seed=7, include_momenta=False)
+    amplitude = model.prepare_cache(sample).amplitude(values)
+    raw = np.asarray(
+        sample.weights
+        * abs(amplitude) ** 2
+        * efficiency(sample.as_dict())
+        * veto(sample.as_dict())
+    )
+    expected, _ = np.histogram(
+        sample.s12,
+        bins=np.linspace(0.4, 3.0, 11),
+        weights=raw / raw.sum() * np.sum(np.asarray(session.tags) == 1),
+    )
+    np.testing.assert_allclose(
+        axes[0].patches[0].get_data().values, expected, atol=1e-12
+    )
+    assert expected[0] == 0
+    plt.close(axes[0].figure)

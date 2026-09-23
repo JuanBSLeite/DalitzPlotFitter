@@ -20,7 +20,9 @@ from dalitzplotfitter import (
 
 def test_binned_data_uses_poisson_sqrt_n_for_unweighted_data():
     values = np.asarray([0.1, 0.2, 0.3, 1.1, 1.2])
-    centers, counts, errors, edges = binned_data(values, bins=np.asarray([0.0, 1.0, 2.0]))
+    centers, counts, errors, edges = binned_data(
+        values, bins=np.asarray([0.0, 1.0, 2.0])
+    )
 
     assert np.allclose(centers, [0.5, 1.5])
     assert np.array_equal(counts, [3, 2])
@@ -151,7 +153,7 @@ def test_plot_contour_draws_one_curve_per_level_plus_best_fit_marker():
     labels = [line.get_label() for line in ax.get_lines()]
     assert "68.0%" in labels
     assert "95.0%" in labels
-    assert "melhor ajuste" in labels
+    assert "best fit" in labels
     assert ax.get_xlabel() == "px"
     assert ax.get_ylabel() == "py"
     plt.close(fig)
@@ -161,7 +163,7 @@ def test_plot_contour_marks_the_fitted_point():
     result = _quadratic_bowl_result()
     ax = plot_contour(result, "px", "py", cl=(0.68,), size=8)
     marker = next(
-        line for line in ax.get_lines() if line.get_label() == "melhor ajuste"
+        line for line in ax.get_lines() if line.get_label() == "best fit"
     )
     np.testing.assert_allclose(marker.get_xdata(), [result.values["px"]], atol=1e-9)
     np.testing.assert_allclose(marker.get_ydata(), [result.values["py"]], atol=1e-9)

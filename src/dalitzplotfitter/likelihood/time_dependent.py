@@ -187,8 +187,8 @@ class TimeDependentDalitzNLL:
         ):
             raise ValueError("wrong_tag must be a probability scalar or event array")
 
-    def _time_basis(self, parameters):
-        times = jnp.asarray(self.times)
+    def _time_basis(self, parameters, times=None):
+        times = jnp.asarray(self.times if times is None else times)
         basis = self.mixing.basis(times, parameters)
         if self.time_nodes is None:
             return basis, self.mixing.integrals(self.time_range, parameters), True
@@ -290,9 +290,10 @@ class TimeDependentDalitzNLL:
         not for use inside a fit objective.
 
         Requires unit temporal acceptance and perfect time resolution
-        (``self.time_nodes is None``): with acceptance or a resolution model
-        the marginal depends on each event's Dalitz position through the
-        response, so a single Dalitz-integrated curve is not exact. Also
+        (``self.time_nodes is None``): this helper currently implements only
+        the analytic time basis.
+        Factorized acceptance and a scalar resolution could also be
+        marginalized, but are not implemented in this helper. Also
         requires a scalar ``wrong_tag``: a single curve needs one
         representative mistag probability, not the per-event values a fit may
         use.
@@ -300,9 +301,7 @@ class TimeDependentDalitzNLL:
         if self.time_nodes is not None:
             raise ValueError(
                 "dalitz_integrated_time_pdf requires unit temporal acceptance "
-                "and perfect resolution (time_nodes=None); with acceptance or "
-                "sigma_t the decay-time marginal is not Dalitz-integrable into "
-                "a single curve"
+                "and perfect resolution (time_nodes=None)"
             )
         wrong = jnp.asarray(_resolve(self.wrong_tag, parameters))
         if wrong.ndim != 0:
@@ -323,35 +322,59 @@ class TimeDependentDalitzNLL:
         observed_minus = (1 - wrong) * p_minus + wrong * p_plus
         return observed_plus, observed_minus
 
-    def tag_marginal_density(self, amplitude_a, amplitude_b, parameters):
-        """Time-integrated (over ``self.time_range``), tag-conditional Dalitz
-        density at arbitrary points, given their A/Abar amplitude values.
-
-        ``amplitude_a``/``amplitude_b`` are the coherent A/Abar amplitudes
-        evaluated at whatever points the caller wants a density for -- e.g. a
-        rendering phase-space sample for plotting, NOT necessarily
-        ``self.cache``'s own event data. Returns ``(observed_plus,
-        observed_minus)``: each a density over the full Dalitz phase space
-        (integrates to 1 there, under the package's ``mean(weights*f)``
-        convention) for the tag=+1 and tag=-1 populations, already including
-        wrong_tag mixing -- the same physical normalization ``densities()``
-        divides each event by, just marginalized over time instead of over
-        Dalitz. Intended for plotting/diagnostics (see
-        ``TimeDependentFitSession.plot_projection``), not for use inside a
-        fit objective.
-
-        Requires a scalar ``wrong_tag``: a single density needs one
-        representative mistag probability, not the per-event values a fit
-        may use.
-        """
+    def _diagnostic_time_basis(self, times, parameters):
+        """Reuse the fitted response for diagnostics with scalar conditioning."""
         wrong = jnp.asarray(_resolve(self.wrong_tag, parameters))
         if wrong.ndim != 0:
-            raise ValueError(
-                "tag_marginal_density requires a scalar wrong_tag; a single "
-                "density needs one representative mistag probability"
-            )
+            raise ValueError("Dalitz diagnostics require a scalar wrong_tag")
+        if self.sigma_t is not None and jnp.ndim(self.sigma_t) != 0:
+            raise ValueError("Dalitz diagnostics require a scalar sigma_t")
+        basis, integral, valid = self._time_basis(
+            parameters,
+            jnp.atleast_1d(jnp.asarray(times)),
+        )
+        # A scalar resolution broadcasts the normalization over the requested
+        # times; all rows have the same selected-time integral.
+        if integral.ndim == 2:
+            integral = integral[0]
+        return basis, integral, wrong, valid
+
+    def _diagnostic_efficiency(self, efficiency):
+        if efficiency is None:
+            if self.cache.efficiency_normalization is not None:
+                raise ValueError(
+                    "supply efficiency at the requested Dalitz points to match "
+                    "the acceptance-weighted cache"
+                )
+            return 1.0
+        return jnp.asarray(efficiency)
+
+    def tag_marginal_density(
+        self,
+        amplitude_a,
+        amplitude_b,
+        parameters,
+        *,
+        efficiency=None,
+    ):
+        """Selected, time-integrated Dalitz densities for the two observed tags.
+
+        Amplitudes at arbitrary points must use the fitted coefficients,
+        dynamics and component scales of this cache. Supply ``efficiency``
+        (including vetoes) at those points when the cache includes acceptance.
+        Each returned density integrates to one under ``mean(weights*f)``.
+
+        Uses the same selected-time integrals as ``densities()``, including
+        true-time acceptance and Gaussian resolution. Requires scalar
+        ``wrong_tag`` and scalar ``sigma_t`` (if present): an event-wise
+        response needs an explicitly specified conditioning distribution.
+        """
+        _, integral, wrong, valid = self._diagnostic_time_basis(
+            jnp.asarray(self.times)[:1],
+            parameters,
+        )
+        eff = self._diagnostic_efficiency(efficiency)
         _, ia, ib, cross, ratio = self._overlap_and_ratio(parameters)
-        integral = self.mixing.integrals(self.time_range, parameters)
         r2 = jnp.abs(ratio) ** 2
         a, b = jnp.asarray(amplitude_a), jnp.asarray(amplitude_b)
         rate_plus = _rate(
@@ -363,39 +386,41 @@ class TimeDependentDalitzNLL:
         norm_plus = _rate(integral, ia, r2 * ib, ratio * cross)
         norm_minus = _rate(integral, ib, ia / r2, jnp.conj(cross) / ratio)
         p_plus, p_minus = rate_plus / norm_plus, rate_minus / norm_minus
-        observed_plus = (1 - wrong) * p_plus + wrong * p_minus
-        observed_minus = (1 - wrong) * p_minus + wrong * p_plus
-        return observed_plus, observed_minus
+        observed_plus = eff * ((1 - wrong) * p_plus + wrong * p_minus)
+        observed_minus = eff * ((1 - wrong) * p_minus + wrong * p_plus)
+        return (
+            jnp.where(valid, observed_plus, jnp.nan),
+            jnp.where(valid, observed_minus, jnp.nan),
+        )
 
-    def dalitz_density_at_time(self, amplitude_a, amplitude_b, t, parameters):
-        """Dalitz-plane density snapshot at one fixed decay time ``t``.
+    def dalitz_density_at_time(
+        self,
+        amplitude_a,
+        amplitude_b,
+        t,
+        parameters,
+        *,
+        efficiency=None,
+    ):
+        """Dalitz densities conditional on observed tag and observed time ``t``.
 
-        Unlike ``tag_marginal_density`` (time-integrated) or
-        ``dalitz_integrated_time_pdf`` (Dalitz-integrated), this leaves both
-        axes unmarginalized: it is the joint (Dalitz, tag) density AT ``t``,
-        normalized so it integrates to 1 over the full Dalitz phase space AT
-        THAT ``t`` (under the package's ``mean(weights*f)`` convention) --
-        i.e. it divides out the trivial overall exp(-t/tau) yield decay so
-        consecutive snapshots are directly comparable, isolating the
-        mixing-driven Dalitz-SHAPE evolution with time (see
-        ``tag_marginal_density``'s docstring for the general
-        amplitude_a/amplitude_b convention). At ``t=0`` this reduces exactly
-        to ``|A|^2/ia`` (tag=+1) and ``|Abar|^2/ib`` (tag=-1) before wrong_tag
-        mixing, since ``mixing.basis(0, .)=(1,0,0,0)`` regardless of x,y.
-        Intended for plotting/diagnostics (e.g. an animation of the D0/D0bar
-        Dalitz shape vs t), not for use inside a fit objective.
+        First mix the selected-sample joint flavour PDFs with ``wrong_tag``,
+        then divide by their observed-tag time marginal. Thus the posterior
+        flavour composition at ``t`` can differ from the sample-wide mistag.
+        For zero mistag and perfect resolution, t=0 reduces to |A|²/I_A or
+        |Abar|²/I_Abar, multiplied by the Dalitz acceptance.
 
-        Requires a scalar ``wrong_tag``, for the same reason as
-        ``tag_marginal_density``.
+        Amplitude scales, efficiency, scalar wrong_tag/sigma_t requirements
+        are as in ``tag_marginal_density``. Acceptance and Gaussian smearing
+        use the same true-time quadrature as the likelihood. An out-of-range
+        time or a zero-probability time has no conditional density (NaN).
         """
-        wrong = jnp.asarray(_resolve(self.wrong_tag, parameters))
-        if wrong.ndim != 0:
-            raise ValueError(
-                "dalitz_density_at_time requires a scalar wrong_tag; a single "
-                "density needs one representative mistag probability"
-            )
+        if jnp.ndim(t) != 0:
+            raise ValueError("dalitz_density_at_time requires a scalar time")
+        basis, integral, wrong, valid = self._diagnostic_time_basis(t, parameters)
+        basis = basis[0]
+        eff = self._diagnostic_efficiency(efficiency)
         _, ia, ib, cross, ratio = self._overlap_and_ratio(parameters)
-        basis = self.mixing.basis(jnp.asarray(t), parameters)
         r2 = jnp.abs(ratio) ** 2
         a, b = jnp.asarray(amplitude_a), jnp.asarray(amplitude_b)
         rate_plus = _rate(
@@ -404,12 +429,20 @@ class TimeDependentDalitzNLL:
         rate_minus = _rate(
             basis, jnp.abs(b) ** 2, jnp.abs(a) ** 2 / r2, jnp.conj(b) * a / ratio
         )
-        norm_plus = _rate(basis, ia, r2 * ib, ratio * cross)
-        norm_minus = _rate(basis, ib, ia / r2, jnp.conj(cross) / ratio)
+        norm_plus = _rate(integral, ia, r2 * ib, ratio * cross)
+        norm_minus = _rate(integral, ib, ia / r2, jnp.conj(cross) / ratio)
+        time_plus = _rate(basis, ia, r2 * ib, ratio * cross) / norm_plus
+        time_minus = _rate(basis, ib, ia / r2, jnp.conj(cross) / ratio) / norm_minus
         p_plus, p_minus = rate_plus / norm_plus, rate_minus / norm_minus
-        observed_plus = (1 - wrong) * p_plus + wrong * p_minus
-        observed_minus = (1 - wrong) * p_minus + wrong * p_plus
-        return observed_plus, observed_minus
+        observed_plus = eff * ((1 - wrong) * p_plus + wrong * p_minus)
+        observed_minus = eff * ((1 - wrong) * p_minus + wrong * p_plus)
+        observed_plus /= (1 - wrong) * time_plus + wrong * time_minus
+        observed_minus /= (1 - wrong) * time_minus + wrong * time_plus
+        valid = valid & (t >= self.time_range[0]) & (t <= self.time_range[1])
+        return (
+            jnp.where(valid, observed_plus, jnp.nan),
+            jnp.where(valid, observed_minus, jnp.nan),
+        )
 
     def _physical_parameters(self, parameters):
         """Cheap, data-independent gate for __call__.

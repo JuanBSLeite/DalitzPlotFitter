@@ -160,7 +160,16 @@ example above -- it never re-derives or overrides the physics in
 direct CP violation; only its dynamics/coefficients are used, since the cache
 is built once on `model`'s `data`/`normalization_sample` for both flavours.
 `session.parameters` collects and deduplicates `Parameter`s from `model` (and
-`abar_model`, if given) plus `mixing`. `fit(update_model=True)` also returns
+`abar_model`, if given), `mixing`, mistag, time acceptance and constraints.
+Floating dynamics are registered for both cache groups: the reflected group
+shares the same public parameter values, with owners remapped internally to
+its `bar_` component names. Each model's `normalize_components` default and
+each component's override are preserved. In particular, reflection inherits
+the original component's normalization convention; it does not disable it.
+Component scales use physical phase-space integrals, while efficiency/veto
+weights enter the full overlap matrix.
+
+`fit(update_model=True)` also returns
 the model(s) with fitted values baked in, via `model_with_fitted_values`.
 Scope matches `TimeDependentDalitzNLL` exactly: signal-only, non-extended, no
 backgrounds.
@@ -194,12 +203,30 @@ A weighted phase-space MC sample renders the histogram; the density comes
 from `TimeDependentDalitzNLL.tag_marginal_density`, the *time*-integrated
 (over `time_range`) counterpart of `dalitz_integrated_time_pdf` --
 `p(s12,s13 | tag) = integral_t rate(t, s12, s13, tag) dt / norm`, built from
-the same `mixing.integrals` the fit itself normalizes against. It shares
-`dalitz_integrated_time_pdf`'s scalar-`wrong_tag` requirement but not its
-unit-acceptance/perfect-resolution one, since time is integrated out
-analytically via `mixing.integrals` regardless of any observed-time
-quadrature. `show_pulls=True` adds a pull panel below each tag's histogram,
-same convention as `FitSession`/`CPFitSession`.
+the same selected-time basis integrals used by the likelihood. The ideal case
+uses analytic integrals; temporal acceptance and Gaussian resolution use the
+configured true-time quadrature, including the probability of entering the
+observed time window. Quadrature convergence remains the caller's responsibility.
+These Dalitz diagnostics require scalar `wrong_tag` and scalar `sigma_t`
+(if supplied). Event-wise values are rejected: a single prediction would need
+an explicitly specified distribution of these conditioning variables.
+
+Projections evaluate the fitted coefficients, dynamics and component scales,
+and multiply by efficiency and veto at the rendering points. Low-level callers
+of `tag_marginal_density(a, b, values, efficiency=...)` must likewise supply
+amplitudes in the cache's convention and acceptance at the requested points;
+omitting acceptance for an acceptance-weighted cache raises an error.
+`show_pulls=True` adds a pull panel below each tag's histogram.
+
+`dalitz_density_at_time(a, b, t, values, efficiency=...)` gives the density
+conditional on the **observed** time and tag, with the same acceptance and
+resolution support. It first mixes the selected-sample joint flavour PDFs,
+then divides by the observed-tag time marginal. Because `wrong_tag` is defined
+over the selected sample, its posterior value at a particular time generally
+changes; independently normalizing each flavour snapshot before mixing would
+be incorrect. With zero mistag and perfect resolution, the t=0 snapshot reduces
+to the accepted, normalized |A|² or |Abar|². Times outside the selected range or
+with zero probability have no conditional density (NaN).
 
 `plot_contour(result, "mix.x", "mix.y")` (not session-specific -- see the
 "Plotting" section of `docs/catalog.md`) draws the published-style (x, y)

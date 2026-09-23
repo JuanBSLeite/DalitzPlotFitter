@@ -240,18 +240,18 @@ def test_tag_marginal_density_rejects_event_wise_wrong_tag():
         nll.tag_marginal_density(np.ones(3), np.ones(3), {})
 
 
-def test_dalitz_density_at_time_zero_reduces_to_plain_overlap_ratio():
+def test_dalitz_density_at_time_zero_reduces_to_plain_overlap_ratio_without_mistag():
     nll = make_nll(
         np.array([0.1, 0.5, 1.0]), np.array([1, -1, 1]),
         mixing=NeutralMesonMixing(0.02, -0.015, 0.6, 0.87, 0.3),
-        wrong_tag=0.18,
+        wrong_tag=0.0,
     )
     zn, wn = quadrature(35, 0, 1)
     a = 1 + 0.7 * zn + 1j * zn * zn
     b = (0.8 + 0.3j) * (1 + 0.7 * (1 - zn) + 1j * (1 - zn) ** 2)
     _, ia, ib, _, _ = nll._overlap_and_ratio({})
-    expected_plus = 0.82 * (np.abs(a) ** 2 / ia) + 0.18 * (np.abs(b) ** 2 / ib)
-    expected_minus = 0.82 * (np.abs(b) ** 2 / ib) + 0.18 * (np.abs(a) ** 2 / ia)
+    expected_plus = np.abs(a) ** 2 / ia
+    expected_minus = np.abs(b) ** 2 / ib
 
     p_plus, p_minus = nll.dalitz_density_at_time(a, b, 0.0, {})
     np.testing.assert_allclose(p_plus, expected_plus, rtol=1e-12)
@@ -275,31 +275,24 @@ def test_dalitz_density_at_time_integrates_to_one_over_dalitz(t):
     np.testing.assert_allclose([total_plus, total_minus], [1.0, 1.0], atol=1e-8)
 
 
-def test_dalitz_density_at_time_matches_manual_overlap_combination():
+@pytest.mark.parametrize("tag", [1, -1])
+@pytest.mark.parametrize("sigma", [None, .08])
+def test_snapshot_matches_joint_pdf_conditioned_on_time(tag, sigma):
+    z, wz = quadrature(35, 0, 1)
+    nodes, weights = quadrature(160, 0, 5)
+    t = .7
     nll = make_nll(
-        np.array([0.1, 0.5, 1.0]), np.array([1, -1, 1]),
-        mixing=NeutralMesonMixing(0.03, 0.02, 0.5, 0.75, 0.15),
-        wrong_tag=0.1,
+        np.full(z.size, t), np.full(z.size, tag), z,
+        mixing=NeutralMesonMixing(.2, .3, .5, 1.4, .2), wrong_tag=.3,
+        time_range=(0, 3), time_nodes=nodes, time_weights=weights,
+        time_acceptance=lambda t, p: t / (t + .3), sigma_t=sigma,
     )
-    zn, wn = quadrature(35, 0, 1)
-    a = 1 + 0.7 * zn + 1j * zn * zn
-    b = (0.8 + 0.3j) * (1 + 0.7 * (1 - zn) + 1j * (1 - zn) ** 2)
-    t = 0.7
-    _, ia, ib, cross, ratio = nll._overlap_and_ratio({})
-    from dalitzplotfitter.likelihood.time_dependent import _rate
-
-    basis = nll.mixing.basis(t, {})
-    r2 = abs(ratio) ** 2
-    rate_plus = _rate(basis, abs(a) ** 2, r2 * abs(b) ** 2, ratio * np.conj(a) * b)
-    rate_minus = _rate(basis, abs(b) ** 2, abs(a) ** 2 / r2, np.conj(b) * a / ratio)
-    norm_plus = _rate(basis, ia, r2 * ib, ratio * cross)
-    norm_minus = _rate(basis, ib, ia / r2, np.conj(cross) / ratio)
-    expected_plus = 0.9 * (rate_plus / norm_plus) + 0.1 * (rate_minus / norm_minus)
-    expected_minus = 0.9 * (rate_minus / norm_minus) + 0.1 * (rate_plus / norm_plus)
-
-    p_plus, p_minus = nll.dalitz_density_at_time(a, b, t, {})
-    np.testing.assert_allclose(p_plus, expected_plus, rtol=1e-12)
-    np.testing.assert_allclose(p_minus, expected_minus, rtol=1e-12)
+    a = 1 + .7 * z + 1j * z**2
+    b = (.8 + .3j) * (1 + .7 * (1 - z) + 1j * (1 - z)**2)
+    joint = np.asarray(nll.densities({}))
+    expected = joint / (wz @ joint)
+    snapshot = nll.dalitz_density_at_time(a, b, t, {})[0 if tag == 1 else 1]
+    np.testing.assert_allclose(snapshot, expected, rtol=1e-12)
 
 
 def test_dalitz_density_at_time_rejects_event_wise_wrong_tag():
@@ -521,3 +514,73 @@ def test_efficiency_normalization_and_no_fixed_dynamics_reevaluation():
     nll = replace(nll, cache=cache)
     pdf = np.asarray(jax.jit(nll.densities)({})).reshape(tt.shape)
     np.testing.assert_allclose(wt @ pdf @ wz, 1, atol=1e-12)
+
+
+@pytest.mark.parametrize("tag", [1, -1])
+@pytest.mark.parametrize("sigma", [None, 0.08])
+def test_dalitz_marginal_matches_integrated_joint_with_acceptance_and_resolution(
+    tag, sigma
+):
+    z, wz = quadrature(35, 0, 1)
+    t, wt = quadrature(130, 0, 3)
+    nodes, weights = quadrature(190, 0, 5)
+    zz, tt = np.meshgrid(z, t)
+    nll = make_nll(
+        tt.ravel(),
+        np.full(tt.size, tag),
+        zz.ravel(),
+        mixing=NeutralMesonMixing(0.2, 0.3, 0.4103, 1.4, 0.2),
+        wrong_tag=0.3,
+        time_range=(0, 3),
+        time_nodes=nodes,
+        time_weights=weights,
+        time_acceptance=lambda t, p: t / (t + 0.3),
+        sigma_t=sigma,
+    )
+    # Unsmeared quadrature should terminate at the observed window: avoid
+    # approximating its discontinuous indicator with nodes spanning beyond it.
+    if sigma is None:
+        nll = replace(nll, time_nodes=t, time_weights=wt)
+    cache = PreparedAmplitudeCache.prepare(
+        nll.cache.components,
+        data={"z": jnp.asarray(zz.ravel())},
+        normalization_data={"z": jnp.asarray(z)},
+        normalization_weights=jnp.asarray(wz * z.size),
+        efficiency_normalization=jnp.asarray(0.2 + z),
+        normalize_components=False,
+    )
+    nll = replace(nll, cache=cache, efficiency=0.2 + zz.ravel())
+    a = 1 + 0.7 * z + 1j * z**2
+    b = (0.8 + 0.3j) * (1 + 0.7 * (1 - z) + 1j * (1 - z) ** 2)
+    expected = wt @ np.asarray(nll.densities({})).reshape(tt.shape)
+    marginal = nll.tag_marginal_density(a, b, {}, efficiency=0.2 + z)[
+        0 if tag == 1 else 1
+    ]
+    np.testing.assert_allclose(marginal, expected, rtol=1e-10)
+    np.testing.assert_allclose(wz @ marginal, 1.0, atol=1e-10)
+    with pytest.raises(ValueError, match="supply efficiency"):
+        nll.tag_marginal_density(a, b, {})
+    # Check the snapshot with nonuniform Dalitz acceptance as well.
+    at_t = replace(nll, times=np.full(tt.size, 0.7))
+    joint = np.asarray(at_t.densities({})).reshape(tt.shape)[0]
+    snapshot = nll.dalitz_density_at_time(a, b, 0.7, {}, efficiency=0.2 + z)[
+        0 if tag == 1 else 1
+    ]
+    np.testing.assert_allclose(snapshot, joint / (wz @ joint), rtol=1e-11)
+
+
+@pytest.mark.parametrize("method", ["tag_marginal_density", "dalitz_density_at_time"])
+def test_dalitz_diagnostics_reject_event_wise_resolution(method):
+    nodes, weights = quadrature(100, 0, 4)
+    nll = make_nll(
+        np.array([0.1, 0.5]),
+        np.ones(2),
+        sigma_t=np.array([0.05, 0.1]),
+        time_nodes=nodes,
+        time_weights=weights,
+    )
+    args = (np.ones(2), np.ones(2))
+    if method == "dalitz_density_at_time":
+        args += (0.5,)
+    with pytest.raises(ValueError, match="scalar sigma_t"):
+        getattr(nll, method)(*args, {})

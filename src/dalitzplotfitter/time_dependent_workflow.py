@@ -20,7 +20,7 @@ import numpy as np
 from dalitzplotfitter.amplitude import AmplitudeComponent, PreparedAmplitudeCache
 from dalitzplotfitter.constraints import ConstrainedNLL
 from dalitzplotfitter.decay import DecayModel
-from dalitzplotfitter.fit import Minimizer, Parameter
+from dalitzplotfitter.fit import Minimizer, Parameter, ParameterKind
 from dalitzplotfitter.io import model_with_fitted_values
 from dalitzplotfitter.kinematics import PhaseSpaceSample
 from dalitzplotfitter.likelihood.time_dependent import (
@@ -176,16 +176,32 @@ class TimeDependentFitSession:
 
     @cached_property
     def _abar_components(self) -> tuple[AmplitudeComponent, ...]:
-        if self.abar_model is not None:
-            return tuple(
-                AmplitudeComponent("bar_" + c.name, c.function, c.coefficient, False)
-                for c in self.abar_model.amplitude_model.components
-            )
+        model = self.model if self.abar_model is None else self.abar_model
         return tuple(
             AmplitudeComponent(
-                "bar_" + c.name, _ReflectedAmplitude(c.function), c.coefficient, False
+                "bar_" + c.name,
+                (
+                    _ReflectedAmplitude(c.function)
+                    if self.abar_model is None
+                    else c.function
+                ),
+                c.coefficient,
+                model.normalize_components
+                if c.normalize_component is None
+                else c.normalize_component,
             )
-            for c in self.model.amplitude_model.components
+            for c in model.amplitude_model.components
+        )
+
+    @cached_property
+    def _cache_parameters(self) -> tuple[Parameter, ...]:
+        # A shared fit value may drive two separately named cache components.
+        # Preserve its public name/backend name and remap only the owner.
+        model = self.model if self.abar_model is None else self.abar_model
+        return tuple(self.model.parameters) + tuple(
+            replace(p, owner="bar_" + p.owner)
+            for p in model.parameters
+            if p.kind is ParameterKind.DYNAMICS and p.owner is not None
         )
 
     @cached_property
@@ -194,11 +210,14 @@ class TimeDependentFitSession:
 
     @cached_property
     def cache(self) -> PreparedAmplitudeCache:
+        return self._prepare_cache(self.data)
+
+    def _prepare_cache(self, data: PhaseSpaceSample) -> PreparedAmplitudeCache:
         components = self.model.amplitude_model.components + self._abar_components
         sample = self.model.normalization_sample
         return PreparedAmplitudeCache.prepare(
             components,
-            data=self.data.as_dict(),
+            data=data.as_dict(),
             normalization_data=sample.as_dict(),
             normalization_weights=sample.weights,
             efficiency_normalization=(
@@ -206,7 +225,8 @@ class TimeDependentFitSession:
                 if self.efficiency is None and self.veto is None
                 else self.acceptance_normalization
             ),
-            normalize_components=False,
+            normalize_components=self.model.normalize_components,
+            parameters=self._cache_parameters,
         )
 
     @cached_property
@@ -249,6 +269,7 @@ class TimeDependentFitSession:
             candidates += list(self.abar_model.parameters)
         candidates += list(self.mixing.parameters)
         candidates += _collect_parameters(self.wrong_tag)
+        candidates += _collect_parameters(self.time_acceptance)
         candidates += _collect_parameters(self.constraints)
         unique: dict[str, Parameter] = {}
         for p in candidates:
@@ -492,7 +513,9 @@ class TimeDependentFitSession:
         ``TimeDependentDalitzNLL.tag_marginal_density``, time-integrated over
         ``self.time_range`` using the same mixing-integral machinery the fit
         itself normalizes against -- not a time-binned approximation. Shares
-        that method's scope: requires a scalar ``wrong_tag``.
+        that method's scope: requires scalar ``wrong_tag`` and, if supplied,
+        scalar ``sigma_t``. The fitted amplitude parameters, component scales,
+        efficiency and veto are applied at the rendering points.
 
         ``show_pulls=True`` adds a ``(observed-expected)/sqrt(expected)``
         panel below each tag's histogram, sharing that column's x axis. It
@@ -519,14 +542,14 @@ class TimeDependentFitSession:
             projection_size, seed=projection_seed, include_momenta=False,
         )
         sample_data = sample.as_dict()
-        a_amp = jnp.zeros(sample.size, dtype=jnp.complex128)
-        for component in self.model.amplitude_model.components:
-            a_amp = a_amp + component.value(sample_data)
-        b_amp = jnp.zeros(sample.size, dtype=jnp.complex128)
-        for component in self._abar_components:
-            b_amp = b_amp + component.value(sample_data)
+        cache = self._prepare_cache(sample)
+        particle = jnp.arange(len(cache.components)) < self.n_particle_components
+        amplitudes, _ = cache.coherent_groups(
+            values, jnp.stack((particle, ~particle), axis=1),
+        )
         density_plus, density_minus = self.base_objective.tag_marginal_density(
-            a_amp, b_amp, values,
+            amplitudes[:, 0], amplitudes[:, 1], values,
+            efficiency=_acceptance(self.efficiency, self.veto, sample_data),
         )
         sample_values = np.asarray(getattr(sample, variable))
 
