@@ -29,7 +29,7 @@ from .background import (
 )
 from .coefficients import CPRealImag, RealImag
 from .config import enable_x64
-from .constraints import ConstrainedNLL, GaussianConstraint
+from .constraints import ConstrainedNLL, GaussianConstraint, QMISmoothnessConstraint
 from .cp_workflow import CPBackgroundSpec, CPFitSession
 from .decay import DalitzAmplitude, DecayChannel, DecayModel, NonResonant, Resonance
 from .discriminants import (
@@ -110,12 +110,21 @@ from .kinematics import (
     square_dalitz_jacobian,
     square_dalitz_to_invariants,
 )
-from .likelihood import CPJointNLL, MultiBackgroundNLL, YieldAsymmetry
+from .likelihood import (
+    CPJointNLL,
+    MultiBackgroundNLL,
+    NeutralMesonMixing,
+    TimeDependentBackgroundCategory,
+    TimeDependentDalitzNLL,
+    TimeDependentMixtureNLL,
+    YieldAsymmetry,
+)
 from .observables import delta_method_covariance, delta_method_errors, delta_method_jacobian
 from .pdf import SCFSignalPDF, SignalPDF
 from .plotting import (
     binned_data,
     plot_binned_data,
+    plot_contour,
     plot_dalitz,
     plot_pulls,
     plot_square_dalitz,
@@ -131,6 +140,11 @@ from .square_histograms import (
     SquareDalitzHistogramBackground,
     SquareDalitzHistogramEfficiency,
 )
+from .time_dependent_workflow import (
+    TimeDependentBackgroundSpec,
+    TimeDependentFitSession,
+)
+from .time_dependent_toy import TimeDependentToy, generate_time_dependent_toy
 from .toy_api import (
     CPToyBackground,
     PreparedInverseToyGenerator,
@@ -151,6 +165,14 @@ from .veto import (
 from .workflow import BackgroundSpec, FitSession
 
 __all__ = [
+    "NeutralMesonMixing",
+    "TimeDependentDalitzNLL",
+    "TimeDependentBackgroundCategory",
+    "TimeDependentMixtureNLL",
+    "TimeDependentBackgroundSpec",
+    "TimeDependentFitSession",
+    "TimeDependentToy",
+    "generate_time_dependent_toy",
     "AmplitudeComponent", "BackgroundCategory", "BackgroundSpec", "BinnedChi2Result", "BreitWigner1D", "CPBackgroundCategory", "kdtree_local_residuals",
     "CPBackgroundSpec", "CPFitSession", "CPJointNLL", "CPToyBackground", "BaBarFlatte", "CPRealImag",
     "CoherentAmplitudeModel", "CompositeVeto", "ConstrainedNLL", "ConstantAmplitude",
@@ -160,7 +182,7 @@ __all__ = [
     "GooFitLegacyAngular", "GounarisSakurai", "Histogram1D", "KMatrix", "LASS", "LineshapeIntensity1D", "DalitzGaussLegendreGrid",
     "MassWindowVeto", "Minimizer", "MultiBackgroundNLL", "MultiStartResult", "NesterovResult", "NonResonant",
     "Parameter", "ParameterKind", "PhaseSpaceMC", "PhaseSpaceSample", "Pole", "PointToPointResult",
-    "PreparedAmplitudeCache", "PreparedInverseToyGenerator", "PipiKKRescattering", "QMI", "QMI2D", "RealImag", "RelativisticBreitWigner", "RhoOmegaMixing", "Rescattering2", "SigmaPole", "SympyLineshape",
+    "PreparedAmplitudeCache", "PreparedInverseToyGenerator", "PipiKKRescattering", "QMI", "QMI2D", "QMISmoothnessConstraint", "RealImag", "RelativisticBreitWigner", "RhoOmegaMixing", "Rescattering2", "SigmaPole", "SympyLineshape",
     "Resonance", "ResonanceAmplitude", "ResonanceContext", "SCFSignalPDF", "SignalPDF",
     "SparseMigration", "SquareDalitzGrid", "SquareDalitzHistogramBackground", "SquareDalitzHistogramEfficiency",
     "SquareDalitzSCFMap", "ToyBackground", "VetoMap", "VetoedDensity", "ZemachP", "ZemachPstar",
@@ -174,7 +196,7 @@ __all__ = [
     "generate_cp_toy", "generate_signal_toy", "generate_toy", "histogram_background_from_root",
     "histogram_efficiency_from_root", "import_cp_models", "import_model", "invariants_to_square_dalitz",
     "model_from_spec", "model_to_spec", "model_with_fitted_values", "physical_bin_mask",
-    "plot_binned_data", "plot_dalitz", "plot_pulls", "plot_square_dalitz", "point_to_point_dissimilarity", "prepare_inverse_toy_generator",
+    "plot_binned_data", "plot_contour", "plot_dalitz", "plot_pulls", "plot_square_dalitz", "point_to_point_dissimilarity", "prepare_inverse_toy_generator",
     "read_phase_space_sample", "read_root_histogram2d", "read_root_tree",
     "square_dalitz_background_from_root", "square_dalitz_efficiency_from_root", "square_dalitz_jacobian",
     "square_dalitz_to_invariants", "vetoed_signal_pdf", "weighted_resample",

@@ -228,6 +228,82 @@ the polar coordinates from the interpolated complex value. A QMI declaration
 must provide exactly one complete parameter set: either `magnitudes` and
 `phases`, or `real_parts` and `imaginary_parts`.
 
+### Optional QMI knot smoothing
+
+All four interpolation modes support the same **optional NLL penalty**:
+
+```python
+penalty = qmi.smoothness_constraint(strength=0.0)  # lambda; off by default
+session = session.with_constraint(penalty)        # FitSession or CPFitSession
+# Low-level alternative: ConstrainedNLL(base_nll, penalty)
+```
+
+`QMISmoothnessConstraint(qmi, strength=..., weights=...)` is also available
+from the top-level package. Creating the constraint alone does not activate
+it; attach it once to the likelihood. No interpolation formula, component
+normalization, or PDF normalization is changed. Existing QMI declarations
+and serialized amplitude models are unchanged. Constraints belong to the
+session/objective, so model-only export does not save this configuration.
+
+For complex node values `q_i`, let `s_i = m_i**2`, `h_i = s_(i+1) - s_i`,
+and `d_i = (q_(i+1) - q_i) / h_i`. The added term is
+
+```text
+lambda * sum_i w_i * 2 * |d_i - d_(i-1)|² / (h_i + h_(i-1)),
+```
+
+summed over interior nodes. The nonuniform-grid factors approximate the
+integral of squared curvature in **s**, using differences of adjacent
+complex slopes. This is a penalty on the **nodes**, not an integral of the
+interpolated curve's second derivative: that distinction makes it useful
+for linear interpolation too. It is identical across interpolation modes
+for identical complex nodes, even though those interpolants differ between
+nodes. Constant or affine-in-s complex nodes have zero penalty. Two knots
+also give zero because they define no interior curvature. Boundary slopes
+are not pinned.
+
+For polar nodes, the constraint first forms `a_i * exp(1j * phi_i)` and
+penalizes Re/Im. It does not penalize wrapped phase differences directly,
+and is regular at zero magnitude. This does not resolve the existing need
+to unwrap phases consistently for **polar interpolation** between nodes.
+The penalty and its gradients/Hessians are pure JAX and operate only on
+knot-sized arrays, independently of prepared event caches.
+
+`strength` must be a fixed finite nonnegative number, not a fit `Parameter`.
+`strength=0` is an exact no-op. There is no implicit factor of 1/2 or division
+by the number of events. With masses in GeV the raw penalty has units of
+amplitude squared / GeV^6; consequently a numerical lambda depends on the
+node amplitude scale and the NLL convention. Validate its value using
+independent toy ensembles, including bias, CPV recovery and interval coverage;
+smaller penalized-Hessian errors do not by themselves demonstrate improved
+frequentist coverage.
+
+`weights` defaults to one per **interior** node (length `len(knots)-2`).
+All weights must be finite and nonnegative. Set a weight to zero to disable
+that node's entire three-node stencil. To protect a narrow structure, disable
+all stencils overlapping that region, not just nodes centred inside it.
+
+For CP QMI with independent charge shapes, attach one penalty for each:
+
+```python
+session = session.with_constraint(qmi_plus.smoothness_constraint(strength=lam))
+session = session.with_constraint(qmi_minus.smoothness_constraint(strength=lam))
+```
+
+This does not constrain the two charges to agree. If the **same QMI object**
+is shared by both charges, attach its penalty only once. A separately declared
+chi_c0 is not directly penalized, although correlations can affect its fit.
+The remaining scalar QMI can itself contain rapidly varying physical
+structures such as f0(980); regularization can bias those too.
+
+The penalty acts on the **raw node values**. Use a fixed scale convention,
+for example `Resonance(..., normalize_component=False)` with a fixed external
+QMI coefficient and an isobar reference. If a free global coefficient can
+compensate arbitrary rescaling of all nodes, or the QMI is dynamically
+unit-normalized with all node magnitudes free, the fit can evade the penalty
+by shrinking the nodes without changing its PDF. The constraint deliberately
+does not change those normalization choices for the caller.
+
 ## QMI2D Dalitz amplitude
 
 `QMI2D` is the direct two-dimensional extension of the QMI idea. Every Dalitz cell carries one complex amplitude
@@ -468,3 +544,33 @@ See [the runnable SymPy tutorial](../notebooks/tutorials/tutorial_11_sympy_lines
 for plots, an Asimov parameter-recovery fit, gradient validation and JSON roundtrip.
 See also [the B → 3π Dalitz example](../notebooks/tutorials/tutorial_12_sympy_b3pi_dalitz.ipynb)
 for a complete symmetrized Dalitz model with a user-defined pole.
+
+### Constant-bin QMI (no interpolation)
+
+`QMI(interpolation="none")` uses `knots` as **mass bin edges**. Supply one
+complex value per interval, not per edge, in either Cartesian or polar form:
+
+```python
+qmi = QMI(knots=(0.28, 0.50, 0.80, 1.20),
+          real_parts=(1.0, 0.7, 0.3), imaginary_parts=(0.0, 0.2, -0.1),
+          interpolation="none")
+```
+
+Bins are `[left, right)`, with the final edge included in the last bin;
+outside the edge range the first/last bin value is held constant. Values
+jump at interior edges. AD differentiates the bin amplitudes; the mass
+derivative is zero within bins and does not represent a derivative at a jump.
+Prepared evaluation reuses bin assignments and grouped reductions for its VJP,
+including polar/Cartesian gradients and Hessians. `size` counts edges in this mode.
+The existing knot-curvature constraint is not defined for constant bins:
+use `strength=0` (nonzero strength raises an error).
+
+Use `Parameter.dynamics` for floating bin values. With a free global complex
+coefficient, fix one bin to `1+0j` to remove the redundant scale and phase.
+Bins completely removed by vetoes should also be fixed: their parameters have
+no likelihood sensitivity. Discontinuous bins require checking normalization
+quadrature convergence near their boundaries. No component normalization is
+implicitly enabled by selecting this mode.
+
+`notebooks/data_analyses/26_b2pipipi_cpvfit_qmi_step_global_cpv.ipynb` applies
+this parameterization to the 25 reference mass bins with global CPV coefficients.

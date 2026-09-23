@@ -29,6 +29,7 @@ def make_model(
     normalize=True,
     charge=1,
     dynamics_microbatch_size=20_000,
+    dynamics_microbatch_parallelism=1,
 ):
     mass = Parameter.dynamics("rho.mass", 0.775, owner="rho")
     width = Parameter.dynamics("rho.width", 0.149, owner="rho")
@@ -85,6 +86,7 @@ def make_model(
         normalization_pair=(0, 1),
         normalization_chunk_size=chunk_size,
         dynamics_microbatch_size=dynamics_microbatch_size,
+        dynamics_microbatch_parallelism=dynamics_microbatch_parallelism,
         normalize_components=normalize,
     )
 
@@ -97,6 +99,7 @@ def prepare_pair(
     efficiency=True,
     charge=1,
     dynamics_microbatch_size=20_000,
+    dynamics_microbatch_parallelism=1,
     chunk_size=17,
 ):
     full = make_model(
@@ -109,6 +112,7 @@ def prepare_pair(
         normalize=normalize,
         charge=charge,
         dynamics_microbatch_size=dynamics_microbatch_size,
+        dynamics_microbatch_parallelism=dynamics_microbatch_parallelism,
     )
     data = full.generate_phase_space(19, seed=381)
     sample = full.normalization_sample
@@ -249,6 +253,50 @@ def test_chunk_and_microbatch_limits_are_balanced_to_minimize_padding():
     assert cache.effective_dynamics_microbatch_size <= cache.dynamics_microbatch_size
 
 
+def test_parallel_microbatches_match_sequential_reduction():
+    _, sequential = prepare_pair(
+        all_dynamic=True,
+        dynamics_microbatch_size=5,
+        dynamics_microbatch_parallelism=1,
+        chunk_size=17,
+    )
+    _, parallel = prepare_pair(
+        all_dynamic=True,
+        dynamics_microbatch_size=5,
+        dynamics_microbatch_parallelism=2,
+        chunk_size=17,
+    )
+    assert sequential.effective_dynamics_microbatch_parallelism == 1
+    assert parallel.effective_dynamics_microbatch_parallelism == 2
+    x = jnp.asarray([0.79, 0.16, 0.62, 0.75])
+
+    def sequential_nll(values):
+        return nll(sequential, values)
+
+    def parallel_nll(values):
+        return nll(parallel, values)
+
+    sequential_value, sequential_gradient = jax.jit(
+        jax.value_and_grad(sequential_nll)
+    )(x)
+    parallel_value, parallel_gradient = jax.jit(
+        jax.value_and_grad(parallel_nll)
+    )(x)
+    np.testing.assert_allclose(parallel_value, sequential_value, rtol=2e-11, atol=1e-10)
+    np.testing.assert_allclose(
+        parallel_gradient,
+        sequential_gradient,
+        rtol=2e-11,
+        atol=1e-10,
+    )
+    np.testing.assert_allclose(
+        jax.jit(jax.jacfwd(jax.grad(parallel_nll)))(x),
+        jax.jit(jax.jacfwd(jax.grad(sequential_nll)))(x),
+        rtol=2e-10,
+        atol=1e-9,
+    )
+
+
 @pytest.mark.parametrize("interpolation", ["linear", "cubic", "hermite", "natural"])
 def test_chunked_qmi_preparation_and_second_derivatives(interpolation):
     # QMI's prepared order/starts/ends are valid only for their exact block.
@@ -312,4 +360,16 @@ def test_dynamic_microbatch_size_must_be_a_positive_integer(microbatch_size):
             normalization_data={},
             normalization_weights=jnp.ones(3),
             dynamics_microbatch_size=microbatch_size,
+        )
+
+
+@pytest.mark.parametrize("parallelism", [0, -1, True, 1.5])
+def test_dynamic_microbatch_parallelism_must_be_a_positive_integer(parallelism):
+    with pytest.raises(ValueError, match="dynamics_microbatch_parallelism"):
+        PreparedAmplitudeCache.prepare(
+            (object(),),
+            data={},
+            normalization_data={},
+            normalization_weights=jnp.ones(3),
+            dynamics_microbatch_parallelism=parallelism,
         )

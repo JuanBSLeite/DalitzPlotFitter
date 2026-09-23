@@ -55,7 +55,7 @@ Each is passed as `Resonance(..., lineshape=...)`; all implement `lineshape(mass
 | `BaBarFlatte` | class | Flatte form as parameterized in the BaBar `B± -> K± pi∓ pi±` analysis (arXiv:0803.4451). |
 | `LASS` | class | Effective-range + `K0*(1430)` coherent S-wave form for `K pi`. |
 | `KMatrix` | class | Five-pole, five-channel Anisovich-Sarantsev pi-pi S-wave K-matrix; exposes `scattering_amplitude()`/`s_matrix()` for unitarity checks. |
-| `QMI` | class | Quasi-model-independent S-wave specified at fixed mass knots; `interpolation=` selects `linear`/`cubic`/`hermite`/`natural`, polar or Cartesian knot parameters. |
+| `QMI` | class | Quasi-model-independent S-wave specified at fixed mass knots; `interpolation=` selects constant bins (`none`) or `linear`/`cubic`/`hermite`/`natural`, polar or Cartesian knot parameters. |
 | `Rescattering2` | class | Port of Laura++ `LauRescattering2Res`: two-region Chebyshev pi-pi/KK rescattering S-wave, zero below the `2*m_K` threshold. |
 
 Docs: `docs/lineshapes.md` (formulas + references). Notebooks: `notebooks/data_analyses/22_rescattering2_toy.ipynb`
@@ -144,16 +144,21 @@ These are what `FitSession`/`CPFitSession` compose automatically; use them direc
 | `SignalPDF` | class | Efficiency-corrected, normalized signal density built from a `PreparedAmplitudeCache`. |
 | `SCFSignalPDF` | class | Signal PDF including correctly-reconstructed *and* self-cross-feed (SCF) migrated events. |
 | `MultiBackgroundNLL` | class | Unbinned NLL: signal plus an arbitrary number of named background categories (non-CP). |
+| `NeutralMesonMixing` | class | Exact neutral-meson time kernel with x, y, lifetime and complex q/p; see [time-dependent fits](time_dependent.md). |
+| `TimeDependentMixtureNLL` | class | Multiple normalized Dalitz-time backgrounds with floating fractions or extended yields and component tag probabilities; see `docs/time_dependent.md`. |
+| `TimeDependentDalitzNLL` | class | Tagged time-dependent Dalitz signal NLL, coherent A/Abar overlap, factorized acceptance and optional Gaussian time resolution; see [time-dependent fits](time_dependent.md). |
 | `CPJointNLL` | class | Unbinned NLL for simultaneous B+/B- fits with one joint `(Dalitz, charge)` normalization — charge is part of the sample space, not fit independently per charge. |
 | `YieldAsymmetry` | class | Extended-fit `signal_yield` replacement splitting a total `N_s` into independent `N_plus`/`N_minus` via a yield asymmetry, overriding `CPJointNLL`'s default amplitude-driven charge split. |
 
-Docs: `docs/fitting.md`, `docs/cp_coefficients.md`, `docs/backgrounds_and_vetoes.md`, `docs/scf.md`, `docs/performance.md`.
+Docs: `docs/fitting.md`, `docs/cp_coefficients.md`, `docs/backgrounds_and_vetoes.md`, `docs/scf.md`, `docs/performance.md`, `docs/time_dependent.md`.
 
 ## Backgrounds
 
 | Name | Kind | What it does |
 |---|---|---|
 | `BackgroundCategory` | class | One normalized background category (density + normalization integral) for `MultiBackgroundNLL`. |
+| `TimeDependentBackgroundSpec` | class | Fixed Dalitz shape normalized per tag plus a caller-normalized, optionally parameterized observed-time PDF for `TimeDependentFitSession`. |
+| `TimeDependentBackgroundCategory` | class | General normalized joint Dalitz-time background callback or array; optional projection marginal callbacks. |
 | `BackgroundSpec` | class | Background *shape* for `FitSession`, normalized automatically on the fit's own measure — no manual integral needed. |
 | `CPBackgroundCategory` | class | One background category in the joint `(Dalitz, charge)` space, for `CPJointNLL`. |
 | `CPBackgroundSpec` | class | Charge-aware background shape for `CPFitSession` (`plus_shape`/`minus_shape`, or one shared shape). |
@@ -243,6 +248,8 @@ part of the specification. None of these capture a session's `data`/`efficiency`
 | `generate_toy` | function | Generate signal/background pseudo-data; `method="inverse-transform"` (default) or `"accept-reject"`. |
 | `generate_signal_toy` | function | Generate an unweighted signal-only toy. |
 | `generate_cp_toy` | function | Generate a CP toy for both charges at once, with the accepted-integral charge split and optional single-ROOT-file output. |
+| `generate_time_dependent_toy` | function | Generate a tagged neutral-meson Dalitz/time toy with latent true tags, observed wrong-tagged tags, and importance resampling; see [time-dependent toy generation](time_dependent.md#joint-time-dependent-toy-generation). |
+| `TimeDependentToy` | class | Immutable container for the generated `data`, `times`, `tags` and `true_tags` arrays. |
 | `prepare_inverse_toy_generator` | function | Precompute the inverse-CDF tables once for repeated toys at fixed model parameters. |
 | `PreparedInverseToyGenerator` | class | The reusable object `prepare_inverse_toy_generator` returns; `.generate(n, seed=...)`. |
 | `weighted_resample` | function | Draw unweighted events from a weighted phase-space sample (the resampling building block behind `method="resample"`). |
@@ -260,7 +267,8 @@ Docs: `docs/toy_generation.md`. Notebooks: `18_user_friendly_toy_generation.ipyn
 | `LineshapeIntensity1D` | class | Turn an existing complex dynamics lineshape (e.g. `RelativisticBreitWigner`) into a normalized 1D intensity PDF. |
 | `FactorizedDensity` | class | Multiply a base Dalitz density by independent 1D discriminant PDFs (mass, BDT, PID, ...). |
 | `GaussianConstraint` | class | Gaussian penalty `0.5*((x-mu)/sigma)^2` on one parameter. |
-| `ConstrainedNLL` | class | Add one or more `GaussianConstraint`s to an existing NLL. |
+| `QMISmoothnessConstraint` | class | Optional complex-node curvature penalty in mass squared for any 1D QMI interpolation; also built by `qmi.smoothness_constraint(...)`. |
+| `ConstrainedNLL` | class | Add callable penalties, including Gaussian or QMI smoothness constraints, to an existing NLL. |
 
 Docs: `docs/discriminants_and_constraints.md`. Notebooks: `10_b2kpipi_discriminating_variables.ipynb`, `11_b2kpipi_gaussian_constraints.ipynb`.
 
@@ -318,6 +326,7 @@ array already ordered like the requested parameter names. Docs:
 | `plot_binned_data` | function | Plot 1D data as black points with statistical error bars. |
 | `binned_data` | function | Return bin centers, counts, uncertainties and edges without plotting (for custom figures). |
 | `plot_pulls` | function | Plot per-bin pulls from a `BinnedChi2Result` (1D bar plot or 2D diverging heatmap). |
+| `plot_contour` | function | Plot Minos profile-likelihood confidence-region contour(s) in a 2D parameter plane (e.g. `(x, y)` mixing) from a fitted `Minuit` result (any `Minimizer.fit()`/`*FitSession.fit()` return value), via `Minuit.mncontour` -- not the Gaussian/covariance-ellipse approximation. Not session-specific. |
 
 Docs: `docs/user_friendly_api.md` ("Automatic projections", "Plot helpers"), `docs/goodness_of_fit.md`.
 
@@ -329,8 +338,9 @@ Composition layers over everything above; see `docs/user_friendly_api.md` "Desig
 |---|---|---|
 | `FitSession` | class | Compose PDF + likelihood + backgrounds + constraints + minimizer for one sample in a few lines; `fit()`, `report()`, `plot_projection()`, `goodness_of_fit_projection()`/`goodness_of_fit_chi2()`/`point_to_point_dissimilarity()`, `.from_root(...)`. |
 | `CPFitSession` | class | Same composition for simultaneous B+/B- fits over `CPJointNLL`; shared `Parameter`s collected once; same goodness-of-fit methods, per charge. |
+| `TimeDependentFitSession` | class | Composes `TimeDependentDalitzNLL`: builds the shared A+Abar `PreparedAmplitudeCache` (Abar derived by reflection unless an explicit `abar_model` is given, for direct CPV) and collects `Parameter`s from the model(s) and `mixing`. `fit()`/`fit_multistart()`/`report()`/`print_result()`/`print_fit_fractions()`/`fit_fraction_errors()`, Supports `.with_background(...)`, conditional fractions or extended yields with component tag fractions; `signal_objective` retains the signal kernel. Projections include all backgrounds when marginal callbacks are available. `plot_time_projection()` overlays each tag's decay-time histogram against the exact Dalitz-integrated curve (unit acceptance/perfect resolution only). `plot_projection()` overlays each tag's Dalitz-variable histogram (one subplot per tag) against the time-integrated, tag-conditional density, mirroring `CPFitSession.plot_projection`'s two-population layout. |
 
-Docs: `docs/user_friendly_api.md`. Notebooks: `16_user_friendly_quickstart.ipynb`, `17_b2kpipi_cp_user_friendly.ipynb`.
+Docs: `docs/user_friendly_api.md`, `docs/time_dependent.md`. Notebooks: `16_user_friendly_quickstart.ipynb`, `17_b2kpipi_cp_user_friendly.ipynb`, `notebooks/benchmark/belle_2014_d0_kspipi_time_dependent.ipynb`.
 
 ## Configuration
 

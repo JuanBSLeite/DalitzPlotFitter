@@ -59,6 +59,18 @@ Any number of independent constraints can be supplied to `ConstrainedNLL`.  Typi
 
 Correlated multivariate Gaussian constraints are not part of the basic implementation yet.
 
+## Optional QMI smoothness constraints
+
+`QMISmoothnessConstraint(qmi, strength=..., weights=...)`, or equivalently
+`qmi.smoothness_constraint(...)`, penalizes differences of adjacent complex
+node slopes in `s=m**2`. It supports all 1D QMI interpolation modes and both
+Cartesian and polar nodes, including JAX gradients and Hessians. Attach it
+with `FitSession.with_constraint`, `CPFitSession.with_constraint`, or
+`ConstrainedNLL`; it is never added implicitly by the lineshape.
+Strength zero disables it exactly. See [the QMI smoothing convention](lineshapes.md#optional-qmi-knot-smoothing)
+for the nonuniform-grid weights, fixed-scale requirement, CP usage and
+validation of the bias/uncertainty tradeoff.
+
 ## Tutorial notebooks
 
 - `10_b2kpipi_discriminating_variables.ipynb` demonstrates a joint Dalitz + reconstructed-mass + BDT fit with mass and BDT projections.

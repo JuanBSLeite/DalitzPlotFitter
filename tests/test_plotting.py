@@ -3,12 +3,15 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-from matplotlib.colors import LogNorm
 import numpy as np
+from matplotlib.colors import LogNorm
 
 from dalitzplotfitter import (
+    Minimizer,
+    Parameter,
     binned_data,
     plot_binned_data,
+    plot_contour,
     plot_dalitz,
     plot_square_dalitz,
     square_dalitz_to_invariants,
@@ -17,7 +20,9 @@ from dalitzplotfitter import (
 
 def test_binned_data_uses_poisson_sqrt_n_for_unweighted_data():
     values = np.asarray([0.1, 0.2, 0.3, 1.1, 1.2])
-    centers, counts, errors, edges = binned_data(values, bins=np.asarray([0.0, 1.0, 2.0]))
+    centers, counts, errors, edges = binned_data(
+        values, bins=np.asarray([0.0, 1.0, 2.0])
+    )
 
     assert np.allclose(centers, [0.5, 1.5])
     assert np.array_equal(counts, [3, 2])
@@ -126,4 +131,47 @@ def test_plot_square_dalitz_folded_restricts_thetaprime_to_half():
     )
     assert ax.get_ylim()[1] <= 0.5 + 1e-9
     assert "folded" in ax.get_ylabel()
+
+
+def _quadratic_bowl_result():
+    px = Parameter("px", 1.0, bounds=(-5.0, 5.0))
+    py = Parameter("py", 1.0, bounds=(-5.0, 5.0))
+
+    def objective(values):
+        return (values["px"] - 2.0) ** 2 + 2 * (values["py"] + 1.0) ** 2
+
+    return Minimizer(objective, (px, py)).fit()
+
+
+def test_plot_contour_draws_one_curve_per_level_plus_best_fit_marker():
+    result = _quadratic_bowl_result()
+    fig, ax = plt.subplots()
+    plot_contour(result, "px", "py", cl=(0.68, 0.95), size=8, ax=ax)
+
+    # one Line2D per contour level plus one for the best-fit marker.
+    assert len(ax.get_lines()) == 3
+    labels = [line.get_label() for line in ax.get_lines()]
+    assert "68.0%" in labels
+    assert "95.0%" in labels
+    assert "best fit" in labels
+    assert ax.get_xlabel() == "px"
+    assert ax.get_ylabel() == "py"
     plt.close(fig)
+
+
+def test_plot_contour_marks_the_fitted_point():
+    result = _quadratic_bowl_result()
+    ax = plot_contour(result, "px", "py", cl=(0.68,), size=8)
+    marker = next(
+        line for line in ax.get_lines() if line.get_label() == "best fit"
+    )
+    np.testing.assert_allclose(marker.get_xdata(), [result.values["px"]], atol=1e-9)
+    np.testing.assert_allclose(marker.get_ydata(), [result.values["py"]], atol=1e-9)
+    plt.close(ax.figure)
+
+
+def test_plot_contour_creates_its_own_axes_when_none_given():
+    result = _quadratic_bowl_result()
+    ax = plot_contour(result, "px", "py", cl=(0.68,), size=8)
+    assert ax is not None
+    plt.close(ax.figure)

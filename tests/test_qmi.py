@@ -719,9 +719,19 @@ def test_prepared_linear_cartesian_qmi_inserting_interpolated_knot_preserves_amp
 
 
 def test_cartesian_qmi_dynamic_cache_matches_direct_model():
+    _check_cartesian_qmi_dynamic_cache("linear")
+
+
+def test_step_qmi_dynamic_cache_matches_direct_model():
+    _check_cartesian_qmi_dynamic_cache("none")
+
+
+def _check_cartesian_qmi_dynamic_cache(interpolation):
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     owner = "S_QMI"
     knots = (0.30, 0.55, 0.85, 1.20, 1.60)
+    if interpolation == "none":
+        knots = (*knots, 1.75)
 
     real_parts = tuple(
         Parameter.dynamics(
@@ -743,7 +753,7 @@ def test_cartesian_qmi_dynamic_cache_matches_direct_model():
         knots=knots,
         real_parts=real_parts,
         imaginary_parts=imaginary_parts,
-        interpolation="linear",
+        interpolation=interpolation,
     )
     model = DecayModel(
         channel,

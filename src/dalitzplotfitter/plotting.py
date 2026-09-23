@@ -258,9 +258,57 @@ def plot_pulls(result, *, ax=None):
     return ax
 
 
+def plot_contour(result, x: str, y: str, *, cl=(0.68, 0.95), size: int = 100, ax=None):
+    """Plot Minos profile-likelihood confidence-region contour(s) in (x, y).
+
+    ``result`` is a fitted ``iminuit.Minuit`` instance -- the direct return
+    value of ``Minimizer.fit()`` (and of ``FitSession``/``CPFitSession``/
+    ``TimeDependentFitSession.fit()`` with the default ``update_model=False``).
+    ``x``/``y`` are the two ``Parameter`` names to scan, e.g. ``"mix.x"``,
+    ``"mix.y"``. Not specific to any session: any object with a fitted
+    Minuit's ``.mncontour``/``.values`` interface works.
+
+    Each level in ``cl`` is drawn as one closed curve from
+    ``Minuit.mncontour(x, y, cl=level, size=size)``, which profiles out every
+    *other* free parameter at each scan point (re-minimizing over them) --
+    this is the Wilks'-theorem profile-likelihood region, not the cheaper
+    Gaussian/covariance-ellipse approximation. Interpretation of ``cl``
+    follows ``mncontour`` itself: ``0 < cl < 1`` is a probability (e.g. 0.68,
+    0.95, matching the two levels a published (x, y) mixing-parameter
+    confidence plot typically shows); ``cl >= 1`` is a number of standard
+    deviations of a normal distribution. The fitted point is marked with a
+    star. This is one full re-minimization per scan point per level (see
+    ``Minuit.mncontour``'s own docs) -- reduce ``size`` for a faster, coarser
+    contour, e.g. while iterating on a plot's appearance.
+
+    1D projections of a 2D confidence region are larger than 1D Minos
+    intervals at the same confidence level (also documented on
+    ``mncontour``); this is expected, not a bug in either.
+    """
+    if ax is None:
+        _, ax = plt.subplots(figsize=(6, 6), constrained_layout=True)
+    for level in cl:
+        points = np.asarray(result.mncontour(x, y, cl=level, size=size))
+        label = f"{level * 100:.1f}%" if level < 1 else rf"{level:g}$\sigma$"
+        ax.plot(points[:, 0], points[:, 1], label=label)
+    ax.plot(
+        [float(result.values[x])], [float(result.values[y])],
+        marker="*", color="black", markersize=12, linestyle="none",
+        label="best fit",
+    )
+    ax.set_xlabel(x)
+    ax.set_ylabel(y)
+    # Outside the axes: an inside "best" location tends to land on top of the
+    # contours/best-fit marker it is supposed to label, especially for a
+    # small number of roughly concentric confidence regions.
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0)
+    return ax
+
+
 __all__ = [
     "binned_data",
     "plot_binned_data",
+    "plot_contour",
     "plot_dalitz",
     "plot_pulls",
     "plot_square_dalitz",

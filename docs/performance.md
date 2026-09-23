@@ -301,6 +301,16 @@ memory. Smaller values reduce peak gradient and Hessian memory. Changing this
 option changes only evaluation partitioning, not the normalization integral or
 its quadrature resolution.
 
+For ordinary floating-dynamics lineshapes, `dynamics_microbatch_parallelism`
+evaluates several microbatches concurrently with `jax.vmap` and reduces their
+partial normalization blocks. Its default is 1, preserving the sequential
+bounded-memory path. Values of 2 or 4 can improve throughput on larger GPUs,
+but increase peak AD memory approximately with the number of concurrent
+microbatches. The effective value is reported by
+`cache.effective_dynamics_microbatch_parallelism`; it is capped by the number
+of microbatches in one macro-chunk. QMI keeps the effective value at 1 because
+its prepared sort order is local to the complete block.
+
 For a floating component whose lineshape sets
 `prepared_mass_is_order_dependent = True` (currently only `QMI`), preparation
 itself uses blocks no larger than `dynamics_microbatch_size`. `QMI.prepare_mass`
@@ -534,3 +544,13 @@ The first compiled call should not be confused with steady-state fit throughput.
 ## Precision
 
 The project uses 64-bit real and 128-bit complex arithmetic when `enable_x64()` is enabled. This is deliberate for amplitude-analysis stability. Consumer GPUs can have much lower FP64 throughput than data-centre GPUs, but changing the default to float32/complex64 should only be done after explicit likelihood, parameter, fit-fraction, and toy-closure studies.
+
+## Time-dependent Dalitz fits
+
+`TimeDependentDalitzNLL` uses `PreparedAmplitudeCache.coherent_groups` to evaluate
+A and Abar and their cross-normalization in one dynamic pass. Mixing-only and
+coefficient-only fits reuse the fixed component basis and Gram matrix. Time
+normalization is analytic by default; acceptance/Gaussian response uses explicit
+true-time quadrature and a JAX scan with event-sized accumulators. See
+[time-dependent fits](time_dependent.md) and
+`benchmarks/benchmark_time_dependent.py` for a runnable D0 example and benchmark.

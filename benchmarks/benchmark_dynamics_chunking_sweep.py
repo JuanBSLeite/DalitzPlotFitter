@@ -1,5 +1,4 @@
-"""Sweep ``normalization_chunk_size`` x ``dynamics_microbatch_size`` and report
-their effect on fit-evaluation wall time and retained cache memory.
+"""Sweep dynamics chunking and microbatch parallelism.
 
 The model has two floating-mass/width resonances using ordinary parametric
 lineshapes (``GounarisSakurai``/the default relativistic Breit-Wigner), so the
@@ -57,6 +56,7 @@ def make_model(
     normalization_resolution: int,
     normalization_chunk_size: int,
     dynamics_microbatch_size: int,
+    dynamics_microbatch_parallelism: int,
 ) -> DecayModel:
     channel = DecayChannel("B+", ("pi+", "pi+", "pi-"))
     return DecayModel(
@@ -102,6 +102,7 @@ def make_model(
         normalization_pair=(0, 2),
         normalization_chunk_size=normalization_chunk_size,
         dynamics_microbatch_size=dynamics_microbatch_size,
+        dynamics_microbatch_parallelism=dynamics_microbatch_parallelism,
     )
 
 
@@ -141,13 +142,17 @@ def run_one(
     normalization_resolution: int,
     normalization_chunk_size: int,
     dynamics_microbatch_size: int,
+    dynamics_microbatch_parallelism: int,
     repeats: int,
     seed: int,
 ) -> dict:
     run_start = time.perf_counter()
     start = time.perf_counter()
     model = make_model(
-        normalization_resolution, normalization_chunk_size, dynamics_microbatch_size
+        normalization_resolution,
+        normalization_chunk_size,
+        dynamics_microbatch_size,
+        dynamics_microbatch_parallelism,
     )
     data = model.generate_phase_space(events, seed=seed, include_momenta=False)
     session = FitSession(model, data)
@@ -196,11 +201,15 @@ def run_one(
         "normalization_resolution": normalization_resolution,
         "normalization_chunk_size": normalization_chunk_size,
         "dynamics_microbatch_size": dynamics_microbatch_size,
+        "dynamics_microbatch_parallelism": dynamics_microbatch_parallelism,
         "effective_normalization_chunk_size": (
             cache.effective_normalization_chunk_size
         ),
         "effective_dynamics_microbatch_size": (
             cache.effective_dynamics_microbatch_size
+        ),
+        "effective_dynamics_microbatch_parallelism": (
+            cache.effective_dynamics_microbatch_parallelism
         ),
         "padding_overhead_fraction": cache.normalization_padding_fraction,
         "cache_prepare_seconds": cache_prepare_seconds,
@@ -234,6 +243,12 @@ def main() -> None:
         default="20000,25000,40000,50000,100000",
         help="Comma-separated dynamics_microbatch_size values to sweep.",
     )
+    parser.add_argument(
+        "--microbatch-parallelism",
+        type=int,
+        default=1,
+        help="Number of microbatches evaluated concurrently with vmap.",
+    )
     args = parser.parse_args()
 
     chunk_sizes = _parse_int_list(args.chunk_sizes)
@@ -244,6 +259,8 @@ def main() -> None:
         parser.error("--chunk-sizes must contain positive integers")
     if not microbatch_sizes or min(microbatch_sizes) < 1:
         parser.error("--microbatch-sizes must contain positive integers")
+    if args.microbatch_parallelism < 1:
+        parser.error("--microbatch-parallelism must be positive")
 
     results = []
     for chunk_size in chunk_sizes:
@@ -253,6 +270,7 @@ def main() -> None:
                 normalization_resolution=args.normalization_resolution,
                 normalization_chunk_size=chunk_size,
                 dynamics_microbatch_size=microbatch_size,
+                dynamics_microbatch_parallelism=args.microbatch_parallelism,
                 repeats=args.repeats,
                 seed=args.seed,
             )
@@ -265,7 +283,7 @@ def main() -> None:
 
     header = (
         f"{'chunk':>10}  {'eff_chunk':>10}  {'microbatch':>10}  "
-        f"{'eff_micro':>10}  {'pad_%':>7}  "
+        f"{'eff_micro':>10}  {'parallel':>8}  {'eff_par':>7}  {'pad_%':>7}  "
         f"{'prepare_s':>10}  {'first_s':>9}  {'steady_s_mean':>14}  "
         f"{'total_s':>9}  {'retained_MB':>12}"
     )
@@ -278,6 +296,8 @@ def main() -> None:
             f"{result['effective_normalization_chunk_size']:>10}  "
             f"{result['dynamics_microbatch_size']:>10}  "
             f"{result['effective_dynamics_microbatch_size']:>10}  "
+            f"{result['dynamics_microbatch_parallelism']:>8}  "
+            f"{result['effective_dynamics_microbatch_parallelism']:>7}  "
             f"{100 * result['padding_overhead_fraction']:>6.1f}%  "
             f"{result['cache_prepare_seconds']:>10.3f}  "
             f"{result['first_jitted_objective_seconds']:>9.3f}  "
