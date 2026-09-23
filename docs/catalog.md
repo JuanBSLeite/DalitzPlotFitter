@@ -145,6 +145,7 @@ These are what `FitSession`/`CPFitSession` compose automatically; use them direc
 | `SCFSignalPDF` | class | Signal PDF including correctly-reconstructed *and* self-cross-feed (SCF) migrated events. |
 | `MultiBackgroundNLL` | class | Unbinned NLL: signal plus an arbitrary number of named background categories (non-CP). |
 | `NeutralMesonMixing` | class | Exact neutral-meson time kernel with x, y, lifetime and complex q/p; see [time-dependent fits](time_dependent.md). |
+| `TimeDependentMixtureNLL` | class | Multiple normalized Dalitz-time backgrounds with floating fractions or extended yields and component tag probabilities; see `docs/time_dependent.md`. |
 | `TimeDependentDalitzNLL` | class | Tagged time-dependent Dalitz signal NLL, coherent A/Abar overlap, factorized acceptance and optional Gaussian time resolution; see [time-dependent fits](time_dependent.md). |
 | `CPJointNLL` | class | Unbinned NLL for simultaneous B+/B- fits with one joint `(Dalitz, charge)` normalization — charge is part of the sample space, not fit independently per charge. |
 | `YieldAsymmetry` | class | Extended-fit `signal_yield` replacement splitting a total `N_s` into independent `N_plus`/`N_minus` via a yield asymmetry, overriding `CPJointNLL`'s default amplitude-driven charge split. |
@@ -156,6 +157,8 @@ Docs: `docs/fitting.md`, `docs/cp_coefficients.md`, `docs/backgrounds_and_vetoes
 | Name | Kind | What it does |
 |---|---|---|
 | `BackgroundCategory` | class | One normalized background category (density + normalization integral) for `MultiBackgroundNLL`. |
+| `TimeDependentBackgroundSpec` | class | Fixed Dalitz shape normalized per tag plus a caller-normalized, optionally parameterized observed-time PDF for `TimeDependentFitSession`. |
+| `TimeDependentBackgroundCategory` | class | General normalized joint Dalitz-time background callback or array; optional projection marginal callbacks. |
 | `BackgroundSpec` | class | Background *shape* for `FitSession`, normalized automatically on the fit's own measure — no manual integral needed. |
 | `CPBackgroundCategory` | class | One background category in the joint `(Dalitz, charge)` space, for `CPJointNLL`. |
 | `CPBackgroundSpec` | class | Charge-aware background shape for `CPFitSession` (`plus_shape`/`minus_shape`, or one shared shape). |
@@ -333,7 +336,7 @@ Composition layers over everything above; see `docs/user_friendly_api.md` "Desig
 |---|---|---|
 | `FitSession` | class | Compose PDF + likelihood + backgrounds + constraints + minimizer for one sample in a few lines; `fit()`, `report()`, `plot_projection()`, `goodness_of_fit_projection()`/`goodness_of_fit_chi2()`/`point_to_point_dissimilarity()`, `.from_root(...)`. |
 | `CPFitSession` | class | Same composition for simultaneous B+/B- fits over `CPJointNLL`; shared `Parameter`s collected once; same goodness-of-fit methods, per charge. |
-| `TimeDependentFitSession` | class | Composes `TimeDependentDalitzNLL`: builds the shared A+Abar `PreparedAmplitudeCache` (Abar derived by reflection unless an explicit `abar_model` is given, for direct CPV) and collects `Parameter`s from the model(s) and `mixing`. `fit()`/`fit_multistart()`/`report()`/`print_result()`/`print_fit_fractions()`/`fit_fraction_errors()`, matching `TimeDependentDalitzNLL`'s scope exactly (signal-only, non-extended, no backgrounds). `plot_time_projection()` overlays each tag's decay-time histogram against the exact Dalitz-integrated curve (unit acceptance/perfect resolution only). `plot_projection()` overlays each tag's Dalitz-variable histogram (one subplot per tag) against the time-integrated, tag-conditional density, mirroring `CPFitSession.plot_projection`'s two-population layout. |
+| `TimeDependentFitSession` | class | Composes `TimeDependentDalitzNLL`: builds the shared A+Abar `PreparedAmplitudeCache` (Abar derived by reflection unless an explicit `abar_model` is given, for direct CPV) and collects `Parameter`s from the model(s) and `mixing`. `fit()`/`fit_multistart()`/`report()`/`print_result()`/`print_fit_fractions()`/`fit_fraction_errors()`, Supports `.with_background(...)`, conditional fractions or extended yields with component tag fractions; `signal_objective` retains the signal kernel. Projections include all backgrounds when marginal callbacks are available. `plot_time_projection()` overlays each tag's decay-time histogram against the exact Dalitz-integrated curve (unit acceptance/perfect resolution only). `plot_projection()` overlays each tag's Dalitz-variable histogram (one subplot per tag) against the time-integrated, tag-conditional density, mirroring `CPFitSession.plot_projection`'s two-population layout. |
 
 Docs: `docs/user_friendly_api.md`, `docs/time_dependent.md`. Notebooks: `16_user_friendly_quickstart.ipynb`, `17_b2kpipi_cp_user_friendly.ipynb`, `notebooks/benchmark/belle_2014_d0_kspipi_time_dependent.ipynb`.
 

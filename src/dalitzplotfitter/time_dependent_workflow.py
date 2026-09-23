@@ -18,15 +18,54 @@ import jax.numpy as jnp
 import numpy as np
 
 from dalitzplotfitter.amplitude import AmplitudeComponent, PreparedAmplitudeCache
+from dalitzplotfitter.background import BackgroundCategory
 from dalitzplotfitter.constraints import ConstrainedNLL
 from dalitzplotfitter.decay import DecayModel
 from dalitzplotfitter.fit import Minimizer, Parameter, ParameterKind
 from dalitzplotfitter.io import model_with_fitted_values
 from dalitzplotfitter.kinematics import PhaseSpaceSample
+from dalitzplotfitter.likelihood.mixture import _resolve
 from dalitzplotfitter.likelihood.time_dependent import (
     NeutralMesonMixing,
     TimeDependentDalitzNLL,
 )
+from dalitzplotfitter.likelihood.time_dependent_mixture import (
+    TimeDependentBackgroundCategory,
+    TimeDependentMixtureNLL,
+)
+
+
+@dataclass(frozen=True)
+class TimeDependentBackgroundSpec:
+    """Factorized observed background: Dalitz shape times normalized time PDF.
+
+    ``shape(data)`` is fixed and normalized automatically over the model's
+    physical phase space, separately for each tag; it may inspect ``tag``.
+    ``time_pdf(data, parameters)`` must integrate to one over the session's
+    selected observed-time range for each tag/sigma_t. Data contains ``t``,
+    ``tag`` and ``sigma_t`` if supplied. This PDF includes its own acceptance
+    and resolution; the signal response/efficiency is never applied to it.
+    Declare any time-shape parameters in ``parameters`` (or on the callable).
+    Use TimeDependentBackgroundCategory for a correlated Dalitz-time PDF.
+    """
+
+    name: str
+    shape: object
+    time_pdf: object
+    fraction: object = None
+    yield_: object = None
+    normalization_sample: PhaseSpaceSample | None = None
+    apply_veto: bool = True
+    tag_fraction: object = None
+    parameters: tuple[Parameter, ...] = ()
+
+    def __post_init__(self):
+        if not self.name:
+            raise ValueError("background name must be non-empty")
+        if not callable(self.shape) or not callable(self.time_pdf):
+            raise TypeError("background shape and time_pdf must be callable")
+        if self.fraction is not None and self.yield_ is not None:
+            raise ValueError("a background cannot define both fraction and yield")
 
 
 def _collect_parameters(value: object) -> tuple[Parameter, ...]:
@@ -34,17 +73,14 @@ def _collect_parameters(value: object) -> tuple[Parameter, ...]:
         return (value,)
     if value is None:
         return ()
-    parameters = getattr(value, "parameters", None)
-    if parameters is not None and not callable(parameters):
-        try:
-            return tuple(item for item in parameters if isinstance(item, Parameter))
-        except TypeError:
-            pass
     if is_dataclass(value) and not isinstance(value, type):
         found: list[Parameter] = []
         for field in fields(value):
             found.extend(_collect_parameters(getattr(value, field.name)))
         return tuple(found)
+    parameters = getattr(value, "parameters", None)
+    if parameters is not None and not callable(parameters):
+        return _collect_parameters(parameters)
     if isinstance(value, Mapping):
         return tuple(
             parameter
@@ -95,7 +131,7 @@ class _ReflectedAmplitude:
 
 @dataclass(frozen=True)
 class TimeDependentFitSession:
-    """Signal-only, non-extended time-dependent tagged Dalitz fit session.
+    """Tagged Dalitz-time session with optional multiple backgrounds and yields.
 
     A composition layer over ``TimeDependentDalitzNLL``: it builds the single
     shared A+Abar ``PreparedAmplitudeCache`` (same final-state coordinates,
@@ -117,8 +153,11 @@ class TimeDependentFitSession:
     ``normalization_sample`` for both flavours (``__post_init__`` checks that
     the two channels at least share daughter masses).
 
-    Scope matches ``TimeDependentDalitzNLL`` exactly: signal-only,
-    non-extended, no backgrounds, no fitted production/tag-count asymmetry.
+    ``signal_objective`` retains the signal-only time-dependent likelihood.
+    With backgrounds or extended yields, ``base_objective`` composes it with
+    ``TimeDependentMixtureNLL``. Fractions describe the same conditional
+    composition for both tags; extended yields count both tags, with explicit
+    component tag fractions (defaulting to the observed tag proportions).
     ``plot_time_projection`` overlays each tag's decay-time histogram against
     the exact Dalitz-integrated curve (unit acceptance/perfect resolution
     only); ``plot_projection`` is the Dalitz-variable analogue, time-integrated
@@ -140,6 +179,16 @@ class TimeDependentFitSession:
     time_acceptance: object = None
     sigma_t: object = None
     constraints: tuple[object, ...] = ()
+    backgrounds: tuple[
+        TimeDependentBackgroundSpec
+        | TimeDependentBackgroundCategory
+        | BackgroundCategory,
+        ...,
+    ] = ()
+    signal_fraction: object = None
+    extended: bool = False
+    signal_yield: object = None
+    signal_tag_fraction: object = None
 
     def __post_init__(self) -> None:
         if self.abar_model is not None:
@@ -152,6 +201,139 @@ class TimeDependentFitSession:
                     "both flavours, so an unrelated channel would silently "
                     "evaluate abar_model's dynamics at the wrong kinematics"
                 )
+
+    def with_background(
+        self,
+        name,
+        shape,
+        *,
+        time_pdf,
+        fraction=None,
+        yield_=None,
+        normalization_sample=None,
+        apply_veto=True,
+        tag_fraction=None,
+        parameters=(),
+    ):
+        """Append a factorized background, following FitSession's mixture API.
+
+        ``time_pdf(data, parameters)`` must be normalized over ``time_range``.
+        Its observed-time resolution and acceptance belong to the background.
+        """
+        spec = TimeDependentBackgroundSpec(
+            name,
+            shape,
+            time_pdf,
+            fraction,
+            yield_,
+            normalization_sample,
+            apply_veto,
+            tag_fraction,
+            tuple(parameters),
+        )
+        return replace(self, backgrounds=self.backgrounds + (spec,))
+
+    @cached_property
+    def _default_tag_fraction(self):
+        return float(np.mean(np.asarray(self.tags) == 1))
+
+    @property
+    def _signal_tag_fraction(self):
+        return (
+            self._default_tag_fraction
+            if self.signal_tag_fraction is None
+            else self.signal_tag_fraction
+        )
+
+    def _event_data(self):
+        data = dict(
+            self.data.as_dict(), t=jnp.asarray(self.times), tag=jnp.asarray(self.tags)
+        )
+        if self.sigma_t is not None:
+            data["sigma_t"] = jnp.broadcast_to(
+                jnp.asarray(self.sigma_t), jnp.shape(self.times)
+            )
+        return data
+
+    def _build_background(self, source):
+        if isinstance(source, BackgroundCategory):
+            source = TimeDependentBackgroundCategory(
+                source.name,
+                source.density,
+                source.fraction,
+                source.yield_,
+            )
+        if isinstance(source, TimeDependentBackgroundCategory):
+            return replace(
+                source,
+                tag_fraction=(
+                    self._default_tag_fraction
+                    if source.tag_fraction is None
+                    else source.tag_fraction
+                ),
+            )
+        if not isinstance(source, TimeDependentBackgroundSpec):
+            raise TypeError(
+                "backgrounds require TimeDependentBackgroundSpec or a category"
+            )
+        if any(not p.fixed for p in _collect_parameters(source.shape)):
+            raise ValueError(
+                "factorized Dalitz background shape parameters must be fixed; "
+                "use TimeDependentBackgroundCategory for a floating joint PDF"
+            )
+        sample = (
+            self.model.normalization_sample
+            if source.normalization_sample is None
+            else source.normalization_sample
+        )
+        sample.validate_integration()
+
+        def shape(data):
+            size = len(data["s12"])
+            array = jnp.broadcast_to(jnp.asarray(source.shape(data)), (size,))
+            if source.apply_veto and self.veto is not None:
+                array = array * jnp.asarray(self.veto(data))
+            return array
+
+        integrals = []
+        for tag in (1, -1):
+            data = dict(sample.as_dict(), tag=jnp.full(sample.size, tag))
+            array = shape(data)
+            if bool(jnp.any(~jnp.isfinite(array) | (array < 0))):
+                raise ValueError("background shape must be finite and nonnegative")
+            norm = jnp.mean(sample.weights * array)
+            if not bool(jnp.isfinite(norm) & (norm > 0)):
+                raise ValueError("background normalization must be finite and positive")
+            integrals.append(norm)
+
+        def dalitz_density(data, parameters):
+            norm = jnp.where(jnp.asarray(data["tag"]) == 1, integrals[0], integrals[1])
+            return shape(data) / norm
+
+        data = self._event_data()
+        dalitz = dalitz_density(data, {})
+        if bool(jnp.any(~jnp.isfinite(dalitz) | (dalitz < 0))):
+            raise ValueError("background data values must be finite and nonnegative")
+
+        def density(parameters):
+            return dalitz * jnp.asarray(source.time_pdf(data, parameters))
+
+        return TimeDependentBackgroundCategory(
+            source.name,
+            density,
+            source.fraction,
+            source.yield_,
+            self._default_tag_fraction
+            if source.tag_fraction is None
+            else source.tag_fraction,
+            dalitz_density,
+            source.time_pdf,
+            source.parameters,
+        )
+
+    @cached_property
+    def background_categories(self):
+        return tuple(self._build_background(b) for b in self.backgrounds)
 
     def with_efficiency(self, efficiency) -> TimeDependentFitSession:
         """Return a copy with a data/normalization-sample efficiency set."""
@@ -230,7 +412,7 @@ class TimeDependentFitSession:
         )
 
     @cached_property
-    def base_objective(self) -> TimeDependentDalitzNLL:
+    def signal_objective(self) -> TimeDependentDalitzNLL:
         return TimeDependentDalitzNLL(
             self.cache,
             self.n_particle_components,
@@ -248,6 +430,35 @@ class TimeDependentFitSession:
             time_weights=self.time_weights,
             time_acceptance=self.time_acceptance,
             sigma_t=self.sigma_t,
+        )
+
+    @cached_property
+    def base_objective(self):
+        signal = self.signal_objective
+        if (
+            not self.backgrounds
+            and not self.extended
+            and self.signal_fraction is None
+            and self.signal_yield is None
+            and self.signal_tag_fraction is None
+        ):
+            return signal
+        if not self.extended and (
+            self.signal_tag_fraction is not None
+            or any(
+                getattr(b, "tag_fraction", None) is not None for b in self.backgrounds
+            )
+        ):
+            raise ValueError("tag_fraction requires extended=True")
+        return TimeDependentMixtureNLL(
+            signal_density=signal.densities,
+            backgrounds=self.background_categories,
+            signal_fraction=self.signal_fraction,
+            extended=self.extended,
+            signal_yield=self.signal_yield,
+            tags=self.tags,
+            signal_tag_fraction=self._signal_tag_fraction,
+            signal_validity=signal._physical_parameters,
         )
 
     @cached_property
@@ -271,6 +482,10 @@ class TimeDependentFitSession:
         candidates += _collect_parameters(self.wrong_tag)
         candidates += _collect_parameters(self.time_acceptance)
         candidates += _collect_parameters(self.constraints)
+        candidates += _collect_parameters(self.backgrounds)
+        candidates += _collect_parameters(self.signal_fraction)
+        candidates += _collect_parameters(self.signal_yield)
+        candidates += _collect_parameters(self.signal_tag_fraction)
         unique: dict[str, Parameter] = {}
         for p in candidates:
             if p.name in unique and unique[p.name] != p:
@@ -430,6 +645,50 @@ class TimeDependentFitSession:
             }
         return report
 
+    def _projection_scales(self, values, tag):
+        """Expected per-tag counts in the full selection, before plot cuts."""
+        if self.extended:
+
+            def scale(yield_, fraction):
+                probability = float(_resolve(fraction, values))
+                return float(_resolve(yield_, values)) * (
+                    probability if tag == 1 else 1 - probability
+                )
+
+            return (
+                scale(self.signal_yield, self._signal_tag_fraction),
+                [scale(c.yield_, c.tag_fraction) for c in self.background_categories],
+            )
+        n = int(np.sum(np.asarray(self.tags) == tag))
+        if not self.backgrounds:
+            return float(n), []
+        fraction = float(_resolve(self.signal_fraction, values))
+        weights = np.asarray(self.base_objective.background_weights(values))
+        return n * fraction, list(n * (1 - fraction) * weights)
+
+    def _background_projection_data(self, data, tag):
+        data = dict(data)
+        size = len(next(iter(data.values())))
+        data["tag"] = jnp.full(size, tag)
+        if self.sigma_t is not None:
+            if jnp.ndim(self.sigma_t) != 0:
+                raise ValueError("background projections require a scalar sigma_t")
+            data["sigma_t"] = jnp.full(size, self.sigma_t)
+        return data
+
+    @staticmethod
+    def _background_marginal(category, kind, data, values):
+        callback = getattr(category, kind)
+        if callback is None:
+            raise ValueError(
+                f"background {category.name!r} requires {kind} for this projection"
+            )
+        size = len(next(iter(data.values())))
+        density = np.broadcast_to(np.asarray(callback(data, values)), (size,))
+        if np.any(~np.isfinite(density) | (density < 0)):
+            raise ValueError("background marginal must be finite and nonnegative")
+        return density
+
     def plot_time_projection(
         self, result, *, bins: int = 60, range: tuple[float, float] | None = None,
         curve_points: int = 400, time_unit: str = "", log_scale: bool = False,
@@ -462,7 +721,7 @@ class TimeDependentFitSession:
         edges = np.linspace(hist_range[0], hist_range[1], bins + 1)
         bin_width = edges[1] - edges[0]
         curve_times = np.linspace(hist_range[0], hist_range[1], curve_points)
-        plus_curve, minus_curve = self.base_objective.dalitz_integrated_time_pdf(
+        plus_curve, minus_curve = self.signal_objective.dalitz_integrated_time_pdf(
             jnp.asarray(curve_times), values,
         )
         plus_curve = np.asarray(plus_curve)
@@ -479,17 +738,44 @@ class TimeDependentFitSession:
         ):
             mask = tags == tag
             n = int(mask.sum())
-            if n == 0:
+            if n == 0 and not self.extended:
                 continue
             centers, counts, errors, _ = binned_data(times[mask], bins=edges)
             ax.errorbar(
                 centers, counts, yerr=errors, fmt="o", color=color, ecolor=color,
                 markersize=4.5, linestyle="none", label=f"data ({label})", zorder=10,
             )
-            ax.plot(
-                curve_times, curve * n * bin_width, color=color,
-                label=f"fit ({label})",
-            )
+            signal_scale, background_scales = self._projection_scales(values, tag)
+            total = curve * signal_scale * bin_width
+            if self.backgrounds:
+                ax.plot(
+                    curve_times,
+                    total,
+                    color=color,
+                    linestyle="--",
+                    label=f"signal ({label})",
+                )
+            projection_data = self._background_projection_data({"t": curve_times}, tag)
+            for category, scale in zip(
+                self.background_categories, background_scales, strict=True
+            ):
+                if scale == 0:
+                    continue
+                marginal = self._background_marginal(
+                    category,
+                    "time_density",
+                    projection_data,
+                    values,
+                )
+                component = marginal * scale * bin_width
+                total = total + component
+                ax.plot(
+                    curve_times,
+                    component,
+                    linestyle=":",
+                    label=f"{category.name} ({label})",
+                )
+            ax.plot(curve_times, total, color=color, label=f"fit ({label})")
         ax.set_ylabel(_bin_width_label(edges, time_unit))
         if log_scale:
             ax.set_yscale("log")
@@ -547,7 +833,7 @@ class TimeDependentFitSession:
         amplitudes, _ = cache.coherent_groups(
             values, jnp.stack((particle, ~particle), axis=1),
         )
-        density_plus, density_minus = self.base_objective.tag_marginal_density(
+        density_plus, density_minus = self.signal_objective.tag_marginal_density(
             amplitudes[:, 0], amplitudes[:, 1], values,
             efficiency=_acceptance(self.efficiency, self.veto, sample_data),
         )
@@ -572,13 +858,37 @@ class TimeDependentFitSession:
             strict=True,
         ):
             mask = tags == tag
-            n = int(mask.sum())
             _, observed, _, _ = plot_binned_data(
                 data_values[mask], bins=edges, ax=ax, label=f"data ({label})",
                 unit=unit, log_scale=log_scale,
             )
-            weights = _scaled_projection_weights(sample, np.asarray(density), n)
+            signal_scale, background_scales = self._projection_scales(values, tag)
+            weights = _scaled_projection_weights(
+                sample, np.asarray(density), signal_scale
+            )
             total, _ = np.histogram(sample_values, bins=edges, weights=weights)
+            if self.backgrounds:
+                ax.stairs(total, edges, label=f"signal ({label})", linestyle="--")
+            projection_data = self._background_projection_data(sample_data, tag)
+            for category, scale in zip(
+                self.background_categories, background_scales, strict=True
+            ):
+                if scale == 0:
+                    continue
+                marginal = self._background_marginal(
+                    category,
+                    "dalitz_density",
+                    projection_data,
+                    values,
+                )
+                bg_weights = _scaled_projection_weights(sample, marginal, scale)
+                component, _ = np.histogram(
+                    sample_values, bins=edges, weights=bg_weights
+                )
+                total = total + component
+                ax.stairs(
+                    component, edges, label=f"{category.name} ({label})", linestyle=":"
+                )
             ax.stairs(total, edges, label=f"fit ({label})", linewidth=2.0)
             ax.set_title(label)
             ax.legend()
@@ -587,12 +897,12 @@ class TimeDependentFitSession:
                 continue
             occupied = total > 0
             pulls = np.full(bins, np.nan)
-            pulls[occupied] = (
-                (observed[occupied] - total[occupied]) / np.sqrt(total[occupied])
+            pulls[occupied] = (observed[occupied] - total[occupied]) / np.sqrt(
+                total[occupied]
             )
             _draw_pulls_1d(ax_pulls, edges, pulls)
             ax_pulls.set_xlabel(axis_label)
         return grid if show_pulls else axes
 
 
-__all__ = ["TimeDependentFitSession"]
+__all__ = ["TimeDependentBackgroundSpec", "TimeDependentFitSession"]

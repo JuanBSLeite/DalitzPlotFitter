@@ -136,5 +136,6 @@ Phys. Rev. D 101 (2020) 012006, arXiv:1909.05212.
 Tagged D0 -> KS pi+ pi- fits are available through `NeutralMesonMixing` and
 `TimeDependentDalitzNLL`, with coherent mixing, JAX gradients, time acceptance
 and optional Gaussian time resolution, or through the higher-level
-`TimeDependentFitSession` composition layer. See [the API and validation scope](docs/time_dependent.md)
+`TimeDependentFitSession` composition layer with multiple backgrounds,
+fraction or extended-yield fits, and signal/background projections. See [the API and validation scope](docs/time_dependent.md)
 and the runnable `benchmarks/benchmark_time_dependent.py` example.

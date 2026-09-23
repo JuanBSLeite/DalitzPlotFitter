@@ -114,7 +114,9 @@ from .likelihood import (
     CPJointNLL,
     MultiBackgroundNLL,
     NeutralMesonMixing,
+    TimeDependentBackgroundCategory,
     TimeDependentDalitzNLL,
+    TimeDependentMixtureNLL,
     YieldAsymmetry,
 )
 from .observables import delta_method_covariance, delta_method_errors, delta_method_jacobian
@@ -138,7 +140,10 @@ from .square_histograms import (
     SquareDalitzHistogramBackground,
     SquareDalitzHistogramEfficiency,
 )
-from .time_dependent_workflow import TimeDependentFitSession
+from .time_dependent_workflow import (
+    TimeDependentBackgroundSpec,
+    TimeDependentFitSession,
+)
 from .toy_api import (
     CPToyBackground,
     PreparedInverseToyGenerator,
@@ -161,6 +166,9 @@ from .workflow import BackgroundSpec, FitSession
 __all__ = [
     "NeutralMesonMixing",
     "TimeDependentDalitzNLL",
+    "TimeDependentBackgroundCategory",
+    "TimeDependentMixtureNLL",
+    "TimeDependentBackgroundSpec",
     "TimeDependentFitSession",
     "AmplitudeComponent", "BackgroundCategory", "BackgroundSpec", "BinnedChi2Result", "BreitWigner1D", "CPBackgroundCategory", "kdtree_local_residuals",
     "CPBackgroundSpec", "CPFitSession", "CPJointNLL", "CPToyBackground", "BaBarFlatte", "CPRealImag",

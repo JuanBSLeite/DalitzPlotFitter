@@ -125,8 +125,9 @@ nodes to avoid materializing an events-by-nodes response matrix.
 Acceptance acts on true time and must factorize from the Dalitz efficiency.
 The PDF is conditional on sigma_t; it assumes the supplied conditional response
 and acceptance describe that category. Correlated time/Dalitz acceptance,
-non-Gaussian resolution mixtures, floating resolution calibration, backgrounds,
-and automatic model serialization are not provided by this first API. Repeat
+non-Gaussian signal resolution mixtures, floating signal-resolution calibration,
+and automatic model serialization are not provided by this signal API.
+Multiple background categories are composed separately by the session below. Repeat
 the quadrature with increased order and true-time endpoint, particularly for
 narrow sigma_t or long lifetime tails. A quadrature endpoint truncates the
 convolution; it is not an exact infinite-time Gaussian convolution.
@@ -171,8 +172,10 @@ weights enter the full overlap matrix.
 
 `fit(update_model=True)` also returns
 the model(s) with fitted values baked in, via `model_with_fitted_values`.
-Scope matches `TimeDependentDalitzNLL` exactly: signal-only, non-extended, no
-backgrounds.
+`session.signal_objective` remains the signal-only `TimeDependentDalitzNLL`.
+`session.base_objective` composes it with `TimeDependentMixtureNLL` when
+backgrounds or extended yields are requested; constraints wrap that mixture.
+Without those options, the original signal-only behavior is unchanged.
 
 `session.plot_time_projection(result)` overlays each observed tag's decay-time
 histogram against the model's exact Dalitz-integrated curve:
@@ -236,11 +239,155 @@ mixing-parameter paper publishes (e.g. Fig. 4 of the Belle reference above).
 `result` is any fitted `Minuit` object, i.e. what `session.fit()` returns
 with the default `update_model=False`.
 
+## Multiple backgrounds and extended yields
+
+`TimeDependentFitSession` follows the `FitSession` / `CPFitSession` conventions:
+`backgrounds=`, `.with_background(...)`, `signal_fraction=`, or
+`extended=True, signal_yield=...`. Every component is a PDF in **both Dalitz
+and observed time**, conditional on the observed tag and `sigma_t`.
+
+A `TimeDependentBackgroundSpec` describes a factorized background.
+`shape(data)` is a fixed Dalitz shape, automatically normalized using
+`mean(sample.weights * shape)` separately for each tag. It can read `tag` as
+well as `s12`, `s13`, `s23`. A supplied `normalization_sample` must have valid
+integration weights. Vetoes are applied by default (`apply_veto=False` opts
+out). Signal efficiency is **not** applied to a background map: the map
+should describe the selected background already.
+
+`time_pdf(data, values)` receives `t`, `tag`, and `sigma_t` when supplied,
+and must be normalized over the session's **selected observed-time range**
+for every tag and sigma_t. Include the background's own resolution and
+acceptance here. The signal's response is not automatically reused. This
+explicit normalization contract also permits analytical time PDFs without
+building an additional event-by-time integration array. `parameters=...`
+registers their floating parameters; parameters declared on callable objects
+are also collected.
+
+For example, two illustrative backgrounds with exponential observed-time
+PDFs (not a detector model for Belle):
+
+```python
+import jax.numpy as jnp
+from dalitzplotfitter import Parameter, TimeDependentFitSession
+
+low, high = 0.0, 4.0
+rate = Parameter("comb.rate", 1.5, bounds=(0.1, 10.0))
+
+def truncated_exponential(t, r):
+    norm = jnp.exp(-r * low) - jnp.exp(-r * high)
+    return jnp.where((t >= low) & (t <= high), r*jnp.exp(-r*t)/norm, 0.0)
+
+def comb_time(data, values):
+    return truncated_exponential(data["t"], rate.resolve(values))
+
+def partial_time(data, values):
+    return truncated_exponential(data["t"], 0.5)
+
+session = TimeDependentFitSession(
+    model, data, times, tags, mixing, time_range=(low, high),
+    signal_fraction=Parameter("f_sig", 0.9, bounds=(0.0, 1.0)),
+).with_background(
+    "combinatorial", lambda d: jnp.ones_like(d["s12"]),
+    time_pdf=comb_time,
+    fraction=Parameter("f_comb", 0.7, bounds=(0.0, 1.0)),
+    parameters=(rate,),
+).with_background(
+    "partial", lambda d: d["s12"], time_pdf=partial_time,
+)
+result = session.fit()
+session.plot_projection(result, "s12")
+session.plot_time_projection(result, time_unit="ps")
+```
+
+As in the other sessions, `f_comb` is a fraction **within the background**:
+
+```text
+p(phi,t | tag,sigma_t) = f_sig S + (1-f_sig)[f_comb B_comb + (1-f_comb) B_partial].
+```
+
+For N backgrounds, the first N-1 carry relative fractions; the last is the
+remainder. A single background needs no relative fraction. These conditional
+mixture fractions are shared by the two tags. The NLL includes every event
+without fitting the relative number of positive/negative tags in this mode.
+
+In extended mode, replace fractions with `signal_yield` and a `yield_` for
+**every** background. Each yield counts the sum of both tags. Unlike the
+signal-only conditional likelihood, the extended intensity includes each
+component's probability `p_k(tag)`:
+
+```text
+lambda(phi,t,tag | sigma_t) = N_sig p_sig(tag) S + sum_k N_k p_k(tag) B_k
+NLL = N_sig + sum_k N_k - sum_events log(lambda).
+```
+
+Use `signal_tag_fraction=` for the signal's P(tag=+1), and `tag_fraction=`
+for each background. These may be fixed numbers or Parameters in [0,1].
+Unspecified tag fractions default to the observed positive-tag fraction,
+fixed and shared; this default adds no component-specific tag-asymmetry
+information. Set them explicitly to model or fit different tag populations.
+Tag-fraction options are only meaningful in extended mode. For example:
+
+```python
+extended_session = TimeDependentFitSession(
+    model, data, times, tags, mixing, time_range=(low, high),
+    extended=True,
+    signal_yield=Parameter("N_sig", 900., bounds=(0., None)),
+    signal_tag_fraction=0.5,
+).with_background(
+    "combinatorial", lambda d: jnp.ones_like(d["s12"]), time_pdf=comb_time,
+    yield_=Parameter("N_comb", 100., bounds=(0., None)),
+    tag_fraction=0.5, parameters=(rate,),
+)
+```
+
+### Correlated backgrounds and real D with random tags
+
+Use `TimeDependentBackgroundCategory(name, density, ...)` for a general
+joint PDF. `density(values)` returns the normalized conditional Dalitz-time
+PDF on the fitted events; fixed arrays are accepted as well. Its normalization,
+acceptance, veto and response are the caller's responsibility. Declare any
+additional fit parameters in `parameters=(...)`. Existing `BackgroundCategory`
+objects are also accepted, provided their densities include time and obey
+this same conditional normalization (a Dalitz-only density is insufficient).
+
+For a real D with random tag, one can reuse the signal kernel with a different
+mistag probability, keeping its mixing dependence:
+
+```python
+from dataclasses import replace
+from dalitzplotfitter import TimeDependentBackgroundCategory
+
+# Begin with a session without backgrounds; share its cache and response.
+random_signal = replace(session.signal_objective, wrong_tag=0.5)
+random_tag = TimeDependentBackgroundCategory(
+    "random_pion", density=random_signal.densities,
+)
+# Configure the complete background tuple and its relative fractions as usual.
+random_session = replace(session, backgrounds=(random_tag,))
+```
+
+This example assumes the random-tag component shares the signal acceptance
+and resolution. Its mixing/amplitude parameters are already in the session;
+declare an independently floated wrong-tag parameter explicitly if used.
+The existing `wrong_tag` convention is a selected-sample posterior, which
+must match the convention used to determine the background mistag fraction.
+
+Projections draw the signal, each named background, and their total. Extended
+projections preserve the fitted expected count for each tag. Factorized specs
+provide their marginals automatically. General/precomputed categories require
+`dalitz_density(data, values)` and/or `time_density(data, values)` callbacks for
+the requested projection; missing callbacks raise an error. Data contains
+`tag`, optional scalar `sigma_t`, and invariants or `t`. These callbacks must
+use the same selection and normalization as the joint PDF. Existing signal
+projection limits still apply: scalar mistag/resolution for Dalitz projections,
+and ideal temporal response for the current time-projection helper.
+
 ## Reproducible validation and scope of the Belle reproduction
 
 ```
 JAX_PLATFORMS=cpu python benchmarks/benchmark_time_dependent.py --resolution 20
 JAX_PLATFORMS=cpu python benchmarks/benchmark_time_dependent.py --resolution 20 --toy
+JAX_PLATFORMS=cpu python benchmarks/benchmark_time_dependent.py --resolution 20 --backgrounds
 pytest tests/test_time_dependent.py
 ```
 
@@ -248,7 +395,9 @@ The script uses physical D0 -> KS pi+ pi- kinematics and a **reduced** K*(892)-,
 K*(892)+, rho model. The Asimov weights and optional sampled toy come from an
 independent NumPy implementation of the printed Belle rates. It fits x,y with
 JAX/Minuit, reports timing, and checks Asimov recovery at Belle's central mixing
-values. The optional toy samples the finite Dalitz/time quadrature distribution;
+values. With `--backgrounds`, it includes two independently normalized
+background PDFs and also floats/reconstructs the signal fraction and the
+relative composition of the background. The optional toy samples the finite Dalitz/time quadrature distribution;
 it is a discrete approximation, not a new continuous public toy generator.
 Neither this three-resonance model nor its fit fractions is Belle's full model.
 

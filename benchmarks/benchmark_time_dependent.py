@@ -24,7 +24,9 @@ from dalitzplotfitter import (
     PreparedAmplitudeCache,
     RealImag,
     Resonance,
+    TimeDependentBackgroundCategory,
     TimeDependentDalitzNLL,
+    TimeDependentMixtureNLL,
 )
 
 
@@ -51,6 +53,8 @@ def main():
     parser.add_argument("--events", type=int, default=100_000)
     parser.add_argument("--repeats", type=int, default=20)
     parser.add_argument("--toy", action="store_true")
+    parser.add_argument("--backgrounds", action="store_true",
+                        help="include two backgrounds and float their fractions")
     args = parser.parse_args()
     model = DecayModel(
         DecayChannel("D0", ("K(S)0", "pi+", "pi-")),
@@ -122,7 +126,27 @@ def main():
     for aa, bb in ((a, b), (b, a)):
         probability = independent_rate(aa, bb) * integration
         probabilities.append(probability / probability.sum() / 2)
-    probabilities = np.stack(probabilities).ravel()
+    probabilities = np.stack(probabilities)
+    background_pdfs = []
+    if args.backgrounds:
+        truth.update({"f_sig": 0.8, "f_comb": 0.65})
+        for shape, rate in ((np.ones(sample.size), 1.4), (np.asarray(sample.s12), 0.5)):
+            dalitz = shape / np.mean(np.asarray(sample.weights) * shape)
+            temporal = rate * np.exp(-rate * times) / -np.expm1(-rate * 4)
+            background_pdfs.append(temporal[:, None] * dalitz[None, :])
+        background_probability = (
+            (
+                truth["f_comb"] * background_pdfs[0]
+                + (1 - truth["f_comb"]) * background_pdfs[1]
+            )
+            * integration
+            / 2
+        )
+        probabilities = (
+            truth["f_sig"] * probabilities
+            + (1 - truth["f_sig"]) * background_probability[None, :, :]
+        )
+    probabilities = probabilities.ravel()
     if args.toy:
         choices = np.random.default_rng(20260923).choice(
             probabilities.size, size=args.events, p=probabilities
@@ -149,9 +173,32 @@ def main():
         time_range=(0, 4),
     )
     cache.check_parameters(parameters)
+    density = nll.densities
+    if args.backgrounds:
+        f_sig = Parameter("f_sig", 0.7, bounds=(0.0, 1.0))
+        f_comb = Parameter("f_comb", 0.5, bounds=(0.0, 1.0))
+        parameters += (f_sig, f_comb)
+        mixture = TimeDependentMixtureNLL(
+            nll.densities,
+            backgrounds=(
+                TimeDependentBackgroundCategory(
+                    "comb",
+                    background_pdfs[0][time_index, dp_index],
+                    fraction=f_comb,
+                ),
+                TimeDependentBackgroundCategory(
+                    "partial",
+                    background_pdfs[1][time_index, dp_index],
+                ),
+            ),
+            signal_fraction=f_sig,
+            tags=nll.tags,
+            signal_validity=nll._physical_parameters,
+        )
+        density = mixture.density
 
     def objective(values):
-        return -jnp.sum(event_weights * jnp.log(nll.densities(values)))
+        return -jnp.sum(event_weights * jnp.log(density(values)))
 
     vg = jax.jit(jax.value_and_grad(objective))
     start = time.perf_counter()
@@ -166,6 +213,7 @@ def main():
         "sample": "quadrature toy" if args.toy else "Asimov",
         "model": "reduced 3-resonance demonstration; not full Belle model",
         "events": args.events,
+        "backgrounds": args.backgrounds,
         "evaluation_points": len(choices),
         "prepare_seconds": prepare_seconds,
         "compile_seconds": compile_seconds,
