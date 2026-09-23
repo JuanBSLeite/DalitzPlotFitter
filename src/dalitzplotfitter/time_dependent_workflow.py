@@ -113,6 +113,23 @@ def _acceptance(efficiency, veto, data: dict[str, object]) -> jnp.ndarray:
 
 
 @dataclass(frozen=True)
+class _ObservedTagFraction:
+    """Observed positive-tag fraction from production and mistag inputs."""
+
+    production_fraction: object
+    wrong_tag: object
+
+    @property
+    def parameters(self):
+        return _collect_parameters((self.production_fraction, self.wrong_tag))
+
+    def resolve(self, values=None):
+        production = _resolve(self.production_fraction, values)
+        wrong = _resolve(self.wrong_tag, values)
+        return production * (1 - wrong) + (1 - production) * wrong
+
+
+@dataclass(frozen=True)
 class _ReflectedAmplitude:
     """No-direct-CPV default: Abar(s12,s13) = A(s13,s12), same s23.
 
@@ -189,8 +206,18 @@ class TimeDependentFitSession:
     extended: bool = False
     signal_yield: object = None
     signal_tag_fraction: object = None
+    production_fraction: object = None
 
     def __post_init__(self) -> None:
+        if self.production_fraction is not None and not self.extended:
+            raise ValueError("production_fraction requires extended=True")
+        if (
+            self.production_fraction is not None
+            and self.signal_tag_fraction is not None
+        ):
+            raise ValueError(
+                "provide either production_fraction or signal_tag_fraction, not both"
+            )
         if self.abar_model is not None:
             own = tuple(float(m) for m in self.model.channel.daughter_masses)
             other = tuple(float(m) for m in self.abar_model.channel.daughter_masses)
@@ -239,6 +266,8 @@ class TimeDependentFitSession:
 
     @property
     def _signal_tag_fraction(self):
+        if self.production_fraction is not None:
+            return _ObservedTagFraction(self.production_fraction, self.wrong_tag)
         return (
             self._default_tag_fraction
             if self.signal_tag_fraction is None
@@ -441,6 +470,7 @@ class TimeDependentFitSession:
             and self.signal_fraction is None
             and self.signal_yield is None
             and self.signal_tag_fraction is None
+            and self.production_fraction is None
         ):
             return signal
         if not self.extended and (
@@ -486,6 +516,7 @@ class TimeDependentFitSession:
         candidates += _collect_parameters(self.signal_fraction)
         candidates += _collect_parameters(self.signal_yield)
         candidates += _collect_parameters(self.signal_tag_fraction)
+        candidates += _collect_parameters(self.production_fraction)
         unique: dict[str, Parameter] = {}
         for p in candidates:
             if p.name in unique and unique[p.name] != p:

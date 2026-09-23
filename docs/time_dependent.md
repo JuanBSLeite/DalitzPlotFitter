@@ -30,6 +30,150 @@ and all times share units (the example uses ps). Require `tau>0`, `|y|<1`,
 `q_over_p>0`. Fields accept floats or `Parameter`s. Put physical bounds on
 floating parameters. Invalid evaluations return infinite NLL.
 
+## Mathematical construction
+
+Let $z=(s_{12},s_{13})$ denote a point in the Dalitz plot, and let
+$A(z)$ and $\bar A(z)$ be the coherent amplitudes for the two flavour states.
+The implementation uses
+
+$$
+r = \frac{q}{p} = |r|e^{i\phi},\qquad u=\frac{t}{\tau},
+$$
+
+and the two mixing functions
+
+$$
+g_+(t)=\frac{1}{2}\left[
+e^{(-1+y+i x)u/2}+e^{(-1-y-i x)u/2}
+\right],
+$$
+
+$$
+g_-(t)=\frac{1}{2}\left[
+e^{(-1+y+i x)u/2}-e^{(-1-y-i x)u/2}
+\right].
+$$
+
+Thus, for an initially produced $D^0$ or $\bar D^0$, the time-dependent
+amplitudes are
+
+$$
+\mathcal A_{D^0}(z,t)=g_+(t)A(z)+r\,g_-(t)\bar A(z),
+$$
+
+$$
+\mathcal A_{\bar D^0}(z,t)=g_+(t)\bar A(z)+r^{-1}g_-(t)A(z).
+$$
+
+The corresponding unnormalised rates can be written as
+
+$$
+R_{+}(z,t)=|g_+|^2|A|^2+|g_-|^2|r\bar A|^2
+ +2\operatorname{Re}\!\left[g_+^*g_-\,r\,A^*\bar A\right],
+$$
+
+$$
+R_{-}(z,t)=|g_+|^2|\bar A|^2+|g_-|^2|r^{-1}A|^2
+ +2\operatorname{Re}\!\left[g_+^*g_-\,r^{-1}\,\bar A^*A\right].
+$$
+
+Equivalently, defining
+
+$$
+C=rA^*\bar A,
+$$
+
+the first rate is the Belle expression
+
+$$
+R_{+}(z,t)=\frac{e^{-u}}{2}\left[
+(|A|^2+|r\bar A|^2)\cosh(yu)
++(|A|^2-|r\bar A|^2)\cos(xu)
++2\operatorname{Re}(C)\sinh(yu)
+-2\operatorname{Im}(C)\sin(xu)
+\right].
+$$
+
+$R_-$ is obtained by exchanging $A\leftrightarrow\bar A$ and replacing
+$r\to r^{-1}$. This is the sign convention implemented by
+`NeutralMesonMixing.basis`; changing the definition of $g_-$ requires changing
+the amplitude convention and the interference terms together.
+
+### Dalitz acceptance and conditional normalisation
+
+With perfect time resolution and unit temporal acceptance, a Dalitz efficiency
+$\epsilon_D(z)$ gives the tag-conditional PDFs
+
+$$
+p_{+}(z,t)=\frac{\epsilon_D(z)R_{+}(z,t)}{N_{+}},
+\qquad
+p_{-}(z,t)=\frac{\epsilon_D(z)R_{-}(z,t)}{N_{-}},
+$$
+
+where
+
+$$
+N_{\pm}=\int_{\mathcal D}d\Phi(z)\,\epsilon_D(z)
+\int_{t_{\min}}^{t_{\max}}dt\,R_{\pm}(z,t).
+$$
+
+The cache supplies the Dalitz integrals of $|A|^2$, $|\bar A|^2$ and
+$A^*\bar A$ using `mean(sample.weights * f)`. The time factors are integrated
+separately and have units of time. Consequently, the two tags are normalised
+separately; this likelihood does not infer the production fraction from the
+number of $D^0$ and $\bar D^0$ tags.
+
+For a factorised true-time acceptance $a(t)$ and Gaussian resolution
+$G(t_{\rm obs}-t;\sigma_t)$, the observed rate is instead
+
+$$
+\widetilde R_{\pm}(z,t_{\rm obs})
+=\int_0^\infty dt\,a(t)G(t_{\rm obs}-t;\sigma_t)R_{\pm}(z,t).
+$$
+
+The normalisation integrates this expression only over the selected observed
+window. In the quadrature implementation this is evaluated as
+
+$$
+N_{\pm}=\int_{\mathcal D}d\Phi(z)\,\epsilon_D(z)
+\int_0^\infty dt\,a(t)R_{\pm}(z,t)
+\Pr(t_{\min}\le t_{\rm obs}\le t_{\max}\mid t,\sigma_t),
+$$
+
+where the final probability is the difference of two Gaussian CDF values.
+Temporal quadrature therefore uses $\sum_i w_i f(t_i)$, while Dalitz
+quadrature retains the package convention based on the weighted mean.
+
+### Mistagging
+
+For an observed tag $q=+1$ or $q=-1$, `wrong_tag` mixes the already normalised
+flavour PDFs. For a scalar or event-wise mistag probability $w$, the observed
+PDF is
+
+$$
+p_{\rm obs}(z,t\mid q=+1)=(1-w)p_+(z,t)+wp_-(z,t),
+$$
+
+$$
+p_{\rm obs}(z,t\mid q=-1)=(1-w)p_-(z,t)+wp_+(z,t).
+$$
+
+Here $w$ is the posterior wrong-flavour probability **in the selected sample**;
+it is not automatically a raw detector mistag rate before selection.
+
+For an extended fit, `production_fraction` provides the true production
+fraction $f_{\rm prod}=P(D^0)$ when `signal_tag_fraction` is not supplied
+explicitly. The session converts it to the observed positive-tag fraction using
+the selected-sample mistag probability $w$:
+
+$$
+P(q_{\rm obs}=+1)=f_{\rm prod}(1-w)+(1-f_{\rm prod})w.
+$$
+
+`signal_tag_fraction` remains available when the observed tag fraction is the
+quantity calibrated directly. Supplying both options is rejected because they
+are two parameterisations of the same tag probability.
+
 ## Preparing A and Abar
 
 Use one `PreparedAmplitudeCache` containing all A components followed by all
@@ -263,6 +407,24 @@ building an additional event-by-time integration array. `parameters=...`
 registers their floating parameters; parameters declared on callable objects
 are also collected.
 
+For the factorized interface, background category $k$ is constructed as
+
+$$
+B_k(z,t\mid q,\sigma_t)=b_k(z\mid q)\,h_k(t\mid q,\sigma_t),
+$$
+
+with
+
+$$
+\int_{\mathcal D}d\Phi\,b_k(z\mid q)=1,
+\qquad
+\int_{t_{\min}}^{t_{\max}}dt\,h_k(t\mid q,\sigma_t)=1.
+$$
+
+The background time PDF includes its own temporal acceptance and resolution;
+the signal efficiency is not automatically applied to a background map that
+already describes the selected background.
+
 For example, two illustrative backgrounds with exponential observed-time
 PDFs (not a detector model for Belle):
 
@@ -301,9 +463,19 @@ session.plot_time_projection(result, time_unit="ps")
 
 As in the other sessions, `f_comb` is a fraction **within the background**:
 
-```text
-p(phi,t | tag,sigma_t) = f_sig S + (1-f_sig)[f_comb B_comb + (1-f_comb) B_partial].
-```
+$$
+p(z,t\mid q,\sigma_t)=f_{\rm sig}S(z,t\mid q,\sigma_t)
++(1-f_{\rm sig})\left[f_{\rm comb}B_{\rm comb}(z,t\mid q,\sigma_t)
++(1-f_{\rm comb})B_{\rm partial}(z,t\mid q,\sigma_t)\right].
+$$
+
+For $K$ background categories, the first $K-1$ relative fractions are fitted
+or fixed and the last is the remainder. In general,
+
+$$
+p=f_{\rm sig}S+(1-f_{\rm sig})\sum_{k=1}^{K}w_kB_k,
+\qquad \sum_{k=1}^{K}w_k=1.
+$$
 
 For N backgrounds, the first N-1 carry relative fractions; the last is the
 remainder. A single background needs no relative fraction. These conditional
@@ -311,14 +483,26 @@ mixture fractions are shared by the two tags. The NLL includes every event
 without fitting the relative number of positive/negative tags in this mode.
 
 In extended mode, replace fractions with `signal_yield` and a `yield_` for
-**every** background. Each yield counts the sum of both tags. Unlike the
-signal-only conditional likelihood, the extended intensity includes each
-component's probability `p_k(tag)`:
+**every** background. Each yield counts the sum of both tags. For an observed
+tag $q$, define $\pi_k(q)=P(q\mid k)$ using `signal_tag_fraction` and
+`tag_fraction`. The fitted intensity is
 
-```text
-lambda(phi,t,tag | sigma_t) = N_sig p_sig(tag) S + sum_k N_k p_k(tag) B_k
-NLL = N_sig + sum_k N_k - sum_events log(lambda).
-```
+$$
+\lambda(z,t,q\mid\sigma_t)=N_{\rm sig}\,\pi_{\rm sig}(q)
+S(z,t\mid q,\sigma_t)
++\sum_{k=1}^{K}N_k\,\pi_k(q)B_k(z,t\mid q,\sigma_t).
+$$
+
+The extended negative log-likelihood, up to parameter-independent terms, is
+
+$$
+\mathcal N_{\rm ext}=N_{\rm sig}+\sum_{k=1}^{K}N_k
+-\sum_{i=1}^{N_{\rm data}}\log\lambda(z_i,t_i,q_i\mid\sigma_{t,i}).
+$$
+
+Each yield counts both observed tags. If a tag fraction is omitted, the
+session uses the observed positive-tag fraction as a fixed default; this does
+not introduce a component-specific tag asymmetry.
 
 Use `signal_tag_fraction=` for the signal's P(tag=+1), and `tag_fraction=`
 for each background. These may be fixed numbers or Parameters in [0,1].
@@ -420,3 +604,32 @@ transcribes all 15 components and runs a fit-fraction audit and Asimov fit.
 Its sizeable remaining FF discrepancies are recorded in the
 [validation report](reviews/20260923_time_dependent_belle.md); do not treat it
 as an already closed reproduction of Belle's amplitude conventions.
+
+## Joint time-dependent toy generation
+
+`generate_time_dependent_toy(session, size, ...)` generates a signal sample
+with Dalitz coordinates, true decay times, observed tags and latent true tags:
+`toy.data`, `toy.times`, `toy.tags` and `toy.true_tags`. It uses a uniform
+phase-space proposal and an exponential lifetime proposal, then resamples using
+the session's own time-dependent signal density. The generated Dalitz shape and
+time distribution are therefore correlated through mixing.
+
+```python
+from dalitzplotfitter import generate_time_dependent_toy
+
+toy = generate_time_dependent_toy(
+    session,
+    50_000,
+    parameters=truth,
+    production_fraction=0.65,
+    wrong_tag=0.08,
+    proposal_size=1_000_000,
+    seed=7,
+)
+```
+
+This first sampler targets true time with perfect resolution and unit temporal
+acceptance. It rejects sessions configured with `time_nodes`, `time_acceptance`
+or `sigma_t`; those require sampling the detector response after the true-time
+draw. Background generation remains separate and can use the existing
+`ToyBackground` and `TimeDependentBackgroundSpec` APIs.

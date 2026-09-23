@@ -144,6 +144,7 @@ from .time_dependent_workflow import (
     TimeDependentBackgroundSpec,
     TimeDependentFitSession,
 )
+from .time_dependent_toy import TimeDependentToy, generate_time_dependent_toy
 from .toy_api import (
     CPToyBackground,
     PreparedInverseToyGenerator,
@@ -170,6 +171,8 @@ __all__ = [
     "TimeDependentMixtureNLL",
     "TimeDependentBackgroundSpec",
     "TimeDependentFitSession",
+    "TimeDependentToy",
+    "generate_time_dependent_toy",
     "AmplitudeComponent", "BackgroundCategory", "BackgroundSpec", "BinnedChi2Result", "BreitWigner1D", "CPBackgroundCategory", "kdtree_local_residuals",
     "CPBackgroundSpec", "CPFitSession", "CPJointNLL", "CPToyBackground", "BaBarFlatte", "CPRealImag",
     "CoherentAmplitudeModel", "CompositeVeto", "ConstrainedNLL", "ConstantAmplitude",
