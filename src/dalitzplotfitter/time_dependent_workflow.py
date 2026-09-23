@@ -121,8 +121,8 @@ class TimeDependentFitSession:
     non-extended, no backgrounds, no fitted production/tag-count asymmetry.
     ``plot_time_projection`` overlays each tag's decay-time histogram against
     the exact Dalitz-integrated curve (unit acceptance/perfect resolution
-    only); a Dalitz-by-tag projection plot is not yet provided. See
-    ``docs/time_dependent.md``.
+    only); ``plot_projection`` is the Dalitz-variable analogue, time-integrated
+    over ``time_range``. See ``docs/time_dependent.md``.
     """
 
     model: DecayModel

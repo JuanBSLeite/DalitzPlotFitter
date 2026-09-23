@@ -294,7 +294,7 @@ def plot_contour(result, x: str, y: str, *, cl=(0.68, 0.95), size: int = 100, ax
     ax.plot(
         [float(result.values[x])], [float(result.values[y])],
         marker="*", color="black", markersize=12, linestyle="none",
-        label="melhor ajuste",
+        label="best fit",
     )
     ax.set_xlabel(x)
     ax.set_ylabel(y)
