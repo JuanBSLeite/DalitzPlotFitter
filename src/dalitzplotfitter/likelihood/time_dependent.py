@@ -323,6 +323,94 @@ class TimeDependentDalitzNLL:
         observed_minus = (1 - wrong) * p_minus + wrong * p_plus
         return observed_plus, observed_minus
 
+    def tag_marginal_density(self, amplitude_a, amplitude_b, parameters):
+        """Time-integrated (over ``self.time_range``), tag-conditional Dalitz
+        density at arbitrary points, given their A/Abar amplitude values.
+
+        ``amplitude_a``/``amplitude_b`` are the coherent A/Abar amplitudes
+        evaluated at whatever points the caller wants a density for -- e.g. a
+        rendering phase-space sample for plotting, NOT necessarily
+        ``self.cache``'s own event data. Returns ``(observed_plus,
+        observed_minus)``: each a density over the full Dalitz phase space
+        (integrates to 1 there, under the package's ``mean(weights*f)``
+        convention) for the tag=+1 and tag=-1 populations, already including
+        wrong_tag mixing -- the same physical normalization ``densities()``
+        divides each event by, just marginalized over time instead of over
+        Dalitz. Intended for plotting/diagnostics (see
+        ``TimeDependentFitSession.plot_projection``), not for use inside a
+        fit objective.
+
+        Requires a scalar ``wrong_tag``: a single density needs one
+        representative mistag probability, not the per-event values a fit
+        may use.
+        """
+        wrong = jnp.asarray(_resolve(self.wrong_tag, parameters))
+        if wrong.ndim != 0:
+            raise ValueError(
+                "tag_marginal_density requires a scalar wrong_tag; a single "
+                "density needs one representative mistag probability"
+            )
+        _, ia, ib, cross, ratio = self._overlap_and_ratio(parameters)
+        integral = self.mixing.integrals(self.time_range, parameters)
+        r2 = jnp.abs(ratio) ** 2
+        a, b = jnp.asarray(amplitude_a), jnp.asarray(amplitude_b)
+        rate_plus = _rate(
+            integral, jnp.abs(a) ** 2, jnp.abs(ratio * b) ** 2, ratio * jnp.conj(a) * b
+        )
+        rate_minus = _rate(
+            integral, jnp.abs(b) ** 2, jnp.abs(a) ** 2 / r2, jnp.conj(b) * a / ratio
+        )
+        norm_plus = _rate(integral, ia, r2 * ib, ratio * cross)
+        norm_minus = _rate(integral, ib, ia / r2, jnp.conj(cross) / ratio)
+        p_plus, p_minus = rate_plus / norm_plus, rate_minus / norm_minus
+        observed_plus = (1 - wrong) * p_plus + wrong * p_minus
+        observed_minus = (1 - wrong) * p_minus + wrong * p_plus
+        return observed_plus, observed_minus
+
+    def dalitz_density_at_time(self, amplitude_a, amplitude_b, t, parameters):
+        """Dalitz-plane density snapshot at one fixed decay time ``t``.
+
+        Unlike ``tag_marginal_density`` (time-integrated) or
+        ``dalitz_integrated_time_pdf`` (Dalitz-integrated), this leaves both
+        axes unmarginalized: it is the joint (Dalitz, tag) density AT ``t``,
+        normalized so it integrates to 1 over the full Dalitz phase space AT
+        THAT ``t`` (under the package's ``mean(weights*f)`` convention) --
+        i.e. it divides out the trivial overall exp(-t/tau) yield decay so
+        consecutive snapshots are directly comparable, isolating the
+        mixing-driven Dalitz-SHAPE evolution with time (see
+        ``tag_marginal_density``'s docstring for the general
+        amplitude_a/amplitude_b convention). At ``t=0`` this reduces exactly
+        to ``|A|^2/ia`` (tag=+1) and ``|Abar|^2/ib`` (tag=-1) before wrong_tag
+        mixing, since ``mixing.basis(0, .)=(1,0,0,0)`` regardless of x,y.
+        Intended for plotting/diagnostics (e.g. an animation of the D0/D0bar
+        Dalitz shape vs t), not for use inside a fit objective.
+
+        Requires a scalar ``wrong_tag``, for the same reason as
+        ``tag_marginal_density``.
+        """
+        wrong = jnp.asarray(_resolve(self.wrong_tag, parameters))
+        if wrong.ndim != 0:
+            raise ValueError(
+                "dalitz_density_at_time requires a scalar wrong_tag; a single "
+                "density needs one representative mistag probability"
+            )
+        _, ia, ib, cross, ratio = self._overlap_and_ratio(parameters)
+        basis = self.mixing.basis(jnp.asarray(t), parameters)
+        r2 = jnp.abs(ratio) ** 2
+        a, b = jnp.asarray(amplitude_a), jnp.asarray(amplitude_b)
+        rate_plus = _rate(
+            basis, jnp.abs(a) ** 2, jnp.abs(ratio * b) ** 2, ratio * jnp.conj(a) * b
+        )
+        rate_minus = _rate(
+            basis, jnp.abs(b) ** 2, jnp.abs(a) ** 2 / r2, jnp.conj(b) * a / ratio
+        )
+        norm_plus = _rate(basis, ia, r2 * ib, ratio * cross)
+        norm_minus = _rate(basis, ib, ia / r2, jnp.conj(cross) / ratio)
+        p_plus, p_minus = rate_plus / norm_plus, rate_minus / norm_minus
+        observed_plus = (1 - wrong) * p_plus + wrong * p_minus
+        observed_minus = (1 - wrong) * p_minus + wrong * p_plus
+        return observed_plus, observed_minus
+
     def _physical_parameters(self, parameters):
         """Cheap, data-independent gate for __call__.
 

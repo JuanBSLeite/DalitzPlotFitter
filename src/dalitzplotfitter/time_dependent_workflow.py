@@ -422,9 +422,8 @@ class TimeDependentFitSession:
         Dalitz marginal, not a rendering MC sample -- so it shares that
         method's scope: requires unit temporal acceptance and perfect
         resolution (no ``time_acceptance``/``sigma_t``) and a scalar
-        ``wrong_tag``. A tag with zero observed events is skipped. Does not
-        project onto a Dalitz variable; see ``docs/time_dependent.md`` for
-        what this session does not yet provide.
+        ``wrong_tag``. A tag with zero observed events is skipped. Projects
+        onto decay time only; see ``plot_projection`` for a Dalitz variable.
         """
         import matplotlib.pyplot as plt
 
@@ -476,6 +475,101 @@ class TimeDependentFitSession:
         ax.set_xlabel("t" + (f" [{time_unit}]" if time_unit else ""))
         ax.legend()
         return ax
+
+    def plot_projection(
+        self, result, variable: str = "s13", *, bins: int = 60,
+        range: tuple[float, float] | None = None, show_pulls: bool = False,
+        log_scale: bool = False, projection_size: int = 100_000,
+        projection_seed: int = 20260924, axes=None,
+    ):
+        """Plot each observed tag's Dalitz-variable histogram against the
+        model's time-integrated, tag-conditional prediction, one subplot per
+        tag (D0 | D0bar), matching ``CPFitSession.plot_projection``'s
+        side-by-side layout for its two populations.
+
+        A weighted phase-space MC sample is used only to render the
+        one-dimensional projection; the density itself comes from
+        ``TimeDependentDalitzNLL.tag_marginal_density``, time-integrated over
+        ``self.time_range`` using the same mixing-integral machinery the fit
+        itself normalizes against -- not a time-binned approximation. Shares
+        that method's scope: requires a scalar ``wrong_tag``.
+
+        ``show_pulls=True`` adds a ``(observed-expected)/sqrt(expected)``
+        panel below each tag's histogram, sharing that column's x axis. It
+        builds its own 2x2 figure and therefore requires ``axes=None``; the
+        return value is then the full 2x2 axes grid (row 0 the histograms,
+        row 1 the pulls) instead of the usual length-2 list.
+        """
+        import matplotlib.pyplot as plt
+
+        from dalitzplotfitter.plotting import _draw_pulls_1d, plot_binned_data
+        from dalitzplotfitter.workflow import _scaled_projection_weights
+
+        if show_pulls and axes is not None:
+            raise ValueError(
+                "show_pulls=True builds its own figure layout; pass axes=None"
+            )
+        values = self.result_values(result)
+        tags = np.asarray(self.tags)
+        data_values = np.asarray(getattr(self.data, variable))
+        hist_range = range or (float(data_values.min()), float(data_values.max()))
+        edges = np.histogram_bin_edges(data_values, bins=bins, range=hist_range)
+
+        sample = self.model.generate_phase_space(
+            projection_size, seed=projection_seed, include_momenta=False,
+        )
+        sample_data = sample.as_dict()
+        a_amp = jnp.zeros(sample.size, dtype=jnp.complex128)
+        for component in self.model.amplitude_model.components:
+            a_amp = a_amp + component.value(sample_data)
+        b_amp = jnp.zeros(sample.size, dtype=jnp.complex128)
+        for component in self._abar_components:
+            b_amp = b_amp + component.value(sample_data)
+        density_plus, density_minus = self.base_objective.tag_marginal_density(
+            a_amp, b_amp, values,
+        )
+        sample_values = np.asarray(getattr(sample, variable))
+
+        grid = None
+        pulls_axes = (None, None)
+        if axes is None:
+            if show_pulls:
+                _, grid = plt.subplots(
+                    2, 2, figsize=(12, 7.2), sharex="col",
+                    gridspec_kw={"height_ratios": (3, 1)}, constrained_layout=True,
+                )
+                axes, pulls_axes = grid[0], grid[1]
+            else:
+                _, axes = plt.subplots(1, 2, figsize=(12, 4.8), constrained_layout=True)
+
+        unit = r"GeV$^2$" if variable in ("s12", "s13", "s23") else ""
+        axis_label = rf"${variable}$" + (" [GeV$^2$]" if unit else "")
+        for ax, ax_pulls, tag, label, density in zip(
+            axes, pulls_axes, (1, -1), ("D0", "D0bar"), (density_plus, density_minus),
+            strict=True,
+        ):
+            mask = tags == tag
+            n = int(mask.sum())
+            _, observed, _, _ = plot_binned_data(
+                data_values[mask], bins=edges, ax=ax, label=f"data ({label})",
+                unit=unit, log_scale=log_scale,
+            )
+            weights = _scaled_projection_weights(sample, np.asarray(density), n)
+            total, _ = np.histogram(sample_values, bins=edges, weights=weights)
+            ax.stairs(total, edges, label=f"fit ({label})", linewidth=2.0)
+            ax.set_title(label)
+            ax.legend()
+            if ax_pulls is None:
+                ax.set_xlabel(axis_label)
+                continue
+            occupied = total > 0
+            pulls = np.full(bins, np.nan)
+            pulls[occupied] = (
+                (observed[occupied] - total[occupied]) / np.sqrt(total[occupied])
+            )
+            _draw_pulls_1d(ax_pulls, edges, pulls)
+            ax_pulls.set_xlabel(axis_label)
+        return grid if show_pulls else axes
 
 
 __all__ = ["TimeDependentFitSession"]

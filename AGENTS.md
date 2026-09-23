@@ -35,6 +35,7 @@ python benchmarks/benchmark_toy_generation.py --size 100000
 python benchmarks/benchmark_scf_migration.py --bins-mprime 40 --bins-thetaprime 40
 python benchmarks/benchmark_cache_stages.py --events 100000 --normalization-resolution 1000
 python benchmarks/benchmark_qmi_memory_speed.py
+python benchmarks/benchmark_time_dependent.py --resolution 20
 ```
 
 CI (`.github/workflows/tests.yml`) runs `pytest tests` on Python 3.12, 3.13, and 3.14, plus a notebook
@@ -162,6 +163,31 @@ of jointly, so `N_plus`/`N_minus` are already standalone per-charge counts — `
 signal-projection scaling must *not* reweight them by `integral_q / norm` the way a shared
 `signal_yield` is. See `docs/cp_coefficients.md`, "Yield-asymmetry parameterization".
 
+### Time-dependent neutral-meson mixing
+
+`NeutralMesonMixing`/`TimeDependentDalitzNLL` (`likelihood/time_dependent.py`) are a separate API
+from `CPJointNLL`: an unbinned `(Dalitz, decay-time)` likelihood conditional on an observed
+initial-flavour tag (D0 vs D0bar), following Belle PRD 89, 091103 (2014) Eqs. (1-2). One
+`PreparedAmplitudeCache` holds A components followed by Abar components, evaluated at the SAME
+final-state coordinates and integration sample -- there is no automatic identical-particle
+folding here (e.g. pi+/pi- stay distinct). `TimeDependentFitSession`
+(`time_dependent_workflow.py`) is the composition layer, following the same "does not replace the
+low-level classes" principle as `FitSession`/`CPFitSession`: by default it derives Abar by
+reflection, `Abar(s12,s13)=A(s13,s12)` (no-direct-CPV); pass an independently built `abar_model`
+for direct CPV instead.
+
+Three `TimeDependentDalitzNLL` methods marginalize the joint density differently and back the
+session's plotting, rather than each plot re-deriving the physics: `dalitz_integrated_time_pdf`
+(Dalitz-integrated, keeps t; requires unit temporal acceptance/perfect resolution),
+`tag_marginal_density` (time-integrated over `time_range`, keeps Dalitz), and
+`dalitz_density_at_time` (neither marginalized -- a Dalitz snapshot at one fixed t, normalized to
+integrate to 1 *at that t*, isolating the mixing-driven shape evolution from the trivial
+exp(-t/tau) yield decay). All three require a scalar `wrong_tag` (a single curve/snapshot needs
+one representative mistag probability, not the per-event values a fit may use). `plot_contour`
+(`plotting.py`) is not session-specific -- it draws Minos profile-likelihood contours via
+`Minuit.mncontour` for any fitted `Minuit` result (any session's `fit()` return value), e.g. the
+`(x,y)` confidence region a mixing measurement publishes. See `docs/time_dependent.md`.
+
 ### Folded Dalitz Plot / Square Dalitz Plot for identical particles
 
 For a channel with two identical final-state particles, `DecayChannel` detects them
@@ -199,7 +225,7 @@ Each subsystem also has one focused doc under `docs/` (`fitting.md`, `lineshapes
 `mc_integration.md`, `backgrounds_and_vetoes.md`, `cp_coefficients.md`, `scf.md`,
 `square_dalitz.md`, `toy_generation.md`, `discriminants_and_constraints.md`,
 `convolution_resolution.md`, `dynamics_structure.md`, `performance.md`, `root_io.md`,
-`model_io.md`, `user_friendly_api.md`, `goodness_of_fit.md`). `docs/reviews/` contains dated, adversarial numeric-reproduction review
+`model_io.md`, `user_friendly_api.md`, `goodness_of_fit.md`, `time_dependent.md`). `docs/reviews/` contains dated, adversarial numeric-reproduction review
 write-ups (concrete inputs, reproduced numbers, "Applied fixes" sections, or — as in
 `paper_isobar_conventions.md` — an explicit "Remaining discrepancy" section when a reproduction
 is not yet closed) — this repo's working style is to reproduce a suspected discrepancy
@@ -212,7 +238,9 @@ set referenced by the docs and README (`notebooks/tutorials/TUTORIALS.md`);
 analyses (not tutorials) that consume the same public API and can break silently when a
 lineshape or normalization convention changes underneath them; `notebooks/benchmark/` holds
 numeric-reproduction benchmarks against a specific published paper/Laura++ configuration (e.g.
-`paper_isobar_benchmark.ipynb` for the LHCb `B -> 3pi` isobar model) rather than tutorials.
+`paper_isobar_benchmark.ipynb` for the LHCb `B -> 3pi` isobar model, or
+`belle_2014_d0_kspipi_time_dependent.ipynb` for the time-dependent D0 mixing formalism above)
+rather than tutorials.
 
 ### Histogram interpolation and Square-Dalitz acceptance
 

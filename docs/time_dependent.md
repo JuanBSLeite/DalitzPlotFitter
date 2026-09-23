@@ -163,8 +163,7 @@ is built once on `model`'s `data`/`normalization_sample` for both flavours.
 `abar_model`, if given) plus `mixing`. `fit(update_model=True)` also returns
 the model(s) with fitted values baked in, via `model_with_fitted_values`.
 Scope matches `TimeDependentDalitzNLL` exactly: signal-only, non-extended, no
-backgrounds. A `plot_projection`-style Dalitz-by-tag projection plot is not
-yet provided.
+backgrounds.
 
 `session.plot_time_projection(result)` overlays each observed tag's decay-time
 histogram against the model's exact Dalitz-integrated curve:
@@ -182,6 +181,33 @@ resolution only (raises if `time_nodes`/`sigma_t`/`time_acceptance` are set),
 and a scalar `wrong_tag` (a single curve needs one representative mistag
 probability, not per-event values). A tag with zero observed events is
 skipped.
+
+`session.plot_projection(result, variable)` is the Dalitz-variable analogue,
+one subplot per tag (D0 | D0bar), mirroring `CPFitSession.plot_projection`'s
+two-population layout:
+
+```python
+session.plot_projection(result, "s13", bins=60)
+```
+
+A weighted phase-space MC sample renders the histogram; the density comes
+from `TimeDependentDalitzNLL.tag_marginal_density`, the *time*-integrated
+(over `time_range`) counterpart of `dalitz_integrated_time_pdf` --
+`p(s12,s13 | tag) = integral_t rate(t, s12, s13, tag) dt / norm`, built from
+the same `mixing.integrals` the fit itself normalizes against. It shares
+`dalitz_integrated_time_pdf`'s scalar-`wrong_tag` requirement but not its
+unit-acceptance/perfect-resolution one, since time is integrated out
+analytically via `mixing.integrals` regardless of any observed-time
+quadrature. `show_pulls=True` adds a pull panel below each tag's histogram,
+same convention as `FitSession`/`CPFitSession`.
+
+`plot_contour(result, "mix.x", "mix.y")` (not session-specific -- see the
+"Plotting" section of `docs/catalog.md`) draws the published-style (x, y)
+confidence-region plot: the profile-likelihood 68%/95% contours from
+`Minuit.mncontour` around the fitted point, exactly the kind of figure a
+mixing-parameter paper publishes (e.g. Fig. 4 of the Belle reference above).
+`result` is any fitted `Minuit` object, i.e. what `session.fit()` returns
+with the default `update_model=False`.
 
 ## Reproducible validation and scope of the Belle reproduction
 

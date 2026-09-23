@@ -54,6 +54,18 @@ def _mixing():
     )
 
 
+def _fixed_mixing():
+    # NonResonant is Dalitz-independent, so the auto-reflected Abar equals A
+    # exactly here, and with q_over_p=1 (default) x drops out of the rate
+    # entirely (see the derivation in the module docstring notes below): x is
+    # a genuinely flat/unidentified direction for this toy model, not just
+    # weakly constrained. Floating it (as _mixing() does) lets Migrad land
+    # anywhere in its bounds, including exactly at one -- flaky across
+    # platforms. Tests that only need "a session that fits", not mixing
+    # convergence itself, use fixed values instead.
+    return NeutralMesonMixing(0.01, 0.005, 0.4103)
+
+
 def _session(**kwargs):
     data = kwargs.pop("data", _data())
     n = data.size
@@ -150,10 +162,9 @@ def test_explicit_abar_model_is_used_directly_not_reflected():
 
 
 def test_fit_update_model_returns_fitted_values():
-    session = _session()
+    session = _session(mixing=_fixed_mixing())
     result, fitted_model = session.fit(
-        {"NR.x": 0.9, "mix.x": 0.01, "mix.y": 0.005},
-        simplex=False, ncall=50, update_model=True,
+        {"NR.x": 0.9}, simplex=False, ncall=50, update_model=True,
     )
     assert result.valid
     fitted_x = next(p for p in fitted_model.parameters if p.name == "NR.x").value
@@ -164,20 +175,16 @@ def test_fit_update_model_returns_fitted_values():
 
 
 def test_report_and_fit_fractions_run():
-    session = _session()
-    result = session.fit(
-        {"NR.x": 0.9, "mix.x": 0.01, "mix.y": 0.005}, simplex=False, ncall=50,
-    )
+    session = _session(mixing=_fixed_mixing())
+    result = session.fit({"NR.x": 0.9}, simplex=False, ncall=50)
     report = session.report(result)
     assert set(report) >= {"valid", "nll", "edm", "values", "errors", "fit_fractions"}
     assert report["fit_fractions"]["NR"] == pytest.approx(1.0, rel=1e-6)
 
 
 def test_plot_time_projection_runs_and_returns_axes_with_both_tags():
-    session = _session()
-    result = session.fit(
-        {"NR.x": 0.9, "mix.x": 0.01, "mix.y": 0.005}, simplex=False, ncall=50,
-    )
+    session = _session(mixing=_fixed_mixing())
+    result = session.fit({"NR.x": 0.9}, simplex=False, ncall=50)
     ax = session.plot_time_projection(result)
     assert ax.get_xlabel() == "t"
     # both tags present in this session's data -> 4 series.
@@ -191,32 +198,68 @@ def test_plot_time_projection_runs_and_returns_axes_with_both_tags():
 
 def test_plot_time_projection_skips_a_tag_with_no_observed_events():
     data = _data()
-    session = _session(data=data, tags=jnp.ones(data.size))
-    result = session.fit(
-        {"NR.x": 0.9, "mix.x": 0.01, "mix.y": 0.005}, simplex=False, ncall=50,
-    )
+    session = _session(data=data, tags=jnp.ones(data.size), mixing=_fixed_mixing())
+    result = session.fit({"NR.x": 0.9}, simplex=False, ncall=50)
     ax = session.plot_time_projection(result)
     assert len(ax.get_legend().get_texts()) == 2
 
 
 def test_plot_time_projection_rejects_event_wise_wrong_tag():
     data = _data()
-    session = _session(data=data, wrong_tag=jnp.full(data.size, 0.1))
-    result = session.fit(
-        {"NR.x": 0.9, "mix.x": 0.01, "mix.y": 0.005}, simplex=False, ncall=50,
+    session = _session(
+        data=data, wrong_tag=jnp.full(data.size, 0.1), mixing=_fixed_mixing(),
     )
+    result = session.fit({"NR.x": 0.9}, simplex=False, ncall=50)
     with pytest.raises(ValueError, match="scalar wrong_tag"):
         session.plot_time_projection(result)
 
 
 def test_plot_time_projection_uses_finite_time_range_by_default():
     data = _data()
-    session = _session(data=data, time_range=(0.0, 3.0))
-    result = session.fit(
-        {"NR.x": 0.9, "mix.x": 0.01, "mix.y": 0.005}, simplex=False, ncall=50,
-    )
+    session = _session(data=data, time_range=(0.0, 3.0), mixing=_fixed_mixing())
+    result = session.fit({"NR.x": 0.9}, simplex=False, ncall=50)
     ax = session.plot_time_projection(result)
     curve = next(line for line in ax.get_lines() if line.get_label().startswith("fit "))
     xdata = curve.get_xdata()
     assert xdata.min() == pytest.approx(0.0)
     assert xdata.max() == pytest.approx(3.0)
+
+
+def test_plot_projection_runs_and_returns_two_axes():
+    session = _session(mixing=_fixed_mixing())
+    result = session.fit({"NR.x": 0.9}, simplex=False, ncall=50)
+    axes = session.plot_projection(result, "s12", bins=10, projection_size=2_000)
+    assert len(axes) == 2
+    assert axes[0].get_title() == "D0"
+    assert axes[1].get_title() == "D0bar"
+    for ax in axes:
+        assert ax.get_xlabel() == r"$s12$ [GeV$^2$]"
+
+
+def test_plot_projection_with_pulls_returns_2x2_grid():
+    session = _session(mixing=_fixed_mixing())
+    result = session.fit({"NR.x": 0.9}, simplex=False, ncall=50)
+    grid = session.plot_projection(
+        result, "s13", bins=10, projection_size=2_000, show_pulls=True,
+    )
+    assert grid.shape == (2, 2)
+
+
+def test_plot_projection_with_pulls_and_explicit_axes_raises():
+    import matplotlib.pyplot as plt
+
+    session = _session(mixing=_fixed_mixing())
+    result = session.fit({"NR.x": 0.9}, simplex=False, ncall=50)
+    _, axes = plt.subplots(1, 2)
+    with pytest.raises(ValueError, match="axes=None"):
+        session.plot_projection(result, show_pulls=True, axes=axes)
+
+
+def test_plot_projection_rejects_event_wise_wrong_tag():
+    data = _data()
+    session = _session(
+        data=data, wrong_tag=jnp.full(data.size, 0.1), mixing=_fixed_mixing(),
+    )
+    result = session.fit({"NR.x": 0.9}, simplex=False, ncall=50)
+    with pytest.raises(ValueError, match="scalar wrong_tag"):
+        session.plot_projection(result, "s12", projection_size=2_000)

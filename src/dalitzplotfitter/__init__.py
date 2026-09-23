@@ -122,6 +122,7 @@ from .pdf import SCFSignalPDF, SignalPDF
 from .plotting import (
     binned_data,
     plot_binned_data,
+    plot_contour,
     plot_dalitz,
     plot_pulls,
     plot_square_dalitz,
@@ -184,7 +185,7 @@ __all__ = [
     "generate_cp_toy", "generate_signal_toy", "generate_toy", "histogram_background_from_root",
     "histogram_efficiency_from_root", "import_cp_models", "import_model", "invariants_to_square_dalitz",
     "model_from_spec", "model_to_spec", "model_with_fitted_values", "physical_bin_mask",
-    "plot_binned_data", "plot_dalitz", "plot_pulls", "plot_square_dalitz", "point_to_point_dissimilarity", "prepare_inverse_toy_generator",
+    "plot_binned_data", "plot_contour", "plot_dalitz", "plot_pulls", "plot_square_dalitz", "point_to_point_dissimilarity", "prepare_inverse_toy_generator",
     "read_phase_space_sample", "read_root_histogram2d", "read_root_tree",
     "square_dalitz_background_from_root", "square_dalitz_efficiency_from_root", "square_dalitz_jacobian",
     "square_dalitz_to_invariants", "vetoed_signal_pdf", "weighted_resample",

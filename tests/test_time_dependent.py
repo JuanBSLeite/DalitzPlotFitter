@@ -190,6 +190,126 @@ def test_dalitz_integrated_time_pdf_rejects_quadrature_and_event_wise_wrong_tag(
         array_wrong_nll.dalitz_integrated_time_pdf(np.array([0.5]), {})
 
 
+def test_tag_marginal_density_integrates_to_one_over_dalitz():
+    nll = make_nll(
+        np.array([0.1, 0.5, 1.0]), np.array([1, -1, 1]),
+        mixing=NeutralMesonMixing(0.015, -0.02, 0.6, 0.88, 0.25),
+        wrong_tag=0.12, time_range=(0.0, 3.0),
+    )
+    zn, wn = quadrature(35, 0, 1)
+    a = 1 + 0.7 * zn + 1j * zn * zn
+    b = (0.8 + 0.3j) * (1 + 0.7 * (1 - zn) + 1j * (1 - zn) ** 2)
+    density_plus, density_minus = nll.tag_marginal_density(a, b, {})
+    weights = wn * len(wn)
+    total_plus = float(np.mean(weights * np.asarray(density_plus)))
+    total_minus = float(np.mean(weights * np.asarray(density_minus)))
+    np.testing.assert_allclose([total_plus, total_minus], [1.0, 1.0], atol=1e-8)
+
+
+def test_tag_marginal_density_matches_manual_overlap_combination():
+    nll = make_nll(
+        np.array([0.1, 0.5, 1.0]), np.array([1, -1, 1]),
+        mixing=NeutralMesonMixing(0.02, 0.01, 0.5, 0.8, -0.2),
+        wrong_tag=0.2, time_range=(0.0, 4.0),
+    )
+    zn, wn = quadrature(35, 0, 1)
+    a = 1 + 0.7 * zn + 1j * zn * zn
+    b = (0.8 + 0.3j) * (1 + 0.7 * (1 - zn) + 1j * (1 - zn) ** 2)
+    _, ia, ib, cross, ratio = nll._overlap_and_ratio({})
+    from dalitzplotfitter.likelihood.time_dependent import _rate
+
+    integral = nll.mixing.integrals(nll.time_range, {})
+    r2 = abs(ratio) ** 2
+    rate_plus = _rate(integral, abs(a) ** 2, r2 * abs(b) ** 2, ratio * np.conj(a) * b)
+    rate_minus = _rate(integral, abs(b) ** 2, abs(a) ** 2 / r2, np.conj(b) * a / ratio)
+    norm_plus = _rate(integral, ia, abs(ratio) ** 2 * ib, ratio * cross)
+    norm_minus = _rate(integral, ib, ia / abs(ratio) ** 2, np.conj(cross) / ratio)
+    expected_plus = 0.8 * (rate_plus / norm_plus) + 0.2 * (rate_minus / norm_minus)
+    expected_minus = 0.8 * (rate_minus / norm_minus) + 0.2 * (rate_plus / norm_plus)
+
+    p_plus, p_minus = nll.tag_marginal_density(a, b, {})
+    np.testing.assert_allclose(p_plus, expected_plus, rtol=1e-12)
+    np.testing.assert_allclose(p_minus, expected_minus, rtol=1e-12)
+
+
+def test_tag_marginal_density_rejects_event_wise_wrong_tag():
+    nll = make_nll(
+        np.array([0.1, 0.5, 1.0]), np.ones(3), wrong_tag=np.array([0.1, 0.2, 0.3]),
+    )
+    with pytest.raises(ValueError, match="scalar wrong_tag"):
+        nll.tag_marginal_density(np.ones(3), np.ones(3), {})
+
+
+def test_dalitz_density_at_time_zero_reduces_to_plain_overlap_ratio():
+    nll = make_nll(
+        np.array([0.1, 0.5, 1.0]), np.array([1, -1, 1]),
+        mixing=NeutralMesonMixing(0.02, -0.015, 0.6, 0.87, 0.3),
+        wrong_tag=0.18,
+    )
+    zn, wn = quadrature(35, 0, 1)
+    a = 1 + 0.7 * zn + 1j * zn * zn
+    b = (0.8 + 0.3j) * (1 + 0.7 * (1 - zn) + 1j * (1 - zn) ** 2)
+    _, ia, ib, _, _ = nll._overlap_and_ratio({})
+    expected_plus = 0.82 * (np.abs(a) ** 2 / ia) + 0.18 * (np.abs(b) ** 2 / ib)
+    expected_minus = 0.82 * (np.abs(b) ** 2 / ib) + 0.18 * (np.abs(a) ** 2 / ia)
+
+    p_plus, p_minus = nll.dalitz_density_at_time(a, b, 0.0, {})
+    np.testing.assert_allclose(p_plus, expected_plus, rtol=1e-12)
+    np.testing.assert_allclose(p_minus, expected_minus, rtol=1e-12)
+
+
+@pytest.mark.parametrize("t", [0.0, 0.3, 1.5])
+def test_dalitz_density_at_time_integrates_to_one_over_dalitz(t):
+    nll = make_nll(
+        np.array([0.1, 0.5, 1.0]), np.array([1, -1, 1]),
+        mixing=NeutralMesonMixing(0.02, -0.015, 0.6, 0.87, 0.3),
+        wrong_tag=0.18,
+    )
+    zn, wn = quadrature(35, 0, 1)
+    a = 1 + 0.7 * zn + 1j * zn * zn
+    b = (0.8 + 0.3j) * (1 + 0.7 * (1 - zn) + 1j * (1 - zn) ** 2)
+    density_plus, density_minus = nll.dalitz_density_at_time(a, b, t, {})
+    weights = wn * len(wn)
+    total_plus = float(np.mean(weights * np.asarray(density_plus)))
+    total_minus = float(np.mean(weights * np.asarray(density_minus)))
+    np.testing.assert_allclose([total_plus, total_minus], [1.0, 1.0], atol=1e-8)
+
+
+def test_dalitz_density_at_time_matches_manual_overlap_combination():
+    nll = make_nll(
+        np.array([0.1, 0.5, 1.0]), np.array([1, -1, 1]),
+        mixing=NeutralMesonMixing(0.03, 0.02, 0.5, 0.75, 0.15),
+        wrong_tag=0.1,
+    )
+    zn, wn = quadrature(35, 0, 1)
+    a = 1 + 0.7 * zn + 1j * zn * zn
+    b = (0.8 + 0.3j) * (1 + 0.7 * (1 - zn) + 1j * (1 - zn) ** 2)
+    t = 0.7
+    _, ia, ib, cross, ratio = nll._overlap_and_ratio({})
+    from dalitzplotfitter.likelihood.time_dependent import _rate
+
+    basis = nll.mixing.basis(t, {})
+    r2 = abs(ratio) ** 2
+    rate_plus = _rate(basis, abs(a) ** 2, r2 * abs(b) ** 2, ratio * np.conj(a) * b)
+    rate_minus = _rate(basis, abs(b) ** 2, abs(a) ** 2 / r2, np.conj(b) * a / ratio)
+    norm_plus = _rate(basis, ia, r2 * ib, ratio * cross)
+    norm_minus = _rate(basis, ib, ia / r2, np.conj(cross) / ratio)
+    expected_plus = 0.9 * (rate_plus / norm_plus) + 0.1 * (rate_minus / norm_minus)
+    expected_minus = 0.9 * (rate_minus / norm_minus) + 0.1 * (rate_plus / norm_plus)
+
+    p_plus, p_minus = nll.dalitz_density_at_time(a, b, t, {})
+    np.testing.assert_allclose(p_plus, expected_plus, rtol=1e-12)
+    np.testing.assert_allclose(p_minus, expected_minus, rtol=1e-12)
+
+
+def test_dalitz_density_at_time_rejects_event_wise_wrong_tag():
+    nll = make_nll(
+        np.array([0.1, 0.5, 1.0]), np.ones(3), wrong_tag=np.array([0.1, 0.2, 0.3]),
+    )
+    with pytest.raises(ValueError, match="scalar wrong_tag"):
+        nll.dalitz_density_at_time(np.ones(3), np.ones(3), 0.5, {})
+
+
 @pytest.mark.parametrize("chunk", [None, 11])
 def test_dynamic_group_cache_and_gradient(chunk):
     nll = make_nll(

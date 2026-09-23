@@ -321,6 +321,7 @@ array already ordered like the requested parameter names. Docs:
 | `plot_binned_data` | function | Plot 1D data as black points with statistical error bars. |
 | `binned_data` | function | Return bin centers, counts, uncertainties and edges without plotting (for custom figures). |
 | `plot_pulls` | function | Plot per-bin pulls from a `BinnedChi2Result` (1D bar plot or 2D diverging heatmap). |
+| `plot_contour` | function | Plot Minos profile-likelihood confidence-region contour(s) in a 2D parameter plane (e.g. `(x, y)` mixing) from a fitted `Minuit` result (any `Minimizer.fit()`/`*FitSession.fit()` return value), via `Minuit.mncontour` -- not the Gaussian/covariance-ellipse approximation. Not session-specific. |
 
 Docs: `docs/user_friendly_api.md` ("Automatic projections", "Plot helpers"), `docs/goodness_of_fit.md`.
 
@@ -332,7 +333,7 @@ Composition layers over everything above; see `docs/user_friendly_api.md` "Desig
 |---|---|---|
 | `FitSession` | class | Compose PDF + likelihood + backgrounds + constraints + minimizer for one sample in a few lines; `fit()`, `report()`, `plot_projection()`, `goodness_of_fit_projection()`/`goodness_of_fit_chi2()`/`point_to_point_dissimilarity()`, `.from_root(...)`. |
 | `CPFitSession` | class | Same composition for simultaneous B+/B- fits over `CPJointNLL`; shared `Parameter`s collected once; same goodness-of-fit methods, per charge. |
-| `TimeDependentFitSession` | class | Composes `TimeDependentDalitzNLL`: builds the shared A+Abar `PreparedAmplitudeCache` (Abar derived by reflection unless an explicit `abar_model` is given, for direct CPV) and collects `Parameter`s from the model(s) and `mixing`. `fit()`/`fit_multistart()`/`report()`/`print_result()`/`print_fit_fractions()`/`fit_fraction_errors()`, matching `TimeDependentDalitzNLL`'s scope exactly (signal-only, non-extended, no backgrounds). `plot_time_projection()` overlays each tag's decay-time histogram against the exact Dalitz-integrated curve (unit acceptance/perfect resolution only); no Dalitz-by-tag projection plot yet. |
+| `TimeDependentFitSession` | class | Composes `TimeDependentDalitzNLL`: builds the shared A+Abar `PreparedAmplitudeCache` (Abar derived by reflection unless an explicit `abar_model` is given, for direct CPV) and collects `Parameter`s from the model(s) and `mixing`. `fit()`/`fit_multistart()`/`report()`/`print_result()`/`print_fit_fractions()`/`fit_fraction_errors()`, matching `TimeDependentDalitzNLL`'s scope exactly (signal-only, non-extended, no backgrounds). `plot_time_projection()` overlays each tag's decay-time histogram against the exact Dalitz-integrated curve (unit acceptance/perfect resolution only). `plot_projection()` overlays each tag's Dalitz-variable histogram (one subplot per tag) against the time-integrated, tag-conditional density, mirroring `CPFitSession.plot_projection`'s two-population layout. |
 
 Docs: `docs/user_friendly_api.md`, `docs/time_dependent.md`. Notebooks: `16_user_friendly_quickstart.ipynb`, `17_b2kpipi_cp_user_friendly.ipynb`, `notebooks/benchmark/belle_2014_d0_kspipi_time_dependent.ipynb`.
 
