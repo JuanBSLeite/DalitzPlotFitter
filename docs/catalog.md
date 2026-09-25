@@ -19,7 +19,7 @@ The lessons explain the main fitting workflow and link to specialized examples b
 |---|---|---|
 | `DecayChannel` | class | Parent particle and ordered three-body final state (`("D+", ("pi-","pi+","pi+"))`). |
 | `DecayModel` | class | Build a coherent amplitude model with deterministic Dalitz-plane normalization; owns `normalization_method`/`normalize_components`. |
-| `Resonance` | class | Declarative one-dimensional resonance component: mass, width, spin, coefficient, and an interchangeable `lineshape`/`angular` plugin. |
+| `Resonance` | class | Declarative one-dimensional resonance component: mass, width, spin, coefficient, interchangeable `lineshape`/`angular` plugins, and `normalize_form_factors` for pole-normalized or raw barriers; see `docs/dynamics_structure.md`. |
 | `NonResonant` | class | Constant (S-wave, isotropic) non-resonant component with a complex coefficient. |
 | `DalitzAmplitude` | class | Attach a genuinely two-dimensional amplitude (e.g. `QMI2D`) that depends on both Dalitz invariants at once, bypassing the isobar construction. |
 | `AmplitudeComponent` | class | Named dynamical component `F_i(x)` with a coefficient; the base type `Resonance`/`NonResonant`/`DalitzAmplitude` all produce. |

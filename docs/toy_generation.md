@@ -105,6 +105,36 @@ If four-momenta are requested, they are reconstructed only for the final accepte
 
 The sampler intentionally keeps a monitored global envelope as an independent validation path. That global envelope can still be inefficient for strongly structured amplitude models; proposal-shape improvements are a separate optimization from the exact computational fast path described above.
 
+## Square-Dalitz histogram backgrounds
+
+For a histogram density `h(mprime, thetaprime)` per Square-Dalitz area, use
+`SquareDalitzHistogramBackground(..., divide_jacobian=True)`. Both
+`ToyBackground` and `CPToyBackground`, including `with_charge_asymmetry()`
+wrappers, then sample in the histogram's ordered Square-Dalitz coordinate pair:
+
+- `accept-reject` proposes uniformly on the full unit square and accepts using
+  the raw histogram height, with monitored envelopes and restart on overflow.
+- `inverse-transform` tabulates its marginal and conditional CDFs on that square;
+  `prepare_inverse_toy_generator` reuses these tables as usual.
+
+Vetoes are evaluated on the corresponding invariants. Folded histograms are
+sampled on the full square, looking up the folded angle, so both exchange-related
+halves are populated. The fit and CP charge-split integrals still evaluate `h/J`
+with ordinary Dalitz integration weights. The same post-veto normalization and
+charge scales therefore determine generation and fitting.
+
+Earlier versions used raw `h` with the ordinary Dalitz sampling measure,
+producing `h*J` in Square Dalitz and potentially incorrect CP charge fractions.
+Merely substituting `h/J` in a conventional-Dalitz sampler is numerically unsafe
+at the boundaries, where `J` vanishes. Direct square-coordinate sampling avoids
+that singularity. Inverse-CDF endpoint values use inward limits at 1e-6 from
+the square edges, where the helicity angle remains defined.
+
+With `divide_jacobian=False`, the histogram callable is instead a density per
+ordinary Dalitz area and generation preserves that interpretation. Custom
+callables also supply density per ordinary Dalitz area; a `generation_value`
+attribute alone no longer changes their measure.
+
 ## Performance
 
 The repository benchmark should be used for current timings because both the accept-reject and compact phase-space paths are actively optimized. It reports accept-reject separately with and without retained four-momenta, as well as inverse-transform preparation and prepared-generation throughput.

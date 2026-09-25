@@ -101,7 +101,8 @@ between bin centres (the `useInterpolation` convention), or
 `interpolation="none"` for piecewise-constant lookup. For a
 background density stored per Square-Dalitz area, use
 `divide_jacobian=True` on `square_dalitz_background_from_root`. The same object
-then exposes `generation_value()` for the raw height used by toy generation.
+then exposes `generation_value()` for the raw height used when sampling
+directly in Square-Dalitz coordinates.
 
 The fitter itself continues to pass ordinary invariants `(s12,s13,s23)`. The histogram model converts every evaluation point internally with `invariants_to_square_dalitz`, then performs the TH2 bin lookup. This means the same object works transparently in:
 
@@ -117,9 +118,12 @@ Efficiency histograms are dimensionless and never receive a Jacobian. For a
 background histogram that is a density in Square-Dalitz area, pass
 `divide_jacobian=True` so its callable value is the density in ordinary
 invariant coordinates used by the likelihood. With `SquareDalitzGrid`, the
-integration weights already contain the Jacobian. During toy generation,
-the generators call `generation_value()` and use the raw histogram height,
-matching Laura++'s separate generation path.
+integration weights already contain the Jacobian. With this option, both toy
+methods sample directly in Square-Dalitz coordinates using `generation_value()`
+and the raw histogram height. CP charge-split integrals use the callable PDF
+(`h/J`) with the ordinary integration weights. Without `divide_jacobian=True`,
+the callable histogram is treated as a density per ordinary Dalitz area for
+both generation and fitting.
 
 The classes can also be constructed directly without ROOT:
 

@@ -15,13 +15,15 @@ from dalitzplotfitter.toy_accept import (
     CPToyBackground,
     ToyBackground,
     _acceptance,
+    _background_sampling_value,
     _background_weights,
     _charge_probability,
     _derived_seed,
     _empty_sample,
+    _generation_shape,
     _integral,
     _merge_samples,
-    _generation_shape,
+    _square_background_pair,
 )
 
 
@@ -31,6 +33,7 @@ def _prepare_sampler(
     *,
     resolution: int,
     quantile_resolution: int | None,
+    square_dalitz_pair: tuple[int, int] | None = None,
 ) -> DalitzInverseTransformSampler:
     return DalitzInverseTransformSampler.prepare(
         model.channel.parent_mass,
@@ -38,6 +41,7 @@ def _prepare_sampler(
         density_function,
         resolution=resolution,
         quantile_resolution=quantile_resolution,
+        square_dalitz_pair=square_dalitz_pair,
     )
 
 
@@ -177,7 +181,7 @@ def prepare_inverse_toy_generator(
             continue
 
         def background_density(data, background=background):
-            result = jnp.asarray(_generation_shape(background.shape, data))
+            result = jnp.asarray(_background_sampling_value(background.shape, data))
             if veto is not None and background.apply_veto:
                 result = result * jnp.asarray(veto(data))
             return result
@@ -186,6 +190,7 @@ def prepare_inverse_toy_generator(
             _prepare_sampler(
                 model,
                 background_density,
+                square_dalitz_pair=_square_background_pair(background.shape),
                 resolution=resolution,
                 quantile_resolution=quantile_resolution,
             )
@@ -357,8 +362,12 @@ def generate_cp_toy_inverse(
         minus_norm_sample = minus_model.normalization_sample
         plus_norm_data = plus_norm_sample.as_dict()
         minus_norm_data = minus_norm_sample.as_dict()
-        j_plus_values = jnp.asarray(_generation_shape(background.plus_shape, plus_norm_data))
-        j_minus_values = jnp.asarray(_generation_shape(background.resolved_minus_shape, minus_norm_data))
+        j_plus_values = jnp.asarray(
+            _generation_shape(background.plus_shape, plus_norm_data)
+        )
+        j_minus_values = jnp.asarray(
+            _generation_shape(background.resolved_minus_shape, minus_norm_data)
+        )
         if background.apply_veto:
             if plus_veto is not None:
                 j_plus_values = j_plus_values * jnp.asarray(plus_veto(plus_norm_data))
@@ -377,7 +386,9 @@ def generate_cp_toy_inverse(
         if count_plus:
 
             def plus_background_density(data, background=background):
-                result = jnp.asarray(_generation_shape(background.plus_shape, data))
+                result = jnp.asarray(
+                    _background_sampling_value(background.plus_shape, data)
+                )
                 if background.apply_veto and plus_veto is not None:
                     result = result * jnp.asarray(plus_veto(data))
                 return result
@@ -385,6 +396,7 @@ def generate_cp_toy_inverse(
             sampler = _prepare_sampler(
                 plus_model,
                 plus_background_density,
+                square_dalitz_pair=_square_background_pair(background.plus_shape),
                 resolution=resolution,
                 quantile_resolution=quantile_resolution,
             )
@@ -398,7 +410,9 @@ def generate_cp_toy_inverse(
         if count_minus:
 
             def minus_background_density(data, background=background):
-                result = jnp.asarray(_generation_shape(background.resolved_minus_shape, data))
+                result = jnp.asarray(
+                    _background_sampling_value(background.resolved_minus_shape, data)
+                )
                 if background.apply_veto and minus_veto is not None:
                     result = result * jnp.asarray(minus_veto(data))
                 return result
@@ -406,6 +420,9 @@ def generate_cp_toy_inverse(
             sampler = _prepare_sampler(
                 minus_model,
                 minus_background_density,
+                square_dalitz_pair=_square_background_pair(
+                    background.resolved_minus_shape
+                ),
                 resolution=resolution,
                 quantile_resolution=quantile_resolution,
             )

@@ -297,5 +297,12 @@ class QMI2D:
         magnitude,phase=self.interpolated_magnitude_phase(data)
         return magnitude*jnp.exp(1j*phase)
 
+    def compact_prepared_data(self, data):
+        """Retain only the Dalitz coordinates this field is evaluated from."""
+
+        if "s12" not in data or "s13" not in data:
+            return dict(data)
+        return {"s12": data["s12"], "s13": data["s13"]}
+
 
 __all__=["QMI2D","physical_bin_mask"]

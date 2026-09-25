@@ -98,7 +98,12 @@ def _physical_pairings(
 
 @dataclass(frozen=True)
 class ResonanceAmplitude:
-    """Complete resonance amplitude assembled from interchangeable plugins."""
+    """Complete resonance amplitude assembled from interchangeable plugins.
+
+    ``normalize_form_factors=False`` selects raw Laura++ primed barriers for
+    both parent and resonance. The default normalizes them at the pole;
+    the lineshape's running-width barrier ratio is unaffected.
+    """
 
     context: ResonanceContext
     daughter_key: str = "p1"
@@ -108,6 +113,7 @@ class ResonanceAmplitude:
     lineshape: object = RelativisticBreitWigner()
     angular: object = CovariantAngular()
     bachelor_momentum_frame: str = "resonance"
+    normalize_form_factors: bool = True
 
     # Prepared interpolation data belong to this amplitude, not just its pair.
     _prepared_namespace: str = field(
@@ -207,7 +213,23 @@ class ResonanceAmplitude:
         """Retain only arrays needed for repeated evaluation of this component."""
 
         if not self._scalar_fast_path():
-            return dict(data)
+            # A shared prepared mapping can contain other resonances' geometry,
+            # interpolation tables and the original four-vectors. This path
+            # evaluates only our pairings' kinematics and lineshape response.
+            prepared = {}
+            for keys in self._pairings():
+                prefix = _kinematics_prefix(*keys)
+                kin_keys = tuple(
+                    f"{prefix}_{name}"
+                    for name in ("mass", "pstar", "p", "q", "costheta")
+                )
+                if not all(key in data for key in kin_keys):
+                    return dict(data)
+                prepared.update({key: data[key] for key in kin_keys})
+                prepared_key = self._lineshape_prepared_key(prefix)
+                if prepared_key in data:
+                    prepared[prepared_key] = data[prepared_key]
+            return prepared
 
         prepared = {}
         self_contained = bool(
@@ -349,10 +371,12 @@ class ResonanceAmplitude:
                 context.bachelor_mass,
             )
         x_res = blatt_weisskopf_from_momenta(
-            kin.q, q0, l, context.resonance_radius
+            kin.q, q0, l, context.resonance_radius,
+            normalize_at_pole=self.normalize_form_factors,
         )
         x_parent = blatt_weisskopf_from_momenta(
-            parent_momentum, p0, l, context.parent_radius
+            parent_momentum, p0, l, context.parent_radius,
+            normalize_at_pole=self.normalize_form_factors,
         )
 
         prefix = _kinematics_prefix(daughter_key, partner_key, bachelor_key)

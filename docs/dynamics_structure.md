@@ -67,6 +67,38 @@ Only `L=0..2` are supported by this legacy option. For a full reproduction of th
 
 For the covariant and Zemach choices, the angular plugin does not implicitly alter the Blatt-Weisskopf convention. The parent-barrier bachelor-momentum frame remains controlled independently through `bachelor_momentum_frame`.
 
+### Normalizing form factors at the pole
+
+`Resonance(..., normalize_form_factors=True)` is the default: both the
+resonance and parent barriers use `sqrt(P_L(q0*r)/P_L(q*r))`, equal to one
+at the pole. Set `normalize_form_factors=False` for the raw Laura++ primed
+convention, `1/sqrt(P_L(q*r))`, for both barriers:
+
+```python
+rho = Resonance(
+    "rho0_770", (2, 0), coefficient,
+    lineshape=GounarisSakurai(), angular=ZemachP(),
+    mass=0.77526, width=0.1478, spin=1,
+    resonance_radius=4.0, parent_radius=4.0,
+    normalize_form_factors=False,
+    normalize_component=False,
+)
+```
+
+Here `P_1(x)=1+x²`, `P_2(x)=9+3x²+x⁴`, etc. The same option is available
+on low-level `ResonanceAmplitude`; the helper
+`blatt_weisskopf_from_momenta` accepts `normalize_at_pole=False`.
+The running width always retains the ratio `B(q)/B(q0)` regardless of this
+amplitude option. Spin-zero factors remain one. Pole momenta follow the existing
+effective-pole-mass prescription for poles outside the kinematic interval.
+
+This is independent of `normalize_component`, which rescales a whole component
+to unit integral. Such rescaling cancels positive constant barrier scales for
+fixed dynamics. With raw components, switching conventions requires transforming
+coefficients; if pole masses or radii float, that transformation itself varies
+with those parameters. Model JSON export/import preserves the option; older
+specifications without it keep the default `True`.
+
 `QMI2D` remains at the `dynamics` level because it is a full two-dimensional Dalitz amplitude evaluated through `DalitzAmplitude`, rather than a one-dimensional `lineshape(mass, context)` plugin used by `Resonance`.
 
 `lineshape/sympy.py` provides the optional `SympyLineshape` adapter. It uses the

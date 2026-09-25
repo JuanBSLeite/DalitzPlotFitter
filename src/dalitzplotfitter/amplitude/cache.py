@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -20,6 +21,28 @@ from .components import AmplitudeComponent, coefficient_value
 
 DEFAULT_NORMALIZATION_CHUNK_SIZE = 100_000
 DEFAULT_DYNAMICS_MICROBATCH_PARALLELISM = 1
+
+# Component-function type names already warned about below, so a chunked
+# normalization pass (or a loop of toy fits) does not reprint the same
+# diagnostic once per chunk/toy.
+_MISSING_COMPACTION_WARNED: set[str] = set()
+
+# (order-dependent component names, requested chunk size, microbatch size)
+# combinations already reported, so a multi-toy loop preparing the same model
+# configuration repeatedly does not reprint the same diagnostic per toy.
+_CHUNK_CAP_WARNED: set[tuple[tuple[str, ...], int, int]] = set()
+
+
+@partial(jax.jit, donate_argnums=(0,))
+def _store_normalization_chunk(buffers, chunk, index):
+    """Fill owned cache buffers without retaining a second full-grid copy."""
+    return jax.tree_util.tree_map(
+        lambda buffer, values: jax.lax.dynamic_update_index_in_dim(
+            buffer, values, index, axis=0
+        ),
+        buffers,
+        chunk,
+    )
 
 
 def _component_normalization_mask(
@@ -103,6 +126,17 @@ def _compact_prepared_component_data(
     for component in components:
         compact = getattr(component.function, "compact_prepared_data", None)
         if compact is None:
+            type_name = type(component.function).__name__
+            if type_name not in _MISSING_COMPACTION_WARNED:
+                _MISSING_COMPACTION_WARNED.add(type_name)
+                print(
+                    "WARNING DalitzPlotFitter normalization: floating component "
+                    f"{component.name!r} ({type_name}) has no compact_prepared_data "
+                    "method, so the full shared prepared mapping is retained for "
+                    "every floating component in this model instead of only what "
+                    "each one needs; see 'compact_prepared_data must be defined for "
+                    "every floating component type' in docs/performance.md."
+                )
             return prepared
         compacted.append(compact(prepared))
 
@@ -702,6 +736,34 @@ class PreparedAmplitudeCache:
             # QMI's sort indices belong to the exact block passed to
             # prepare_mass. Prepare smaller blocks up front rather than
             # slicing that state later in the inner AD microbatch scan.
+            if int(dynamics_microbatch_size) < int(normalization_chunk_size):
+                order_dependent_names = tuple(
+                    component.name
+                    for component in dynamic_components
+                    if getattr(
+                        getattr(component.function, "lineshape", None),
+                        "prepared_mass_is_order_dependent",
+                        False,
+                    )
+                )
+                cap_key = (
+                    order_dependent_names,
+                    int(normalization_chunk_size),
+                    int(dynamics_microbatch_size),
+                )
+                if cap_key not in _CHUNK_CAP_WARNED:
+                    _CHUNK_CAP_WARNED.add(cap_key)
+                    print(
+                        "INFO DalitzPlotFitter normalization: floating component(s) "
+                        f"{order_dependent_names} use order-dependent prepared state "
+                        "(e.g. QMI's sort order/interval boundaries), so the effective "
+                        "normalization chunk size is capped at "
+                        f"dynamics_microbatch_size={int(dynamics_microbatch_size)} "
+                        "instead of the requested normalization_chunk_size="
+                        f"{int(normalization_chunk_size)}; see 'normalization_chunk_size "
+                        "is silently capped by dynamics_microbatch_size...' in "
+                        "docs/performance.md."
+                    )
             dynamic_chunk_limit = min(
                 dynamic_chunk_limit,
                 dynamics_microbatch_size,
@@ -907,7 +969,8 @@ class PreparedAmplitudeCache:
             geometry = _compact_prepared_component_data(dynamic, prepared)
             return (geometry, w, eff, columns), bare, accepted
 
-        chunks = []
+        chunk_arrays = None
+        n_chunks = (n_points + chunk_size - 1) // chunk_size
         bare_sum = accepted_sum = None
         for start in range(0, n_points, chunk_size):
             stop = min(start + chunk_size, n_points)
@@ -922,10 +985,18 @@ class PreparedAmplitudeCache:
                     padding_value=1,
                 ),
             )
-            chunks.append(chunk)
+            if chunk_arrays is None:
+                chunk_arrays = jax.tree_util.tree_map(
+                    lambda array: jnp.zeros(
+                        (n_chunks,) + array.shape, dtype=array.dtype
+                    ),
+                    chunk,
+                )
+            chunk_arrays = _store_normalization_chunk(
+                chunk_arrays, chunk, start // chunk_size
+            )
             bare_sum = bare if bare_sum is None else bare_sum + bare
             accepted_sum = accepted if accepted_sum is None else accepted_sum + accepted
-        chunk_arrays = jax.tree_util.tree_map(lambda *xs: jnp.stack(xs), *chunks)
         bare_matrix = bare_sum / n_points
         accepted_matrix = accepted_sum / n_points
         real_dtype = jnp.result_type(weights.dtype, jnp.float32)
