@@ -70,6 +70,59 @@ sort indices cannot be sliced after preparation. The grid resolution still
 controls quadrature accuracy and should not be reduced without a normalization-
 convergence check.
 
+### `normalization_chunk_size` is silently capped by `dynamics_microbatch_size` whenever an order-dependent lineshape floats
+
+The two chunk-size options are not always independent. `PreparedAmplitudeCache.prepare` (`amplitude/cache.py`,
+around `order_dependent_preparation`) checks whether *any* currently floating dynamic component has
+a lineshape with `prepared_mass_is_order_dependent = True` — today only `QMI`. If so, the macro
+chunk limit passed to `_prepare_chunked_dynamics` is `min(normalization_chunk_size,
+dynamics_microbatch_size)`, **not** `normalization_chunk_size` alone, because QMI's cached sort
+order and interval boundaries are only valid for the exact block they were prepared on, so its
+macro block and its AD microbatch must be the same size. This shrinks the macro chunk for
+**every** floating component sharing that partition, not just QMI, since all floating components in
+one model are chunked together.
+
+Concretely: a `DecayModel(normalization_chunk_size=100_000, dynamics_microbatch_size=20_000)`
+(both defaults except the first) with a floating QMI component reports
+`cache.effective_normalization_chunk_size == 19_600`, not `100_000` — confirmed by preparing the
+`benchmarks/benchmark_qmi_memory_speed.py` model (QMI plus GounarisSakurai `rho770`/`omega782`, QMI
+floating) and reading `cache.effective_normalization_chunk_size` /
+`cache.effective_dynamics_microbatch_size` after `prepare()`. Raising `normalization_chunk_size`
+alone therefore does nothing for macro-chunk granularity — and so nothing for the outer
+`jax.lax.scan` iteration count over `normalization_chunks` in `_chunked_dynamic_normalization` — in
+any fit where QMI (or a future order-dependent lineshape) is floating; `dynamics_microbatch_size`
+is the knob that actually controls it in that case. This is not a bug — it is what QMI's
+block-local sort state requires — but it is easy to miss while tuning a QMI fit's memory/throughput,
+since the two options read as independent everywhere else in this document.
+
+### `compact_prepared_data` must be defined for every floating component type
+
+`PreparedAmplitudeCache._prepare_chunked_dynamics` retains, per normalization chunk, only the
+union of what each *floating* (`ParameterKind.DYNAMICS`-owned) component's
+`compact_prepared_data(data)` reports it needs (`_compact_prepared_component_data` in
+`amplitude/cache.py`). This union is computed by iterating the floating components and returning
+the **entire** shared prepared mapping unchanged as soon as any one of them lacks a
+`compact_prepared_data` method — so a single component type in the model without one silently
+disables compaction for every other floating component too, not just the one missing it.
+
+`ResonanceAmplitude.compact_prepared_data` previously also fell back to `dict(data)` (a shallow
+copy of the whole shared mapping) for any resonance with spin != 0 or a non-`CovariantAngular`
+angular factor — i.e. effectively every P-wave/D-wave resonance (rho, omega, K*, f2, ...). Since a
+shallow copy still holds a live reference to every value in the original mapping, this defeated
+compaction for the whole model whenever such a resonance floated alongside anything else. It now
+retains only the five kinematics arrays (`mass`, `pstar`, `p`, `q`, `costheta`) each of its
+pairings needs plus its own namespaced prepared-lineshape entry, falling back to the full copy
+only if those keys are unexpectedly absent.
+
+`QMI2D` (via `DalitzAmplitude`/`_ResolvedDirectDynamics` in `decay.py`) had no
+`compact_prepared_data` at all, so any model combining a floating `QMI2D` field with floating 1D
+resonances lost compaction entirely even after the `ResonanceAmplitude` fix above. It now retains
+only `s12`/`s13`, the sole keys `interpolated_magnitude_phase` reads; `_ResolvedDirectDynamics`
+delegates to the wrapped dynamics object's own `compact_prepared_data` when present. Any future
+`AmplitudeComponent`-compatible dynamics object used as a floating component needs the same method
+for compaction to remain effective across the rest of the model — see
+`tests/test_resonance_amplitude.py` and `tests/test_qmi2d.py` for the expected contract.
+
 ## Input memory in multi-toy studies
 
 `read_root_tree` defaults to JAX arrays on the active device. Keeping a complete

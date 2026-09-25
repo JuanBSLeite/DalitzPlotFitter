@@ -190,3 +190,57 @@ def test_qmi2d_rejects_unknown_interpolation_mode():
         assert "interpolation" in str(exc)
     else:
         raise AssertionError("QMI2D accepted an unknown interpolation mode")
+
+
+def test_qmi2d_compact_prepared_data_drops_unrelated_state():
+    model = QMI2D(
+        s12_edges=(0.0, 1.0, 2.0),
+        s13_edges=(0.0, 1.0, 2.0),
+        magnitudes=((1.0, 2.0), (3.0, 4.0)),
+        phases=((0.0, 0.1), (0.2, 0.3)),
+        interpolation="linear",
+    )
+    data = _data([1.2], [0.4])
+    shared = dict(data)
+    shared["__kin_p1_p2_p3_mass"] = jnp.asarray([1.5])
+    shared["unrelated_component_table"] = jnp.asarray([[1.0, 2.0]])
+
+    compact = model.compact_prepared_data(shared)
+
+    assert set(compact) == {"s12", "s13"}
+    assert bool(jnp.allclose(model(compact), model(shared)))
+
+
+def test_qmi2d_compact_prepared_data_falls_back_without_coordinates():
+    model = QMI2D(
+        s12_edges=(0.0, 1.0),
+        s13_edges=(0.0, 1.0),
+        magnitudes=((1.0,),),
+        phases=((0.0,),),
+    )
+    data = {"other": jnp.asarray([1.0])}
+    assert model.compact_prepared_data(data) == data
+
+
+def test_resolved_direct_dynamics_delegates_compaction_to_qmi2d():
+    owner = "qmi2d"
+    field = QMI2D(
+        s12_edges=(0.0, 2.0, 4.0),
+        s13_edges=(0.0, 2.0, 4.0),
+        magnitudes=((1.0, 1.2), (0.8, 1.1)),
+        phases=((Parameter.dynamics("qmi2d.p00", 0.0, owner=owner), 0.2), (0.4, 0.6)),
+        interpolation="linear",
+    )
+    decay = DecayModel(
+        DecayChannel("D_s+", ("pi-", "pi+", "pi+")),
+        [DalitzAmplitude(owner, field, RealImag(1.0, 0.0))],
+        normalization_resolution=30,
+    )
+    (component,) = decay.amplitude_model.components
+
+    data = _data([1.2], [0.4])
+    shared = dict(data)
+    shared["unrelated_component_table"] = jnp.asarray([[1.0, 2.0]])
+    compact = component.function.compact_prepared_data(shared)
+
+    assert set(compact) == {"s12", "s13"}

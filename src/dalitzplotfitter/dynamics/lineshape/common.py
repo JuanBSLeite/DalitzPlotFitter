@@ -57,14 +57,24 @@ def _blatt_polynomial(z, angular_momentum: int):
     raise NotImplementedError("barrier factors currently support L=0..4")
 
 
-def blatt_weisskopf_from_momenta(momentum, pole_momentum, angular_momentum: int, radius):
+def blatt_weisskopf_from_momenta(
+    momentum, pole_momentum, angular_momentum: int, radius, *, normalize_at_pole=True
+):
+    """Blatt-Weisskopf factor, optionally unity at the pole (default).
+
+    With ``normalize_at_pole=False``, return the raw primed factor used by
+    Laura++: ``1/sqrt(P_L(momentum*radius))``. Running widths must continue
+    to use the pole-normalized ratio independently of amplitude conventions.
+    """
     l = int(angular_momentum)
     momentum = jnp.asarray(momentum)
     if l == 0:
         return jnp.ones_like(momentum)
     z = momentum * radius
-    z0 = pole_momentum * radius
-    return jnp.sqrt(_blatt_polynomial(z0, l) / _blatt_polynomial(z, l))
+    numerator = (
+        _blatt_polynomial(pole_momentum * radius, l) if normalize_at_pole else 1.0
+    )
+    return jnp.sqrt(numerator / _blatt_polynomial(z, l))
 
 
 def energy_dependent_width(mass, context: ResonanceContext):

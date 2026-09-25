@@ -192,7 +192,13 @@ class DecayChannel:
 
 @dataclass(frozen=True)
 class Resonance:
-    """Declarative resonance component with interchangeable dynamics plugins."""
+    """Declarative resonance component with interchangeable dynamics plugins.
+
+    ``normalize_form_factors=True`` makes both amplitude barriers unity at
+    the pole. False uses raw Laura++ primed barriers. This is independent of
+    ``normalize_component`` (unit-integral component rescaling) and does not
+    change the barrier ratio in the running width.
+    """
 
     name: str
     pair: tuple[int, int]
@@ -206,6 +212,7 @@ class Resonance:
     parent_radius: object = 5.0
     bachelor_momentum_frame: Literal["resonance", "parent"] = "resonance"
     normalize_component: bool | None = None
+    normalize_form_factors: bool = True
 
     def __post_init__(self) -> None:
         if len(set(self.pair)) != 2 or any(
@@ -272,6 +279,12 @@ class _ResolvedDirectDynamics:
 
     def __call__(self, data, parameters=None):
         return resolve_value(self.dynamics, parameters)(data)
+
+    def compact_prepared_data(self, data):
+        """Delegate to the wrapped dynamics object when it can compact itself."""
+
+        compact = getattr(self.dynamics, "compact_prepared_data", None)
+        return dict(data) if compact is None else compact(data)
 
 
 @dataclass(frozen=True, init=False)
@@ -856,6 +869,7 @@ class DecayModel:
             lineshape=component.lineshape,
             angular=component.angular,
             bachelor_momentum_frame=component.bachelor_momentum_frame,
+            normalize_form_factors=component.normalize_form_factors,
         )
         return AmplitudeComponent(
             component.name,

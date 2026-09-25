@@ -122,3 +122,49 @@ def test_odd_spin_identical_resonance_daughters_are_rejected():
     labels = ("pi0", "pi0", "K0")
     with pytest.raises(ValueError, match="odd-spin resonance"):
         _component(1, final_state=labels)(data)
+
+
+@pytest.mark.parametrize(
+    "spin,prepared_lineshape", [(0, False), (1, False), (2, False), (0, True)]
+)
+def test_compaction_drops_unrelated_component_state(spin, prepared_lineshape):
+    from dataclasses import replace
+
+    from dalitzplotfitter import QMI, ZemachP
+
+    component = _component(spin, final_state=FINAL_STATE)
+    if prepared_lineshape:
+        component = replace(
+            component,
+            angular=ZemachP(),
+            lineshape=QMI(
+                knots=(0.28, 0.5, 0.9, 1.74),
+                real_parts=(1.0, 0.4, -0.2, 0.6),
+                imaginary_parts=(0.0, 0.1, 0.3, -0.1),
+                interpolation="linear",
+            ),
+        )
+    unrelated = replace(
+        _component(0, "p2", "p3", "p1"),
+        lineshape=QMI(
+            knots=(0.28, 0.5, 0.9, 1.74),
+            real_parts=(1.0, 0.2, 0.3, 0.4),
+            imaginary_parts=(0.0, 0.0, 0.0, 0.0),
+        ),
+    )
+    data = _data()
+    shared = component.prepare_data(unrelated.prepare_data(data))
+    compact = component.compact_prepared_data(shared)
+    assert not any(key in compact for key in data)
+    assert not any(key.startswith("__kin_p2_p3_p1") for key in compact)
+    assert len(compact) < len(shared)
+    assert jnp.allclose(component(compact), component(shared), rtol=1e-12, atol=1e-12)
+    assert jnp.allclose(component(compact), component(data), rtol=1e-12, atol=1e-12)
+
+
+def test_compaction_preserves_unprepared_input_fallback():
+    component = _component(1, final_state=FINAL_STATE)
+    data = _data()
+    compact = component.compact_prepared_data(data)
+    assert set(compact) == set(data)
+    assert jnp.allclose(component(compact), component(data), rtol=1e-12, atol=1e-12)
