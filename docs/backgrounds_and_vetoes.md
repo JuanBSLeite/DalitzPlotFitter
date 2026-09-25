@@ -162,6 +162,9 @@ invariant-mass measure used by the signal likelihood:
 `b(s13, s23) = h(mprime, thetaprime) / square_dalitz_jacobian(...)`.
 Normalizing the unconverted shape cannot repair the position-dependent
 distortion. An efficiency is dimensionless and does not receive this factor.
+With `divide_jacobian=True`, both toy methods sample this background directly
+in Square-Dalitz coordinates; CP charge fractions use the converted PDF and
+post-veto integration weights. See [toy generation](toy_generation.md#square-dalitz-histogram-backgrounds).
 
 Match the external interpolation setting as well, and normalize the converted
 background after vetoes. In CP fits with a prescribed background counting

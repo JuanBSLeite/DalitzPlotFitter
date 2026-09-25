@@ -9,7 +9,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from dalitzplotfitter.kinematics import PhaseSpaceSample
+from dalitzplotfitter.kinematics import PhaseSpaceSample, square_dalitz_to_invariants
 
 DensityFunction = Callable[[dict[str, object]], object]
 
@@ -159,6 +159,11 @@ class DalitzInverseTransformSampler:
     quantiles and bilinearly interpolated during generation. Generation itself
     rechecks the target support and replaces candidates with zero density.
     The density within the allowed support remains a grid approximation.
+
+    With ``square_dalitz_pair`` set, the callback instead supplies a density
+    per ``dm' dtheta'``. The same CDF algorithm operates directly on the unit
+    square for that ordered pair, then converts generated points to invariants.
+    The historical ``m12_grid``/``marginal_m12`` fields hold m' in this mode.
     """
 
     mother_mass: float
@@ -169,6 +174,7 @@ class DalitzInverseTransformSampler:
     quantile_levels: np.ndarray
     conditional_quantiles: np.ndarray
     density_function: DensityFunction = field(repr=False, compare=False)
+    square_dalitz_pair: tuple[int, int] | None = None
 
     @classmethod
     def prepare(
@@ -179,6 +185,7 @@ class DalitzInverseTransformSampler:
         *,
         resolution: int = 1024,
         quantile_resolution: int | None = None,
+        square_dalitz_pair: tuple[int, int] | None = None,
     ) -> DalitzInverseTransformSampler:
         if resolution < 16:
             raise ValueError("inverse-transform resolution must be at least 16")
@@ -195,38 +202,55 @@ class DalitzInverseTransformSampler:
         if mother_mass <= sum(masses):
             raise ValueError("mother mass must exceed the three-body threshold")
 
-        m1, m2, m3 = masses
-        m_min = m1 + m2
-        m_max = mother_mass - m3
-        m12_grid = np.linspace(m_min, m_max, int(resolution), dtype=float)
-        m12_eval = m12_grid.copy()
-        m12_eval[0] = np.nextafter(m_min, m_max)
-        m12_eval[-1] = np.nextafter(m_max, m_min)
-        s12_rows = m12_eval**2
-        low, high = _s13_limits(s12_rows, mother_mass=mother_mass, masses=masses)
-        width = np.maximum(high - low, 0.0)
-
         v_grid = np.linspace(0.0, 1.0, int(resolution), dtype=float)
-        s13 = low[:, None] + width[:, None] * v_grid[None, :]
-        constant = mother_mass**2 + m1**2 + m2**2 + m3**2
-        s12 = np.broadcast_to(s12_rows[:, None], s13.shape)
-        s23 = constant - s12 - s13
-        data = {
-            "s12": jnp.asarray(s12.reshape(-1)),
-            "s13": jnp.asarray(s13.reshape(-1)),
-            "s23": jnp.asarray(s23.reshape(-1)),
-        }
+        if square_dalitz_pair is not None:
+            # The same Rosenblatt tables can use (m', theta') directly. The
+            # density callback then supplies density per square area, avoiding
+            # h/J singularities at the physical Dalitz boundary.
+            m12_grid = np.linspace(0.0, 1.0, int(resolution))
+            mp, tp = np.meshgrid(m12_grid, v_grid, indexing="ij")
+            # At exactly m'=0 or 1 the helicity angle is undefined. Evaluate
+            # one-sided limits inside the domain while keeping CDF endpoints.
+            inv = square_dalitz_to_invariants(
+                np.clip(mp.ravel(), 1e-6, 1.0 - 1e-6),
+                np.clip(tp.ravel(), 1e-6, 1.0 - 1e-6),
+                mother_mass=mother_mass,
+                masses=masses,
+                pair=square_dalitz_pair,
+            )
+            data = dict(zip(("s12", "s13", "s23"), inv, strict=True))
+        else:
+            m1, m2, m3 = masses
+            m_min = m1 + m2
+            m_max = mother_mass - m3
+            m12_grid = np.linspace(m_min, m_max, int(resolution), dtype=float)
+            m12_eval = m12_grid.copy()
+            m12_eval[0] = np.nextafter(m_min, m_max)
+            m12_eval[-1] = np.nextafter(m_max, m_min)
+            s12_rows = m12_eval**2
+            low, high = _s13_limits(s12_rows, mother_mass=mother_mass, masses=masses)
+            width = np.maximum(high - low, 0.0)
+
+            s13 = low[:, None] + width[:, None] * v_grid[None, :]
+            constant = mother_mass**2 + m1**2 + m2**2 + m3**2
+            s12 = np.broadcast_to(s12_rows[:, None], s13.shape)
+            s23 = constant - s12 - s13
+            data = {
+                "s12": jnp.asarray(s12.reshape(-1)),
+                "s13": jnp.asarray(s13.reshape(-1)),
+                "s23": jnp.asarray(s23.reshape(-1)),
+            }
         try:
             density = np.asarray(
                 jax.device_get(jnp.asarray(density_function(data))), dtype=float
-            ).reshape(s13.shape)
+            ).reshape((int(resolution), int(resolution)))
         except KeyError as exc:
             raise ValueError(
                 "inverse-transform toy generation supports densities expressed in "
                 "Dalitz invariants s12/s13/s23; the supplied efficiency or veto "
                 "requested another event field"
             ) from exc
-        if density.shape != s13.shape:
+        if density.shape != (int(resolution), int(resolution)):
             raise ValueError(
                 "inverse-transform density must return one value per grid point"
             )
@@ -237,7 +261,11 @@ class DalitzInverseTransformSampler:
 
         conditional_cumulative = _cumulative_trapezoid(density, v_grid, axis=1)
         row_integral_v = conditional_cumulative[:, -1]
-        marginal_density = 2.0 * m12_eval * width * row_integral_v
+        marginal_density = (
+            row_integral_v
+            if square_dalitz_pair is not None
+            else 2.0 * m12_eval * width * row_integral_v
+        )
         marginal_cumulative = _cumulative_trapezoid(marginal_density, m12_grid, axis=0)
         total = float(marginal_cumulative[-1])
         if not np.isfinite(total) or total <= 0.0:
@@ -263,6 +291,7 @@ class DalitzInverseTransformSampler:
             quantile_levels=quantile_levels,
             conditional_quantiles=conditional_quantiles,
             density_function=density_function,
+            square_dalitz_pair=square_dalitz_pair,
         )
 
     def generate(
@@ -355,11 +384,22 @@ class DalitzInverseTransformSampler:
         v1 = v10 + q_fraction * (v11 - v10)
         v = np.clip(v0 + row_fraction * (v1 - v0), 0.0, 1.0)
 
-        s12 = m12**2
-        low, high = _s13_limits(s12, mother_mass=self.mother_mass, masses=self.masses)
-        s13 = low + v * (high - low)
-        m1, m2, m3 = self.masses
-        s23 = self.mother_mass**2 + m1**2 + m2**2 + m3**2 - s12 - s13
+        if self.square_dalitz_pair is not None:
+            s12, s13, s23 = square_dalitz_to_invariants(
+                m12,
+                v,
+                mother_mass=self.mother_mass,
+                masses=self.masses,
+                pair=self.square_dalitz_pair,
+            )
+        else:
+            s12 = m12**2
+            low, high = _s13_limits(
+                s12, mother_mass=self.mother_mass, masses=self.masses
+            )
+            s13 = low + v * (high - low)
+            m1, m2, m3 = self.masses
+            s23 = self.mother_mass**2 + m1**2 + m2**2 + m3**2 - s12 - s13
         return PhaseSpaceSample(
             s12=jnp.asarray(s12),
             s13=jnp.asarray(s13),

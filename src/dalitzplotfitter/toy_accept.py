@@ -107,14 +107,46 @@ def _scores(pool: PhaseSpaceSample, density) -> jax.Array:
 
 
 def _generation_shape(shape, data):
-    """Evaluate a shape in the measure used by its generator.
+    """Evaluate the density with respect to ordinary Dalitz area.
 
-    Square-Dalitz histogram backgrounds expose ``generation_value`` because
-    Laura++ divides by the Jacobian for the fit PDF but samples the raw
-    histogram height during generation.
+    Ordinary-Dalitz proposals and CP charge-split integrals use this measure.
+    A Square-Dalitz density must therefore include its inverse Jacobian,
+    exactly as for the fit. Raw
+    ``generation_value`` is only valid for proposals uniform in Square Dalitz.
     """
-    evaluator = getattr(shape, "generation_value", shape)
-    return evaluator(data)
+    return shape(data)
+
+
+def _square_background_pair(shape):
+    """Recognize built-in SDP densities, including charge-scaled wrappers."""
+    from dalitzplotfitter.background.models import ChargeScaledBackground
+    from dalitzplotfitter.square_histograms import SquareDalitzHistogramBackground
+
+    while isinstance(shape, ChargeScaledBackground):
+        shape = shape.shape
+    if isinstance(shape, SquareDalitzHistogramBackground) and shape.divide_jacobian:
+        return shape.pair
+    return None
+
+
+def _background_sampling_value(shape, data):
+    if _square_background_pair(shape) is not None:
+        return shape.generation_value(data)
+    return _generation_shape(shape, data)
+
+
+def _square_proposal(model, size, seed, pair):
+    from dalitzplotfitter.kinematics import square_dalitz_to_invariants
+
+    mp, tp = np.random.default_rng(seed).random((2, size))
+    s12, s13, s23 = square_dalitz_to_invariants(
+        mp,
+        tp,
+        mother_mass=model.channel.parent_mass,
+        masses=model.channel.daughter_masses,
+        pair=pair,
+    )
+    return PhaseSpaceSample(s12=s12, s13=s13, s23=s23, weights=jnp.ones_like(s12))
 
 
 def _score_statistics(values: jax.Array, *, include_mean: bool = False):
@@ -325,6 +357,7 @@ def _accept_reject_component(
     batch_size: int | None,
     envelope_safety: float,
     max_restarts: int,
+    square_dalitz_pair: tuple[int, int] | None = None,
 ) -> PhaseSpaceSample:
     """Generate one unweighted component with monitored safe envelopes.
 
@@ -332,7 +365,10 @@ def _accept_reject_component(
     with a separately monitored envelope per cell. The cell is drawn with
     probability proportional to its envelope, so accepting with score/envelope
     preserves the exact target density. Momentum-dependent custom densities
-    retain the original monitored global-envelope fallback.
+    retain the original monitored global-envelope fallback. With
+    ``square_dalitz_pair`` set, proposals are uniform on the full Square-Dalitz
+    domain and the callback supplies density per square area; a monitored
+    global envelope avoids the inverse-Jacobian boundary singularity.
     """
 
     if size <= 0:
@@ -348,21 +384,31 @@ def _accept_reject_component(
     # Built-in amplitudes need only Dalitz invariants.  Try the compact proposal
     # first and fall back to full four-vectors only for custom densities that
     # explicitly request momentum fields.
-    compact_proposal = True
-    pilot = model.generate_phase_space(
-        n_pilot,
-        seed=_derived_seed(seed, 1),
-        include_momenta=False,
-    )
+    compact_proposal = square_dalitz_pair is None
+    square_momenta = False
+    if square_dalitz_pair is not None:
+        pilot = _square_proposal(
+            model, n_pilot, _derived_seed(seed, 1), square_dalitz_pair
+        )
+    else:
+        pilot = model.generate_phase_space(
+            n_pilot,
+            seed=_derived_seed(seed, 1),
+            include_momenta=False,
+        )
     try:
         pilot_scores = _scores(pilot, compiled_density(pilot.as_dict()))
     except KeyError:
         compact_proposal = False
-        pilot = model.generate_phase_space(
-            n_pilot,
-            seed=_derived_seed(seed, 1),
-            include_momenta=True,
-        )
+        if square_dalitz_pair is not None:
+            square_momenta = True
+            pilot = _attach_momenta(model, pilot, _derived_seed(seed, 2))
+        else:
+            pilot = model.generate_phase_space(
+                n_pilot,
+                seed=_derived_seed(seed, 1),
+                include_momenta=True,
+            )
         pilot_scores = _scores(pilot, compiled_density(pilot.as_dict()))
 
     observed_max, mean_score = _score_statistics(
@@ -428,6 +474,18 @@ def _accept_reject_component(
                 grid_shape=grid_shape,
                 seed=_derived_seed(seed, 10_000 + proposal_index),
             )
+        elif square_dalitz_pair is not None:
+            pool = _square_proposal(
+                model,
+                batch_size,
+                _derived_seed(seed, 10_000 + proposal_index),
+                square_dalitz_pair,
+            )
+            if square_momenta:
+                pool = _attach_momenta(
+                    model, pool, _derived_seed(seed, 20_000 + proposal_index)
+                )
+            proposal_cells = None
         else:
             pool = model.generate_phase_space(
                 batch_size,
@@ -674,7 +732,7 @@ def generate_toy(
             continue
 
         def background_density(data, background=background):
-            result = jnp.asarray(_generation_shape(background.shape, data))
+            result = jnp.asarray(_background_sampling_value(background.shape, data))
             if veto is not None and background.apply_veto:
                 result = result * jnp.asarray(veto(data))
             return result
@@ -684,6 +742,7 @@ def generate_toy(
                 model,
                 int(count),
                 background_density,
+                square_dalitz_pair=_square_background_pair(background.shape),
                 seed=_derived_seed(seed, 100 + index),
                 pool_size=pool_size,
                 batch_size=batch_size,
@@ -838,8 +897,12 @@ def generate_cp_toy(
         minus_norm_sample = minus_model.normalization_sample
         plus_norm_data = plus_norm_sample.as_dict()
         minus_norm_data = minus_norm_sample.as_dict()
-        j_plus_values = jnp.asarray(_generation_shape(background.plus_shape, plus_norm_data))
-        j_minus_values = jnp.asarray(_generation_shape(background.resolved_minus_shape, minus_norm_data))
+        j_plus_values = jnp.asarray(
+            _generation_shape(background.plus_shape, plus_norm_data)
+        )
+        j_minus_values = jnp.asarray(
+            _generation_shape(background.resolved_minus_shape, minus_norm_data)
+        )
         if background.apply_veto:
             if plus_veto is not None:
                 j_plus_values = j_plus_values * jnp.asarray(plus_veto(plus_norm_data))
@@ -858,7 +921,9 @@ def generate_cp_toy(
         if count_plus > 0:
 
             def plus_background_density(data, background=background):
-                result = jnp.asarray(_generation_shape(background.plus_shape, data))
+                result = jnp.asarray(
+                    _background_sampling_value(background.plus_shape, data)
+                )
                 if background.apply_veto and plus_veto is not None:
                     result = result * jnp.asarray(plus_veto(data))
                 return result
@@ -868,6 +933,7 @@ def generate_cp_toy(
                     plus_model,
                     count_plus,
                     plus_background_density,
+                    square_dalitz_pair=_square_background_pair(background.plus_shape),
                     seed=_derived_seed(seed, 100 + index),
                     pool_size=pool_size,
                     batch_size=batch_size,
@@ -879,7 +945,9 @@ def generate_cp_toy(
         if count_minus > 0:
 
             def minus_background_density(data, background=background):
-                result = jnp.asarray(_generation_shape(background.resolved_minus_shape, data))
+                result = jnp.asarray(
+                    _background_sampling_value(background.resolved_minus_shape, data)
+                )
                 if background.apply_veto and minus_veto is not None:
                     result = result * jnp.asarray(minus_veto(data))
                 return result
@@ -889,6 +957,9 @@ def generate_cp_toy(
                     minus_model,
                     count_minus,
                     minus_background_density,
+                    square_dalitz_pair=_square_background_pair(
+                        background.resolved_minus_shape
+                    ),
                     seed=_derived_seed(seed, 200 + index),
                     pool_size=pool_size,
                     batch_size=batch_size,

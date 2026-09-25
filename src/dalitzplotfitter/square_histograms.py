@@ -79,8 +79,9 @@ class _SquareDalitzHistogram2D:
         """Raw histogram value used by Laura++-style toy generation.
 
         A Square-Dalitz histogram is a density in ``dm' dtheta'`` for
-        generation. The Jacobian conversion belongs only to its PDF value in
-        ordinary Dalitz coordinates.
+        generation with proposals uniform in Square-Dalitz coordinates.
+        Sampling or integrating in ordinary Dalitz coordinates requires
+        ``__call__`` instead, including the Jacobian conversion when enabled.
         """
         return jnp.maximum(self._histogram_value(data), 0.0)
 
@@ -148,9 +149,12 @@ class SquareDalitzHistogramBackground(_SquareDalitzHistogram2D):
     ``interpolation='linear'`` reproduces Laura++'s bilinear interpolation
     between bin centres; ``'none'`` keeps the piecewise-constant lookup.
     ``divide_jacobian=True`` converts the Square-Dalitz density to a density
-    in ordinary Dalitz coordinates for the fit PDF. Toy generation uses
-    :meth:`generation_value`, which intentionally never divides by the
-    Jacobian, matching Laura++'s ``LauBkgndDPModel::generate``.
+    in ordinary Dalitz coordinates for the fit PDF. With this option, both
+    toy methods sample directly in Square-Dalitz coordinates using
+    :meth:`generation_value`, which never divides by the Jacobian. The
+    accept-reject path follows Laura++'s ``LauBkgndDPModel::generate`` measure.
+    With ``divide_jacobian=False``, toy methods interpret the callable value
+    as a density per ordinary Dalitz area, just like the fit.
 
     ``folded=True`` folds ``theta'`` onto ``[0, 0.5]`` before the bin lookup;
     see :class:`SquareDalitzHistogramEfficiency`.
