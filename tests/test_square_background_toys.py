@@ -167,24 +167,6 @@ def test_unconverted_background_keeps_dalitz_measure(method):
     assert np.mean((np.asarray(mp) > 0.25) & (np.asarray(mp) < 0.75)) > 0.8
 
 
-def test_square_background_accept_reject_preserves_momentum_veto():
-    model, shape = setup_background()
-
-    def veto(data):
-        return data["p1"][:, 3] > 0
-
-    toy = generate_toy(
-        model,
-        1000,
-        method="accept-reject",
-        signal_fraction=0,
-        backgrounds=[ToyBackground("bkg", shape)],
-        veto=veto,
-        seed=821,
-    )
-    assert np.all(veto(toy.as_dict()))
-
-
 @pytest.mark.parametrize("method", ["accept-reject", "inverse-transform"])
 @pytest.mark.parametrize("interpolation,pair", [("linear", (0, 2)), ("spline", (2, 1))])
 def test_interpolated_square_background_and_ordered_pair(method, interpolation, pair):

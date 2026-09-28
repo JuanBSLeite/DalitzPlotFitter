@@ -18,10 +18,25 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install
+        shell: bash
         run: |
+          # PyPI's per-package "simple" index occasionally returns transient
+          # 503s (observed for mplhep independently of Python version); retry
+          # each install with backoff instead of failing the whole matrix job.
+          install_with_retries() {
+            local attempt
+            for attempt in 1 2 3 4 5; do
+              if python -m pip install --retries 10 --timeout 60 "$@"; then
+                return 0
+              fi
+              echo "pip install failed (attempt $attempt/5) for: $*" >&2
+              sleep $((attempt * 15))
+            done
+            return 1
+          }
           python -m pip install --upgrade pip
-          python -m pip install -e ".[test,sympy]"
-          python -m pip install nbformat
+          install_with_retries -e ".[test,sympy]"
+          install_with_retries nbformat
       - name: Validate notebooks
         run: |
           python - <<'PY'

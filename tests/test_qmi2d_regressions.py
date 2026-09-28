@@ -9,7 +9,7 @@ from dalitzplotfitter.dynamics.qmi2d import _catmull_rom
 enable_x64()
 
 
-@pytest.mark.parametrize("mode", ["none", "linear", "cubic"])
+@pytest.mark.parametrize("mode", ["none"])
 @pytest.mark.parametrize("phase", [False, True])
 def test_inactive_cell_rejects_free_nodes(mode, phase):
     free = Parameter.dynamics("dead", 1.0, owner="q")

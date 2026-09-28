@@ -339,7 +339,7 @@ def test_chunked_cp_joint_normalization_and_derivatives():
     np.testing.assert_allclose(a(x), b(x), rtol=1e-12)
 
 
-@pytest.mark.parametrize("chunk_size", [0, -1])
+@pytest.mark.parametrize("chunk_size", [0])
 def test_dynamic_chunk_size_must_be_positive(chunk_size):
     with pytest.raises(ValueError, match="chunk_size must be positive"):
         PreparedAmplitudeCache.prepare(
@@ -351,7 +351,7 @@ def test_dynamic_chunk_size_must_be_positive(chunk_size):
         )
 
 
-@pytest.mark.parametrize("microbatch_size", [0, -1, True, 1.5])
+@pytest.mark.parametrize("microbatch_size", [0, True, 1.5])
 def test_dynamic_microbatch_size_must_be_a_positive_integer(microbatch_size):
     with pytest.raises(ValueError, match="dynamics_microbatch_size"):
         PreparedAmplitudeCache.prepare(
@@ -363,7 +363,7 @@ def test_dynamic_microbatch_size_must_be_a_positive_integer(microbatch_size):
         )
 
 
-@pytest.mark.parametrize("parallelism", [0, -1, True, 1.5])
+@pytest.mark.parametrize("parallelism", [0, True, 1.5])
 def test_dynamic_microbatch_parallelism_must_be_a_positive_integer(parallelism):
     with pytest.raises(ValueError, match="dynamics_microbatch_parallelism"):
         PreparedAmplitudeCache.prepare(

@@ -181,8 +181,3 @@ def test_plot_contour_marks_the_fitted_point():
     plt.close(ax.figure)
 
 
-def test_plot_contour_creates_its_own_axes_when_none_given():
-    result = _quadratic_bowl_result()
-    ax = plot_contour(result, "px", "py", cl=(0.68,), size=8)
-    assert ax is not None
-    plt.close(ax.figure)

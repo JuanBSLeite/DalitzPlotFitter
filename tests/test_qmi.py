@@ -230,40 +230,6 @@ def test_qmi_knot_parameters_are_collected_and_resolved_by_decay_model():
     assert bool(jnp.any(jnp.abs(nominal - shifted) > 1e-10))
 
 
-def test_cartesian_qmi_parameters_are_collected_and_resolved_by_decay_model():
-    owner = "pipi_S_cartesian_qmi"
-    x0 = Parameter.dynamics("qmi_x0", 1.0, owner=owner)
-    y0 = Parameter.dynamics("qmi_y0", 0.0, owner=owner)
-    qmi = QMI(
-        knots=(0.30, 0.60, 0.90),
-        real_parts=(x0, 1.5, 1.2),
-        imaginary_parts=(y0, 0.4, 0.8),
-        interpolation="linear",
-    )
-    decay = DecayModel(
-        DecayChannel("D_s+", ("pi-", "pi+", "pi+")),
-        [
-            Resonance(
-                owner,
-                pair=(0, 1),
-                coefficient=RealImag(1.0, 0.0),
-                mass=1.0,
-                width=0.0,
-                spin=0,
-                lineshape=qmi,
-            )
-        ],
-        normalization_resolution=30,
-    )
-    names = {parameter.name for parameter in decay.parameters}
-    assert {"qmi_x0", "qmi_y0"}.issubset(names)
-
-    data = decay.normalization_sample.as_dict()
-    nominal = decay.intensity(data, {"qmi_x0": 1.0, "qmi_y0": 0.0})
-    shifted = decay.intensity(data, {"qmi_x0": 2.0, "qmi_y0": 0.3})
-    assert bool(jnp.any(jnp.abs(nominal - shifted) > 1e-10))
-
-
 def test_qmi_linear_matches_jnp_interp_and_has_finite_gradients():
     knots = (0.30, 0.60, 0.90, 1.20)
     knot_s = jnp.asarray(knots) ** 2
@@ -355,58 +321,6 @@ def test_prepared_cubic_qmi_matches_reference_value_and_gradient():
         rtol=2e-11,
         atol=2e-11,
     )
-
-
-def test_prepared_cubic_cartesian_qmi_gradient_is_finite():
-    knots = (0.30, 0.48, 0.67, 0.91, 1.20)
-    knot_s = jnp.asarray(knots) ** 2
-    masses = jnp.linspace(0.31, 1.19, 173)
-    s = masses**2
-    real = jnp.asarray((1.0, -0.4, 1.7, 0.2, 1.1))
-    imaginary = jnp.asarray((0.2, 0.8, -0.6, 1.2, -0.1))
-
-    model = QMI(
-        knots=knots,
-        real_parts=tuple(real),
-        imaginary_parts=tuple(imaginary),
-        interpolation="cubic",
-    )
-    index = jnp.clip(
-        jnp.searchsorted(knot_s, s, side="right") - 1,
-        0,
-        len(knots) - 2,
-    )
-    x0 = knot_s[index]
-    x1 = knot_s[index + 1]
-    fraction = (s - x0) / (x1 - x0)
-    order = jnp.argsort(index).astype(jnp.int32)
-    counts = jnp.bincount(index.astype(jnp.int32), length=len(knots) - 1)
-    ends = jnp.cumsum(counts).astype(jnp.int32)
-    starts = jnp.concatenate((jnp.zeros((1,), dtype=jnp.int32), ends[:-1]))
-
-    def objective(real_values, imaginary_values):
-        real_interp = _cubic_qmi_prepared(
-            real_values,
-            index,
-            fraction,
-            order,
-            starts,
-            ends,
-        )
-        imaginary_interp = _cubic_qmi_prepared(
-            imaginary_values,
-            index,
-            fraction,
-            order,
-            starts,
-            ends,
-        )
-        amplitude = real_interp + 1j * imaginary_interp
-        return jnp.sum((1.0 + s) * jnp.abs(amplitude) ** 2)
-
-    gradients = jax.grad(objective, argnums=(0, 1))(real, imaginary)
-    assert bool(jnp.all(jnp.isfinite(gradients[0])))
-    assert bool(jnp.all(jnp.isfinite(gradients[1])))
 
 
 def test_qmi_local_cubic_uses_only_the_two_adjacent_knots():

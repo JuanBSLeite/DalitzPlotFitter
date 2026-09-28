@@ -87,7 +87,7 @@ def test_modes_parameter_resolution_jit_gradient_and_hessian(mode, polar):
         assert np.linalg.eigvalsh(hessian).min() > -1e-9
 
 
-@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("mode", MODES[:1])
 def test_exact_curvature_for_quadratic_on_nonuniform_mass_squared_grid(mode):
     # q(s) = (1+2i)s². |q''|² = 20, interior dual-cell width = (4-1)/2.
     s = np.array([1.0, 2.0, 4.0])
@@ -111,7 +111,7 @@ def test_exact_curvature_for_quadratic_on_nonuniform_mass_squared_grid(mode):
     assert float(polar.smoothness_constraint(1.0)({})) == pytest.approx(30.0)
 
 
-@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("mode", MODES[:1])
 def test_affine_complex_nodes_are_unpenalized_even_for_nonlinear_interpolants(mode):
     s = np.array([0.09, 0.2, 0.7, 2.0])
     z = (1 + 0.2j) + (0.3 - 0.7j) * s

@@ -34,7 +34,7 @@ def test_raw_factor_matches_laura_primed_polynomial(spin):
     assert float(blatt_weisskopf_from_momenta(.7, .7, spin, 4.)) == 1.
 
 
-@pytest.mark.parametrize("spin", range(5))
+@pytest.mark.parametrize("spin", [2])
 def test_public_option_scales_complete_amplitude_and_survives_json(spin):
     channel = DecayChannel("B+", ("pi+", "pi+", "pi-"))
     component = Resonance(

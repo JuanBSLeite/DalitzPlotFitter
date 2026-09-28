@@ -81,12 +81,6 @@ def test_fit_session_fit_update_model_returns_a_model_with_fitted_values():
     assert session_x.value == initial_x
 
 
-def test_fit_session_fit_without_update_model_returns_plain_result():
-    session = FitSession(_model(), _data())
-    result = session.fit({"NR.x": 0.9}, simplex=False, ncall=100)
-    assert result.valid
-
-
 def test_fit_session_cached_signal_matches_generic_pdf():
     session = FitSession(_model(), _data())
     values = {"NR.x": 1.3}

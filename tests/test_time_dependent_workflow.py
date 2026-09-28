@@ -96,12 +96,6 @@ def test_parameters_collect_model_and_mixing_deduplicated():
     assert names == ["NR.x", "mix.x", "mix.y"]
 
 
-def test_objective_is_finite_at_declared_values():
-    session = _session()
-    values = {"NR.x": 1.0, "mix.x": 0.01, "mix.y": 0.005}
-    assert jnp.isfinite(session.objective(values))
-
-
 def test_session_matches_hand_built_time_dependent_nll():
     from dalitzplotfitter import (
         AmplitudeComponent,

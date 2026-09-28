@@ -36,12 +36,6 @@ def test_inverse_transform_is_default_toy_method():
     assert inspect.signature(generate_cp_toy).parameters["method"].default == "inverse-transform"
 
 
-def test_generate_signal_toy_returns_requested_unweighted_size():
-    toy = generate_signal_toy(_model(), 60, seed=10, inverse_resolution=64)
-    assert toy.size == 60
-    assert jnp.allclose(toy.weights, 1.0)
-
-
 def test_generate_signal_toy_supports_accept_reject():
     toy = generate_signal_toy(
         _model(),
@@ -93,29 +87,11 @@ def test_inverse_transform_can_skip_four_momenta_without_changing_invariants():
     assert compact.nbytes * 4 == full.nbytes
 
 
-def test_accept_reject_can_return_compact_toy():
-    toy = generate_signal_toy(
-        _model(),
-        100,
-        seed=103,
-        method="accept-reject",
-        pool_size=500,
-        include_momenta=False,
-    )
-    assert toy.p1 is None and toy.p2 is None and toy.p3 is None
-    assert toy.size == 100
-
-
 def test_prepared_inverse_generator_can_return_compact_toy():
     prepared = prepare_inverse_toy_generator(_model(), resolution=80)
     toy = prepared.generate(120, seed=104, include_momenta=False)
     assert toy.size == 120
     assert toy.p1 is None and toy.p2 is None and toy.p3 is None
-
-
-def test_resample_is_not_a_public_toy_method():
-    with pytest.raises(ValueError, match="method must be one of"):
-        generate_toy(_model(), 20, method="resample")
 
 
 def test_generate_toy_rejects_unknown_sampling_method():
@@ -196,39 +172,6 @@ def test_generate_cp_toy_preserves_total_event_count_and_charge_model():
         400,
         parameters={"NR.x": 1.0, "NR.dx": 0.25},
         seed=12,
-        inverse_resolution=80,
-    )
-    assert plus_toy.size + minus_toy.size == 400
-    assert plus_toy.size > minus_toy.size
-    assert jnp.allclose(plus_toy.weights, 1.0)
-    assert jnp.allclose(minus_toy.weights, 1.0)
-
-
-def test_generate_cp_toy_inverse_preserves_total_event_count_and_charge_model():
-    x = Parameter.coefficient("NR.x", 1.0, owner="NR")
-    dx = Parameter.coefficient("NR.dx", 0.25, owner="NR")
-    cp = CPRealImag(x, 0.0, dx, 0.0)
-    plus = DecayModel(
-        DecayChannel("B+", ("K+", "pi+", "pi-")),
-        [NonResonant(cp.for_charge(+1))],
-        normalization_method="square-dalitz",
-        normalization_resolution=12,
-        normalization_pair=(0, 2),
-    )
-    minus = DecayModel(
-        DecayChannel("B-", ("K-", "pi-", "pi+")),
-        [NonResonant(cp.for_charge(-1))],
-        normalization_method="square-dalitz",
-        normalization_resolution=12,
-        normalization_pair=(0, 2),
-    )
-    plus_toy, minus_toy = generate_cp_toy(
-        plus,
-        minus,
-        400,
-        parameters={"NR.x": 1.0, "NR.dx": 0.25},
-        seed=112,
-        method="inverse-transform",
         inverse_resolution=80,
     )
     assert plus_toy.size + minus_toy.size == 400

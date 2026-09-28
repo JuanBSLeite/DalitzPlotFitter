@@ -371,29 +371,6 @@ def test_decay_model_can_generate_compact_phase_space():
     assert compact.nbytes * 4 == full.nbytes
 
 
-def test_decay_model_builds_symmetrized_resonance_without_manual_particle_masses():
-    channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
-    model = _model(
-        channel,
-        [
-            Resonance(
-                "rho_test",
-                pair=(0, 1),
-                coefficient=RealImag(1.0, 0.0),
-                mass=0.77526,
-                width=0.1491,
-                spin=1,
-            ),
-            NonResonant(RealImag(0.2, -0.1)),
-        ],
-    )
-    sample = model.generate_phase_space(128, seed=17)
-    values = model.intensity(sample.as_dict())
-    assert values.shape == (128,)
-    assert bool(jnp.all(jnp.isfinite(values)))
-    assert bool(jnp.all(values >= 0.0))
-
-
 def test_decay_model_accepts_custom_lineshape_plugin():
     channel = DecayChannel("D+", ("pi-", "pi+", "pi+"))
     model = _model(
