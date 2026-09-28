@@ -422,7 +422,7 @@ class DecayModel:
         normalization_order_m23: int | None = None,
         normalization_narrow_width: float = 0.020,
         normalization_narrow_window: float = 5.0,
-        normalization_binning_factor: float = 100.0, 
+        normalization_binning_factor: float = 20.0, 
         normalization_sample: PhaseSpaceSample | None = None,
         normalization_chunk_size: int = DEFAULT_NORMALIZATION_CHUNK_SIZE,
         dynamics_microbatch_size: int = DEFAULT_DYNAMICS_MICROBATCH_SIZE,
