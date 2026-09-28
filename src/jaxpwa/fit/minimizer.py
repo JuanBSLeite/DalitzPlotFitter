@@ -474,6 +474,25 @@ class Minimizer:
 
         return result
 
+    def jax_hessian(
+        self, values: Mapping[str, float] | None = None,
+    ) -> tuple[tuple[str, ...], np.ndarray]:
+        """Exact objective Hessian from the memory-aware JAX backend.
+
+        Returns ``(names, hessian)`` in free-parameter order. Floating-dynamics
+        fits keep the same sequential/batched HVP implementation used by
+        ``hessian="jax"``, so callers such as the sWeight covariance correction
+        do not need to materialize an event-by-parameter Jacobian.
+        """
+        free, names, _, _, hessian_callback = self._backend()
+        supplied = self._validate_start_values(values)
+        point = np.asarray(
+            [float(supplied.get(parameter.name, parameter.value)) for parameter in free],
+            dtype=float,
+        )
+        hessian = np.asarray(hessian_callback(*point), dtype=float)
+        return names, 0.5 * (hessian + hessian.T)
+
     def jax_covariance(
         self, values: Mapping[str, float] | None = None,
     ) -> tuple[tuple[str, ...], np.ndarray]:
@@ -494,13 +513,7 @@ class Minimizer:
         is accepted directly by ``_covariance_matrix``/``fit_fraction_errors``
         as long as ``parameter_names`` is passed as this same ``names``.
         """
-        free, names, _, _, hessian_callback = self._backend()
-        supplied = self._validate_start_values(values)
-        point = np.asarray(
-            [float(supplied.get(parameter.name, parameter.value)) for parameter in free],
-            dtype=float,
-        )
-        hessian = np.asarray(hessian_callback(*point), dtype=float)
+        names, hessian = self.jax_hessian(values)
         covariance = 2.0 * self.errordef * np.linalg.inv(hessian)
         return names, 0.5 * (covariance + covariance.T)
 
