@@ -117,6 +117,18 @@ from dalitzplotfitter import enable_x64  # only needed to opt back out
 enable_x64(False)  # explicit, unvalidated float32 experiment
 ```
 
+### Time-dependent neutral-meson amplitudes
+
+Tagged D0 -> KS pi+ pi- fits are available through `NeutralMesonMixing` and
+`TimeDependentDalitzNLL`, with coherent mixing, JAX gradients, time acceptance
+and optional Gaussian time resolution, or through the higher-level
+`TimeDependentFitSession` composition layer with multiple backgrounds,
+fraction or extended-yield fits, and signal/background projections. The
+mixing convention follows the Belle paper above (Eqs. 1-2). See
+[the API and validation scope](docs/time_dependent.md) and the runnable
+`benchmarks/benchmark_time_dependent.py` example.
+
+
 ## Physics references
 
 J. Back et al., *Laura++: a Dalitz plot fitter*, Computer Physics Communications 231 (2018)
@@ -139,13 +151,3 @@ Belle Collaboration, *Measurement of D<sup>0</sup>-D̄<sup>0</sup> mixing and se
 violation using D<sup>0</sup> → K<sub>S</sub><sup>0</sup>π<sup>+</sup>π<sup>-</sup> decays*,
 Phys. Rev. D 89 (2014) 091103, arXiv:1404.2412.
 
-### Time-dependent neutral-meson amplitudes
-
-Tagged D0 -> KS pi+ pi- fits are available through `NeutralMesonMixing` and
-`TimeDependentDalitzNLL`, with coherent mixing, JAX gradients, time acceptance
-and optional Gaussian time resolution, or through the higher-level
-`TimeDependentFitSession` composition layer with multiple backgrounds,
-fraction or extended-yield fits, and signal/background projections. The
-mixing convention follows the Belle paper above (Eqs. 1-2). See
-[the API and validation scope](docs/time_dependent.md) and the runnable
-`benchmarks/benchmark_time_dependent.py` example.
