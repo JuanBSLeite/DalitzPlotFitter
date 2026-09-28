@@ -131,11 +131,21 @@ Phys. Rev. D 103 (2021) 092004, arXiv:2009.00025.
 LHCb Collaboration, *Amplitude analysis of the B<sup>±</sup> → π<sup>±</sup>π<sup>±</sup>π<sup>∓</sup> decay*,
 Phys. Rev. D 101 (2020) 012006, arXiv:1909.05212.
 
+BaBar Collaboration, *Improved measurement of the CKM angle γ in B<sup>∓</sup> → D<sup>(*)</sup>K<sup>(*)∓</sup>
+decays with a Dalitz plot analysis of D decays to K<sub>S</sub><sup>0</sup>π<sup>+</sup>π<sup>-</sup> and
+K<sub>S</sub><sup>0</sup>K<sup>+</sup>K<sup>-</sup>*, Phys. Rev. D 78 (2008) 034023, arXiv:0804.2089.
+
+Belle Collaboration, *Measurement of D<sup>0</sup>-D̄<sup>0</sup> mixing and search for indirect CP
+violation using D<sup>0</sup> → K<sub>S</sub><sup>0</sup>π<sup>+</sup>π<sup>-</sup> decays*,
+Phys. Rev. D 89 (2014) 091103, arXiv:1404.2412.
+
 ### Time-dependent neutral-meson amplitudes
 
 Tagged D0 -> KS pi+ pi- fits are available through `NeutralMesonMixing` and
 `TimeDependentDalitzNLL`, with coherent mixing, JAX gradients, time acceptance
 and optional Gaussian time resolution, or through the higher-level
 `TimeDependentFitSession` composition layer with multiple backgrounds,
-fraction or extended-yield fits, and signal/background projections. See [the API and validation scope](docs/time_dependent.md)
-and the runnable `benchmarks/benchmark_time_dependent.py` example.
+fraction or extended-yield fits, and signal/background projections. The
+mixing convention follows the Belle paper above (Eqs. 1-2). See
+[the API and validation scope](docs/time_dependent.md) and the runnable
+`benchmarks/benchmark_time_dependent.py` example.
