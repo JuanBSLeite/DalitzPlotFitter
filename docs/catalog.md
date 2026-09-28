@@ -144,6 +144,7 @@ These are what `FitSession`/`CPFitSession` compose automatically; use them direc
 | `SignalPDF` | class | Efficiency-corrected, normalized signal density built from a `PreparedAmplitudeCache`. |
 | `SCFSignalPDF` | class | Signal PDF including correctly-reconstructed *and* self-cross-feed (SCF) migrated events. |
 | `MultiBackgroundNLL` | class | Unbinned NLL: signal plus an arbitrary number of named background categories (non-CP). |
+| `WeightedUnbinnedNLL` | class | Weighted unbinned NLL `-sum_i w_i log p(x_i)` for an externally-weighted `logpdf` (e.g. sWeights); does not implement the covariance correction needed for statistically valid HESSE errors on such fits. |
 | `NeutralMesonMixing` | class | Exact neutral-meson time kernel with x, y, lifetime and complex q/p; see [time-dependent fits](time_dependent.md). |
 | `TimeDependentMixtureNLL` | class | Multiple normalized Dalitz-time backgrounds with floating fractions or extended yields and component tag probabilities; see `docs/time_dependent.md`. |
 | `TimeDependentDalitzNLL` | class | Tagged time-dependent Dalitz signal NLL, coherent A/Abar overlap, factorized acceptance and optional Gaussian time resolution; see [time-dependent fits](time_dependent.md). |

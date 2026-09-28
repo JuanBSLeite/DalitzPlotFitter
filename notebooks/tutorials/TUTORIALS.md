@@ -104,6 +104,7 @@ way as [`docs/catalog.md`](../../docs/catalog.md), or jump straight to a noteboo
 | 62 | [Resonance internals](tutorial_62_resonance_internals.ipynb) | `ResonanceAmplitude`/`ResonanceContext` |
 | 63 | [DalitzAmplitude + QMI2D](tutorial_63_dalitz_amplitude_qmi2d.ipynb) | `DalitzAmplitude` wrapping `QMI2D` |
 | 64 | [Feature index](tutorial_64_feature_index.ipynb) | Decision table linking back to all of the above |
+| 65 | [Weighted unbinned NLL](tutorial_65_weighted_unbinned_nll.ipynb) | `WeightedUnbinnedNLL` |
 
 ## Continue with focused examples
 

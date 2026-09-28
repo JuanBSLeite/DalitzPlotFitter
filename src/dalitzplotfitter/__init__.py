@@ -117,6 +117,7 @@ from .likelihood import (
     TimeDependentBackgroundCategory,
     TimeDependentDalitzNLL,
     TimeDependentMixtureNLL,
+    WeightedUnbinnedNLL,
     YieldAsymmetry,
 )
 from .observables import delta_method_covariance, delta_method_errors, delta_method_jacobian
@@ -185,7 +186,7 @@ __all__ = [
     "PreparedAmplitudeCache", "PreparedInverseToyGenerator", "PipiKKRescattering", "QMI", "QMI2D", "QMISmoothnessConstraint", "RealImag", "RelativisticBreitWigner", "RhoOmegaMixing", "Rescattering2", "SigmaPole", "SympyLineshape",
     "Resonance", "ResonanceAmplitude", "ResonanceContext", "SCFSignalPDF", "SignalPDF",
     "SparseMigration", "SquareDalitzGrid", "SquareDalitzHistogramBackground", "SquareDalitzHistogramEfficiency",
-    "SquareDalitzSCFMap", "ToyBackground", "VetoMap", "VetoedDensity", "ZemachP", "ZemachPstar",
+    "SquareDalitzSCFMap", "ToyBackground", "VetoMap", "VetoedDensity", "WeightedUnbinnedNLL", "ZemachP", "ZemachPstar",
     "Zemach_P", "Zemach_Pstar",
     "boost_to_rest_frame", "binned_data", "chi2_from_histograms", "covariant_kinematics",
     "covariant_kinematics_from_invariants", "dalitz_s13_limits",
