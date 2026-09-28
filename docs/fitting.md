@@ -204,6 +204,66 @@ gradient_check = minimizer.check_gradient(
 
 This should be used when introducing a new dynamical parameter or lineshape.
 
+## sWeight / sPlot Dalitz fits
+
+`FitSession.fit()` accepts per-event weights directly:
+
+```python
+result = session.fit(
+    weights=sweights,
+    covariance="sweight",
+    strategy=1,
+    hessian="jax",
+)
+```
+
+The fitted objective is signal-only,
+
+```text
+NLL_w(theta) = -sum_i w_i log p_signal(x_i; theta),
+```
+
+and finite negative weights are allowed. The weight multiplies the log-PDF; it
+is never placed inside the logarithm. A weighted `FitSession` must therefore
+not also configure an explicit Dalitz background mixture, signal fraction,
+signal yield, or extended likelihood. The background subtraction is already
+encoded statistically by the event weights.
+
+With `covariance="sweight"`, Jax-PWA evaluates two postfit Hessians at the
+same fitted point,
+
+```text
+H_w   = -sum_i w_i   d2 log p_i / dtheta dtheta^T
+H_w2  = -sum_i w_i^2 d2 log p_i / dtheta dtheta^T
+```
+
+and replaces the covariance reported by the returned Minuit object with
+
+```text
+C_sweight = inv(H_w) H_w2 inv(H_w).
+```
+
+The same memory-aware JAX Hessian/HVP implementation used for large QMI fits is
+used for both matrices. `result.errors`, `result.covariance`,
+`FitSession.fit_fraction_errors()`, and `FitSession.report()` therefore all
+consume the corrected covariance automatically. Use `covariance="minuit"`
+to keep the ordinary weighted-HESSE covariance instead.
+
+Gaussian/external constraints are not event-weighted; they are included
+unchanged in both postfit Hessians. `covariance="sweight"` is not available
+for the standalone `method="nesterov"` result because that result is not a
+Minuit result.
+
+This is the commonly used squared-weight Hessian (SumW2/RooFit-style)
+correction. It is **not** the most general uncertainty prescription for
+arbitrary event weights: the asymptotically correct expression can require
+the score outer-product matrix, and uncertainty from the procedure that
+determined the sWeights can add further terms. See C. Langenbruch,
+*Eur. Phys. J. C* **82** (2022) 393, arXiv:1911.01303, especially Eqs. (18)
+and (20--21). For an sPlot analysis, the usual requirement that the
+discriminating variable used to obtain the sWeights be sufficiently
+independent of the Dalitz variables within each component remains essential.
+
 ## Slow HESSE in large fits
 
 `MnHesse: Using analytical gradient but a numerical Hessian calculator` means
