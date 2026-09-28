@@ -1,6 +1,6 @@
 # Dynamics module structure
 
-One-dimensional resonance lineshapes are organized under `src/dalitzplotfitter/dynamics/lineshape/`, with one physical model per file:
+One-dimensional resonance lineshapes are organized under `src/jaxpwa/dynamics/lineshape/`, with one physical model per file:
 
 ```text
 dynamics/
@@ -20,12 +20,12 @@ dynamics/
     qmi.py
 ```
 
-`common.py` contains only shared kinematic and Blatt-Weisskopf helpers. Public imports remain available from `dalitzplotfitter` and `dalitzplotfitter.dynamics`, so user code does not need to import implementation files directly.
+`common.py` contains only shared kinematic and Blatt-Weisskopf helpers. Public imports remain available from `jaxpwa` and `jaxpwa.dynamics`, so user code does not need to import implementation files directly.
 
 Angular factors are interchangeable plugins passed through `Resonance(..., angular=...)`. The default remains `CovariantAngular()`. Two Laura++ Zemach conventions are also available:
 
 ```python
-from dalitzplotfitter import Zemach_P, Zemach_Pstar
+from jaxpwa import Zemach_P, Zemach_Pstar
 
 rho = Resonance(
     "rho770",
@@ -43,7 +43,7 @@ rho = Resonance(
 A legacy GooFit angular convention is also retained explicitly for compatibility with the historical `Ds -> pi pi pi` implementation:
 
 ```python
-from dalitzplotfitter import GooFitLegacyAngular
+from jaxpwa import GooFitLegacyAngular
 
 rho_legacy = Resonance(
     "rho770",

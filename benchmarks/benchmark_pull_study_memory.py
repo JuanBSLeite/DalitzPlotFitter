@@ -35,7 +35,7 @@ import numpy as np
 import uproot
 from benchmark_fit_evaluation import _block_tree
 
-from dalitzplotfitter import read_root_tree
+from jaxpwa import read_root_tree
 
 DEFAULT_NOTEBOOK = (
     Path(__file__).resolve().parents[1]
@@ -111,7 +111,7 @@ def main():
             raise ValueError(f"Unexpected notebook layout at cell {index}")
         exec(compile(source, f"{args.notebook}:cell{index}", "exec"), scope)
 
-    execute(2, "from dalitzplotfitter import")
+    execute(2, "from jaxpwa import")
     execute(4, "NORMALIZATION_CONFIG =")
     if args.normalization_resolution is not None:
         scope["NORMALIZATION_CONFIG"]["normalization_resolution"] = (

@@ -2,8 +2,8 @@ import math
 
 import jax.numpy as jnp
 
-from dalitzplotfitter import enable_x64
-from dalitzplotfitter.kinematics import (
+from jaxpwa import enable_x64
+from jaxpwa.kinematics import (
     PhaseSpaceMC,
     boost_to_rest_frame,
     covariant_kinematics,

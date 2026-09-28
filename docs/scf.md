@@ -1,6 +1,6 @@
 # Self-cross-feed (SCF) migration
 
-DalitzPlotFitter supports Laura++-style self-cross-feed (SCF), also called
+Jax-PWA supports Laura++-style self-cross-feed (SCF), also called
 misreconstructed-signal migration. SCF is treated as part of the signal model,
 not as an incoherent physics background.
 
@@ -160,7 +160,7 @@ For genuinely large maps, do not construct the dense matrix at all. Build a
 `SparseMigration` directly:
 
 ```python
-from dalitzplotfitter import SparseMigration, SquareDalitzSCFMap
+from jaxpwa import SparseMigration, SquareDalitzSCFMap
 
 migration = SparseMigration(
     true_indices=true_bins,
@@ -194,7 +194,7 @@ dense matrix only when explicitly needed for diagnostics or export.
 ## SCFSignalPDF API
 
 ```python
-from dalitzplotfitter import SCFSignalPDF, SquareDalitzSCFMap
+from jaxpwa import SCFSignalPDF, SquareDalitzSCFMap
 
 pdf = SCFSignalPDF(
     intensity=intensity,
@@ -209,7 +209,7 @@ The migration operator and `f_SCF` map must use the same Square-Dalitz binning.
 
 ## Important convention when importing Laura++ histograms
 
-DalitzPlotFitter stores the migration with the explicit orientation
+Jax-PWA stores the migration with the explicit orientation
 
 ```text
 axis 0 = true bin

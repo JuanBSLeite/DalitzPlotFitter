@@ -4,14 +4,14 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from dalitzplotfitter import (
+from jaxpwa import (
     DecayChannel,
     DecayModel,
     FunctionalVeto,
     NonResonant,
     RealImag,
 )
-from dalitzplotfitter.kinematics import PhaseSpaceMC, PhaseSpaceSample
+from jaxpwa.kinematics import PhaseSpaceMC, PhaseSpaceSample
 
 
 def sample():

@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 
-from dalitzplotfitter import (
+from jaxpwa import (
     FunctionalVeto,
     SCFSignalPDF,
     SparseMigration,
@@ -9,7 +9,7 @@ from dalitzplotfitter import (
     SquareDalitzSCFMap,
     enable_x64,
 )
-from dalitzplotfitter.integration import GridIntegrator
+from jaxpwa.integration import GridIntegrator
 
 
 enable_x64()

@@ -3,8 +3,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from dalitzplotfitter import QMI2D, Parameter, enable_x64, physical_bin_mask
-from dalitzplotfitter.dynamics.qmi2d import _catmull_rom
+from jaxpwa import QMI2D, Parameter, enable_x64, physical_bin_mask
+from jaxpwa.dynamics.qmi2d import _catmull_rom
 
 enable_x64()
 

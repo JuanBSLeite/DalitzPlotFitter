@@ -1,6 +1,6 @@
 # PDF convolution and detector resolution
 
-DalitzPlotFitter provides a generic one-dimensional convolution layer for observables whose reconstructed value differs continuously from the underlying true value.
+Jax-PWA provides a generic one-dimensional convolution layer for observables whose reconstructed value differs continuously from the underlying true value.
 
 For a true PDF `f(t)` and a conditional resolution kernel `R(x | t)`, the observed density is
 
@@ -15,7 +15,7 @@ The finite observed-range normalization is explicit. This matters whenever detec
 For an isolated resonance, `LineshapeIntensity1D` converts an existing complex dynamics plugin into a normalized one-dimensional intensity PDF. No second Breit-Wigner implementation is needed.
 
 ```python
-from dalitzplotfitter import (
+from jaxpwa import (
     ConvolvedPDF1D,
     GaussianResolution1D,
     LineshapeIntensity1D,

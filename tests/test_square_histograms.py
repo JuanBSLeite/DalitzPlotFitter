@@ -2,7 +2,7 @@ import jax.numpy as jnp
 import numpy as np
 import uproot
 
-from dalitzplotfitter import (
+from jaxpwa import (
     SquareDalitzHistogramBackground,
     SquareDalitzHistogramEfficiency,
     square_dalitz_background_from_root,

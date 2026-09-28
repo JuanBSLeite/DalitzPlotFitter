@@ -51,9 +51,9 @@ def main():
     import jax.numpy as jnp
     import numpy as np
 
-    from dalitzplotfitter import SquareDalitzGrid
-    from dalitzplotfitter.integration.gauss_legendre import _s13_limits_numpy
-    from dalitzplotfitter.kinematics import PhaseSpaceSample
+    from jaxpwa import SquareDalitzGrid
+    from jaxpwa.integration.gauss_legendre import _s13_limits_numpy
+    from jaxpwa.kinematics import PhaseSpaceSample
 
     models = (scope["plus_model"], scope["minus_model"])
     efficiencies = (scope["plus_efficiency"], scope["minus_efficiency"])

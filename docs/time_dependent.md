@@ -191,7 +191,7 @@ also support direct CP violation; reference phases and scales must be fixed to
 remove unidentifiable directions, especially when fitting `q/p` simultaneously.
 
 ```python
-from dalitzplotfitter import (
+from jaxpwa import (
     Parameter, PreparedAmplitudeCache, NeutralMesonMixing,
     TimeDependentDalitzNLL, Minimizer,
 )
@@ -285,7 +285,7 @@ boilerplate above. It composes one `DecayModel` (the D0/A amplitude), a
 arrays, and a `NeutralMesonMixing`:
 
 ```python
-from dalitzplotfitter import NeutralMesonMixing, TimeDependentFitSession
+from jaxpwa import NeutralMesonMixing, TimeDependentFitSession
 
 session = TimeDependentFitSession(
     model, data, times, tags,
@@ -430,7 +430,7 @@ PDFs (not a detector model for Belle):
 
 ```python
 import jax.numpy as jnp
-from dalitzplotfitter import Parameter, TimeDependentFitSession
+from jaxpwa import Parameter, TimeDependentFitSession
 
 low, high = 0.0, 4.0
 rate = Parameter("comb.rate", 1.5, bounds=(0.1, 10.0))
@@ -539,7 +539,7 @@ mistag probability, keeping its mixing dependence:
 
 ```python
 from dataclasses import replace
-from dalitzplotfitter import TimeDependentBackgroundCategory
+from jaxpwa import TimeDependentBackgroundCategory
 
 # Begin with a session without backgrounds; share its cache and response.
 random_signal = replace(session.signal_objective, wrong_tag=0.5)
@@ -677,7 +677,7 @@ rejection sampler. Use a fixed `seed` for reproducible candidates and increase
 `proposal_size` when validating small mixing or narrow Dalitz structures.
 
 ```python
-from dalitzplotfitter import generate_time_dependent_toy
+from jaxpwa import generate_time_dependent_toy
 
 toy = generate_time_dependent_toy(
     session,

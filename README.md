@@ -1,6 +1,21 @@
-# DalitzPlotFitter
+<table>
+<tr>
+<td width="190"><img src="assets/logo.png" alt="Jax-PWA logo" width="170"></td>
+<td>
 
-DalitzPlotFitter is a Python package for **unbinned amplitude fits of three-body decays**
+# Jax-PWA
+
+**JAX-native, end-to-end unbinned amplitude fitting for three-body decays.**
+
+</td>
+</tr>
+</table>
+
+[![tests](https://github.com/JuanBSLeite/Jax-PWA/actions/workflows/tests.yml/badge.svg)](https://github.com/JuanBSLeite/Jax-PWA/actions/workflows/tests.yml)
+![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-blue)
+![JAX](https://img.shields.io/badge/backend-JAX-orange)
+
+Jax-PWA is a Python package for **unbinned amplitude fits of three-body decays**
 ("Dalitz plot analyses"), the technique used across flavour physics (LHCb, BaBar, Belle,
 BESIII, E791, ...) to extract resonance parameters, branching fractions, CP asymmetries and
 interference structure from a sample of reconstructed decays such as `B+ -> K+ pi+ pi-` or
@@ -13,7 +28,7 @@ normalization, likelihood and gradient evaluation — is written in **JAX**, end
 ROOT file input/output without needing PyROOT. There is no TensorFlow dependency anywhere.
 
 Laura++ is the primary physics reference for resonance, barrier-factor, angular and
-Square-Dalitz-Plot conventions; DalitzPlotFitter follows those conventions (and documents any
+Square-Dalitz-Plot conventions; Jax-PWA follows those conventions (and documents any
 deliberate deviation) while using its own, backend-neutral class names.
 
 ## What it can do
@@ -83,8 +98,8 @@ basic flow.
 ## Installation
 
 ```bash
-git clone https://github.com/JuanBSLeite/DalitzPlotFitter.git
-cd DalitzPlotFitter
+git clone https://github.com/JuanBSLeite/Jax-PWA.git
+cd Jax-PWA
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -108,11 +123,11 @@ are currently provided for Linux; see the [JAX installation guide](https://docs.
 for driver and platform requirements.
 
 The project deliberately runs `float64`/`complex128` rather than JAX's own default, for
-amplitude-analysis stability. `import dalitzplotfitter` already enables double precision
+amplitude-analysis stability. `import jaxpwa` already enables double precision
 automatically, so no separate call is needed for normal use:
 
 ```python
-from dalitzplotfitter import enable_x64  # only needed to opt back out
+from jaxpwa import enable_x64  # only needed to opt back out
 
 enable_x64(False)  # explicit, unvalidated float32 experiment
 ```

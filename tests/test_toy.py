@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import uproot
 
-from dalitzplotfitter import (
+from jaxpwa import (
     CPToyBackground,
     CPRealImag,
     DecayChannel,

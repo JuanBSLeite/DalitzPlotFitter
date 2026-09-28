@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from dalitzplotfitter import (
+from jaxpwa import (
     QMI,
     CPRealImag,
     DecayChannel,
@@ -17,8 +17,8 @@ from dalitzplotfitter import (
     Resonance,
     ZemachP,
 )
-from dalitzplotfitter.amplitude import PreparedAmplitudeCache
-from dalitzplotfitter.likelihood import CPJointNLL
+from jaxpwa.amplitude import PreparedAmplitudeCache
+from jaxpwa.likelihood import CPJointNLL
 
 
 def make_model(

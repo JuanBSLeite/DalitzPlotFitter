@@ -1,9 +1,9 @@
 import jax.numpy as jnp
 import pytest
 
-from dalitzplotfitter import enable_x64
-from dalitzplotfitter.dynamics import ResonanceAmplitude, ResonanceContext
-from dalitzplotfitter.kinematics import PhaseSpaceMC
+from jaxpwa import enable_x64
+from jaxpwa.dynamics import ResonanceAmplitude, ResonanceContext
+from jaxpwa.kinematics import PhaseSpaceMC
 
 
 enable_x64()
@@ -130,7 +130,7 @@ def test_odd_spin_identical_resonance_daughters_are_rejected():
 def test_compaction_drops_unrelated_component_state(spin, prepared_lineshape):
     from dataclasses import replace
 
-    from dalitzplotfitter import QMI, ZemachP
+    from jaxpwa import QMI, ZemachP
 
     component = _component(spin, final_state=FINAL_STATE)
     if prepared_lineshape:

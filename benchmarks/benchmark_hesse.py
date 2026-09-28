@@ -20,7 +20,7 @@ from benchmark_fit_evaluation import make_model as make_isobar_model
 from benchmark_qmi_memory_speed import make_model as make_qmi_model
 from iminuit import Minuit
 
-from dalitzplotfitter import FitSession, enable_x64
+from jaxpwa import FitSession, enable_x64
 
 
 def main():

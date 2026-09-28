@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 
-from dalitzplotfitter import (
+from jaxpwa import (
     ConvolvedPDF1D,
     FactorizedDensity,
     Gaussian1D,

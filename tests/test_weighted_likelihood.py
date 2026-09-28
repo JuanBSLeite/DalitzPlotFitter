@@ -2,8 +2,8 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from dalitzplotfitter import enable_x64
-from dalitzplotfitter.likelihood import WeightedUnbinnedNLL
+from jaxpwa import enable_x64
+from jaxpwa.likelihood import WeightedUnbinnedNLL
 
 enable_x64()
 

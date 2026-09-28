@@ -10,7 +10,7 @@ import pytest
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from dalitzplotfitter import (
+from jaxpwa import (
     BackgroundCategory,
     DecayChannel,
     DecayModel,

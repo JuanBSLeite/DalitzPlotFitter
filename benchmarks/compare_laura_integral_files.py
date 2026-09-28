@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import jax  # noqa: E402
 import jax.numpy as jnp  # noqa: E402
 
-from dalitzplotfitter import (  # noqa: E402
+from jaxpwa import (  # noqa: E402
     CompositeVeto,
     DecayChannel,
     DecayModel,
@@ -34,7 +34,7 @@ from dalitzplotfitter import (  # noqa: E402
     ZemachP,
     read_root_histogram2d,
 )
-from dalitzplotfitter.integration.gauss_legendre import _s13_limits_numpy  # noqa: E402
+from jaxpwa.integration.gauss_legendre import _s13_limits_numpy  # noqa: E402
 
 CATALOG = [
     ("rho0(770)", 0.77526, 0.1478, 1, GounarisSakurai),

@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from dalitzplotfitter import (
+from jaxpwa import (
     CPBackgroundCategory,
     CPFitSession,
     CPRealImag,
@@ -14,8 +14,8 @@ from dalitzplotfitter import (
     RealImag,
     enable_x64,
 )
-from dalitzplotfitter.amplitude import AmplitudeComponent, PreparedAmplitudeCache
-from dalitzplotfitter.likelihood import CPJointNLL, YieldAsymmetry
+from jaxpwa.amplitude import AmplitudeComponent, PreparedAmplitudeCache
+from jaxpwa.likelihood import CPJointNLL, YieldAsymmetry
 
 enable_x64()
 

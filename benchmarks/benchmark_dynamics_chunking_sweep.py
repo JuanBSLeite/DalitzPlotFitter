@@ -30,7 +30,7 @@ import time
 import jax
 import numpy as np
 
-from dalitzplotfitter import (
+from jaxpwa import (
     DecayChannel,
     DecayModel,
     FitSession,

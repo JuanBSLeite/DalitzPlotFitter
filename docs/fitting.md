@@ -1,6 +1,6 @@
 # Fitting and statistical validation
 
-DalitzPlotFitter uses JAX to evaluate the objective and automatic gradient. `iminuit`
+Jax-PWA uses JAX to evaluate the objective and automatic gradient. `iminuit`
 remains the default minimizer, and a projected Nesterov prefit is available for
 large amplitude fits that benefit from a fast first pass.
 
@@ -408,7 +408,7 @@ JAX. `fit_fraction_errors` instead differentiates
 `PreparedAmplitudeCache.fit_fractions` -- a pure JAX function of the full
 parameter mapping, exactly like the objective itself -- with reverse-mode
 autodiff (the same VJP construction as
-`dalitzplotfitter.observables.delta_method_jacobian`), giving `J`
+`jaxpwa.observables.delta_method_jacobian`), giving `J`
 to floating-point precision with no step-size tuning and no truncation
 error. Reverse mode is also the efficient *direction* here: a fit fraction
 vector has far fewer entries (one per component) than a QMI-heavy model has
@@ -550,7 +550,7 @@ propagation:
   `Cov(theta_hat)` -- and hence on every propagated fit-fraction error -- is
   already included automatically, whether or not that parameter is fixed.
 
-`dalitzplotfitter.observables.delta_method_errors`/`delta_method_covariance`
+`jaxpwa.observables.delta_method_errors`/`delta_method_covariance`
 are general-purpose: they work for any JAX-differentiable postfit quantity,
 not just fit fractions (interference fractions, the CP-observable table in
 `docs/cp_coefficients.md`, or any custom derived observable) -- see

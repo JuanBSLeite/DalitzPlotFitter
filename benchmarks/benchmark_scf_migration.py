@@ -20,7 +20,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from dalitzplotfitter import SparseMigration, SquareDalitzSCFMap, enable_x64
+from jaxpwa import SparseMigration, SquareDalitzSCFMap, enable_x64
 
 
 enable_x64()

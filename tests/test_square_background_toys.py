@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from dalitzplotfitter import (
+from jaxpwa import (
     CPToyBackground,
     DecayChannel,
     DecayModel,
@@ -172,7 +172,7 @@ def test_unconverted_background_keeps_dalitz_measure(method):
 def test_interpolated_square_background_and_ordered_pair(method, interpolation, pair):
     from dataclasses import replace
 
-    from dalitzplotfitter import square_dalitz_to_invariants
+    from jaxpwa import square_dalitz_to_invariants
 
     model, shape = setup_background(values=np.arange(1, 17).reshape(4, 4))
     shape = replace(shape, interpolation=interpolation, pair=pair)

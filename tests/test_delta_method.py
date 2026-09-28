@@ -2,7 +2,7 @@ import numpy as np
 import jax.numpy as jnp
 import pytest
 
-from dalitzplotfitter import (
+from jaxpwa import (
     CPFitSession,
     CPRealImag,
     DecayChannel,
@@ -252,7 +252,7 @@ def test_qmi_cp_fraction_errors_preserve_full_integral_and_cross_covariance(
 
     import jax
 
-    from dalitzplotfitter import QMI, delta_method_jacobian
+    from jaxpwa import QMI, delta_method_jacobian
 
     magnitudes = tuple(
         Parameter.dynamics(f"S.mag{i}", 1.0 + 0.1*i, owner="S", fixed=i == 0)

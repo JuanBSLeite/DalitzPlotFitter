@@ -1,13 +1,13 @@
 # API catalog
 
-An index of every name exported from `dalitzplotfitter` (i.e. `import dalitzplotfitter as m;
+An index of every name exported from `jaxpwa` (i.e. `import jaxpwa as m;
 m.__all__`): what it is, one line on what it does, and where to read more. Everything below is
-importable directly as `from dalitzplotfitter import <Name>` — no submodule path needed.
+importable directly as `from jaxpwa import <Name>` — no submodule path needed.
 
 This page is a map, not a tutorial. For conventions, formulas and worked examples, follow the
 "docs" links to the per-topic file, and the "notebooks" links to a runnable example. For anything
 not covered here (private helpers, submodule-only exports like the `Simultaneous`/`Unbinned`/
-`WeightedUnbinned` NLL variants in `dalitzplotfitter.likelihood`), read the module directly —
+`WeightedUnbinned` NLL variants in `jaxpwa.likelihood`), read the module directly —
 this catalog only covers the public top-level surface.
 
 For a guided introduction, start with the [nine-part notebook course](../notebooks/tutorials/TUTORIALS.md).
@@ -235,7 +235,7 @@ Docs: `docs/root_io.md`. Notebooks: `13_b2kpipi_root_tree_input.ipynb`, `19_toy_
 automatically, returning `(result, updated_model)`/`(result, plus_model, minus_model)` instead of
 plain `result` (default `False`, existing callers are unaffected).
 
-Only the built-in dalitzplotfitter component/plugin classes (`Resonance`/`NonResonant`/
+Only the built-in jaxpwa component/plugin classes (`Resonance`/`NonResonant`/
 `DalitzAmplitude`, every lineshape and angular model, `RealImag`/`CPRealImag`, `QMI2D`) round-trip;
 a custom plugin needs its own `to_spec`/`from_spec` pair, as `SympyLineshape` already provides.
 `normalization_method="toy-mc"` is not supported, since its external `normalization_sample` is not
@@ -347,6 +347,6 @@ Docs: `docs/user_friendly_api.md`, `docs/time_dependent.md`. Notebooks: `16_user
 
 | Name | Kind | What it does |
 |---|---|---|
-| `enable_x64` | function | Enable or disable JAX 64-bit floating-point precision. Importing `dalitzplotfitter` already calls this with `enabled=True` unless `JAX_ENABLE_X64` was set explicitly first; call `enable_x64(False)` directly only to opt back into an explicit, unvalidated float32 experiment. |
+| `enable_x64` | function | Enable or disable JAX 64-bit floating-point precision. Importing `jaxpwa` already calls this with `enabled=True` unless `JAX_ENABLE_X64` was set explicitly first; call `enable_x64(False)` directly only to opt back into an explicit, unvalidated float32 experiment. |
 
 Docs: `README.md` "Installation", `docs/fitting.md`.

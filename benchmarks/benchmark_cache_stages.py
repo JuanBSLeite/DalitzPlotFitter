@@ -15,7 +15,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from dalitzplotfitter import (
+from jaxpwa import (
     BaBarFlatte,
     DecayChannel,
     DecayModel,
@@ -26,7 +26,7 @@ from dalitzplotfitter import (
     Resonance,
     enable_x64,
 )
-from dalitzplotfitter.amplitude.cache import (
+from jaxpwa.amplitude.cache import (
     DEFAULT_NORMALIZATION_CHUNK_SIZE,
     _compact_data_kernel,
     _compact_normalization_kernel,

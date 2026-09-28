@@ -8,7 +8,7 @@ The usual weighted-PhaseSpaceMC path conserves the measure implemented by the ge
 
 ## 1. High: documentation lets a signal toy be interpreted as an integration sample with unit weights
 
-`src/dalitzplotfitter/decay.py`, `normalization_sample` documentation and constructor; `tests/test_decay_model.py::test_unweighted_toy_mc_sample_uses_unit_weights`.
+`src/jaxpwa/decay.py`, `normalization_sample` documentation and constructor; `tests/test_decay_model.py::test_unweighted_toy_mc_sample_uses_unit_weights`.
 
 The API uses the supplied weights directly. The phrase "an unweighted toy uses unit weights" does not distinguish uniform phase space from a signal toy. For points distributed according to q, the mean of f with unit weights estimates the expectation of f under q; integrating in the desired measure requires importance weights proportional to 1/q. Unit weights are appropriate only when the proposal is uniform in that measure, with the corresponding volume convention.
 
@@ -26,7 +26,7 @@ Recommendation: document and, where possible, explicitly represent the proposal/
 
 ## 2. Medium: the public stratified sample carries proposal weights, not full integration weights
 
-`src/dalitzplotfitter/kinematics/phase_space_mc.py`, `_generate_three_body_invariant_cells` and `generate_stratified_invariants`.
+`src/jaxpwa/kinematics/phase_space_mc.py`, `_generate_three_body_invariant_cells` and `generate_stratified_invariants`.
 
 Cells are chosen with non-uniform probabilities, but the returned weight does not include the inverse of that probability. This is intentional for accept-reject, whose envelope/cell probability supplies the correction. However, the returned object is an ordinary PhaseSpaceSample and can be passed directly to integration.
 
@@ -39,7 +39,7 @@ Recommendation: explicitly distinguish proposals from integrable samples, or off
 
 ## 3. Medium: filtering a normalization sample changes the estimator's denominator
 
-`src/dalitzplotfitter/veto.py::VetoMap.apply`, `kinematics/sample.py::PhaseSpaceSample.take`, `integration/grid.py::GridIntegrator.integrate`.
+`src/jaxpwa/veto.py::VetoMap.apply`, `kinematics/sample.py::PhaseSpaceSample.take`, `integration/grid.py::GridIntegrator.integrate`.
 
 `apply` removes events and preserves their weights. The subsequent integration divides by the retained count, not the original count. This is appropriate as a data selection, but it does not preserve the original sample's integral. The current workflow avoids this problem by multiplying the veto into the full sample; the risk appears when the user supplies an already-filtered external sample.
 
@@ -52,7 +52,7 @@ Recommendation: keep events with zero contribution, or, when filtering an integr
 
 ## 4. Medium: non-finite external samples enter normalization
 
-`src/dalitzplotfitter/decay.py`, `normalization_sample` validation in the constructor.
+`src/jaxpwa/decay.py`, `normalization_sample` validation in the constructor.
 
 The constructor checks type, size, and shape of the vectors, but not finiteness. A physical 100-event sample with just one weight replaced by NaN was accepted; the model intensity started returning NaN because of the component normalization scale.
 

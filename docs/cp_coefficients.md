@@ -1,6 +1,6 @@
 # Direct-CP coefficient parameterization
 
-DalitzPlotFitter provides `CPRealImag` for charge-conjugate amplitude fits. It is a Cartesian extension of `RealImag` and keeps the CP-averaged amplitude and direct-CP difference in one shared parameter set.
+Jax-PWA provides `CPRealImag` for charge-conjugate amplitude fits. It is a Cartesian extension of `RealImag` and keeps the CP-averaged amplitude and direct-CP difference in one shared parameter set.
 
 For charge label `q = +1` or `q = -1`,
 
@@ -86,7 +86,7 @@ treated as having zero covariance. Consequently, components fitted with
 coefficient `A_CP` and CP phase difference, while their common magnitude and
 phase can still carry uncertainty from `x` and `y`.
 
-`dalitzplotfitter.observables.delta_method_covariance`/`delta_method_errors`
+`jaxpwa.observables.delta_method_covariance`/`delta_method_errors`
 implement exactly this `Cov(f) = J Cov(x) J^T` propagation as a reusable
 library function, with `J` computed by exact autodiff (`jax.jacrev`) rather
 than a hand-rolled finite-difference Jacobian, for any JAX-differentiable
@@ -254,8 +254,8 @@ gives by default. `nll.expected_events(values)` still returns `N_s` exactly
 backgrounds are present).
 
 ```python
-from dalitzplotfitter import Parameter
-from dalitzplotfitter.likelihood import YieldAsymmetry
+from jaxpwa import Parameter
+from jaxpwa.likelihood import YieldAsymmetry
 
 signal_yield = YieldAsymmetry(
     Parameter("n_signal", 5000.0),

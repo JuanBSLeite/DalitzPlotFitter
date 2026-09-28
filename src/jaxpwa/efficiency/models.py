@@ -1,0 +1,100 @@
+"""Built-in efficiency models."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Callable
+
+import jax.numpy as jnp
+from jax import Array
+
+from jaxpwa.histogram import interpolate_2d
+
+
+def _validate_histogram_edges(edges: Array, label: str) -> Array:
+    edges = jnp.asarray(edges)
+    if edges.ndim != 1 or edges.size < 2:
+        raise ValueError(f"{label} edges must be a one-dimensional array with at least two entries")
+    if not bool(jnp.all(jnp.isfinite(edges))):
+        raise ValueError(f"{label} edges must be finite")
+    if not bool(jnp.all(jnp.diff(edges) > 0.0)):
+        raise ValueError(f"{label} edges must be strictly increasing")
+    return edges
+
+
+@dataclass(frozen=True)
+class UnityEfficiency:
+    """Efficiency model corresponding to no efficiency correction."""
+
+    def __call__(self, data: dict[str, Array]) -> Array:
+        if not data:
+            raise ValueError("efficiency evaluation requires non-empty event data")
+        first = jnp.asarray(next(iter(data.values())))
+        size = first.shape[0] if first.ndim > 0 else 1
+        return jnp.ones((size,), dtype=float)
+
+
+@dataclass(frozen=True)
+class FunctionalEfficiency:
+    """Wrap a JAX-compatible non-negative relative efficiency function."""
+
+    function: Callable[[dict[str, Array]], Array]
+
+    def __call__(self, data: dict[str, Array]) -> Array:
+        values = jnp.asarray(self.function(data))
+        valid = jnp.isfinite(values) & (values >= 0.0)
+        return jnp.where(valid, values, jnp.nan)
+
+
+@dataclass(frozen=True)
+class HistogramEfficiency:
+    """Piecewise-constant 2D relative efficiency histogram.
+
+    ``folded=True`` folds the ``(x_variable, y_variable)`` pair onto
+    ``x <= y`` (via ``min``/``max``) before the bin lookup, for two
+    exchange-symmetric Dalitz invariants (e.g. ``x_variable="s12"``,
+    ``y_variable="s13"`` for a channel with two identical daughters sharing
+    the third, bachelor particle). ``x_edges`` and ``y_edges`` must then be
+    identical, since folding always looks the smaller value up on the ``x``
+    grid and the larger on the ``y`` grid.
+    """
+
+    x_edges: Array
+    y_edges: Array
+    values: Array
+    x_variable: str = "s12"
+    y_variable: str = "s13"
+    folded: bool = False
+    interpolation: str = "none"
+
+    def __post_init__(self) -> None:
+        x_edges = _validate_histogram_edges(self.x_edges, "x")
+        y_edges = _validate_histogram_edges(self.y_edges, "y")
+        values = jnp.asarray(self.values)
+        expected = (x_edges.size - 1, y_edges.size - 1)
+        if values.shape != expected:
+            raise ValueError(f"Histogram values shape must be {expected}, got {values.shape}")
+        if not bool(jnp.all(jnp.isfinite(values))):
+            raise ValueError("Histogram efficiency values must be finite")
+        if bool(jnp.any(values < 0.0)):
+            raise ValueError("Histogram efficiency values must be non-negative")
+        if self.folded and not bool(jnp.array_equal(x_edges, y_edges)):
+            raise ValueError(
+                "folded HistogramEfficiency requires x_edges and y_edges to be "
+                "identical: folding looks min(x,y) up on the x grid and "
+                "max(x,y) up on the y grid, so mismatched ranges would "
+                "silently clamp whichever value is smaller/larger to the "
+                "narrower grid's boundary"
+            )
+        if self.interpolation not in {"none", "linear", "spline"}:
+            raise ValueError("interpolation must be 'none', 'linear' or 'spline'")
+        object.__setattr__(self, "x_edges", x_edges)
+        object.__setattr__(self, "y_edges", y_edges)
+        object.__setattr__(self, "values", values)
+
+    def __call__(self, data: dict[str, Array]) -> Array:
+        x = jnp.asarray(data[self.x_variable])
+        y = jnp.asarray(data[self.y_variable])
+        if self.folded:
+            x, y = jnp.minimum(x, y), jnp.maximum(x, y)
+        return interpolate_2d(x, y, self.x_edges, self.y_edges, self.values, self.interpolation)

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from scipy.interpolate import CubicSpline
 
-from dalitzplotfitter import QMI
+from jaxpwa import QMI
 
 
 @pytest.mark.parametrize("polar", [False, True])
@@ -73,7 +73,7 @@ def test_natural_has_global_support():
 
 
 def test_natural_second_derivatives_and_interior_continuity():
-    from dalitzplotfitter.dynamics.lineshape.qmi import _natural_cubic
+    from jaxpwa.dynamics.lineshape.qmi import _natural_cubic
 
     x = jnp.array([0.09, 0.25, 0.64, 1.44, 3.24])
     y = jnp.array([0.4, 1.0, -0.2, 0.8, 0.3])

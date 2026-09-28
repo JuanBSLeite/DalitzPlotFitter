@@ -10,7 +10,7 @@ def _run_import(*, preallocate=None):
     else:
         env["XLA_PYTHON_CLIENT_PREALLOCATE"] = preallocate
     code = (
-        "import os; import dalitzplotfitter; "
+        "import os; import jaxpwa; "
         "print(os.environ.get('XLA_PYTHON_CLIENT_PREALLOCATE'))"
     )
     return subprocess.run(
@@ -36,7 +36,7 @@ def _run_x64_check(*, jax_enable_x64=None):
         env.pop("JAX_ENABLE_X64", None)
     else:
         env["JAX_ENABLE_X64"] = jax_enable_x64
-    code = "import jax; import dalitzplotfitter; print(jax.config.jax_enable_x64)"
+    code = "import jax; import jaxpwa; print(jax.config.jax_enable_x64)"
     return subprocess.run(
         [sys.executable, "-c", code],
         env=env,

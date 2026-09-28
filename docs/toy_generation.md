@@ -64,7 +64,7 @@ Four-momenta are reconstructed in the parent rest frame from the sampled invaria
 The expensive part of inverse-transform generation is preparation. For repeated pseudoexperiments with the same model parameters, prepare once:
 
 ```python
-from dalitzplotfitter import prepare_inverse_toy_generator
+from jaxpwa import prepare_inverse_toy_generator
 
 prepared = prepare_inverse_toy_generator(
     model,
@@ -205,7 +205,7 @@ workflows that need momentum branches in ROOT output.
 ## Save a non-CP toy to ROOT
 
 ```python
-from dalitzplotfitter import generate_toy
+from jaxpwa import generate_toy
 
 toy = generate_toy(
     model,

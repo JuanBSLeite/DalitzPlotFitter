@@ -1,6 +1,6 @@
 # NVIDIA GPU testing on Ubuntu 24.04.4 LTS / WSL2
 
-This guide defines the reference GPU test environment for DalitzPlotFitter:
+This guide defines the reference GPU test environment for Jax-PWA:
 
 ```text
 Host:             Windows + WSL2
@@ -11,7 +11,7 @@ Accelerator:      NVIDIA GPU via CUDA
 Reference GPU:    GeForce RTX 3050 Ti Laptop GPU (4 GB, compute capability 8.6)
 ```
 
-DalitzPlotFitter has no separate GPU code path. The numerical backend is JAX, so the same fitter code automatically runs on an NVIDIA GPU when a CUDA-enabled JAX installation detects one.
+Jax-PWA has no separate GPU code path. The numerical backend is JAX, so the same fitter code automatically runs on an NVIDIA GPU when a CUDA-enabled JAX installation detects one.
 
 ## Important WSL2 rule
 
@@ -81,10 +81,10 @@ For this project on WSL2, CUDA 12 is the conservative reference configuration be
 
 ## 4. Create the Python 3.12.3 environment
 
-From the DalitzPlotFitter repository:
+From the Jax-PWA repository:
 
 ```bash
-cd DalitzPlotFitter
+cd Jax-PWA
 python3.12 -m venv .venv
 source .venv/bin/activate
 ```
@@ -235,7 +235,7 @@ wsl --shutdown
 Then reopen Ubuntu WSL, activate the environment, export the JAX memory setting, and start the notebook again:
 
 ```bash
-cd ~/work/DalitzPlotFitter
+cd ~/work/Jax-PWA
 source .venv/bin/activate
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 code .
@@ -315,7 +315,7 @@ print("Result:", float(y[0, 0]))
 PY
 ```
 
-## 11. Run DalitzPlotFitter tests on the GPU
+## 11. Run Jax-PWA tests on the GPU
 
 ```bash
 python -c 'import jax; assert jax.default_backend() == "gpu"; print(jax.devices())' && pytest
@@ -379,7 +379,7 @@ A coefficient-only fit deliberately uses cached component amplitudes and a cache
 ## Minimal RTX 3050 Ti / WSL2 reference sequence
 
 ```bash
-cd ~/work/DalitzPlotFitter
+cd ~/work/Jax-PWA
 source .venv/bin/activate
 
 export XLA_PYTHON_CLIENT_PREALLOCATE=false

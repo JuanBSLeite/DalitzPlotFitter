@@ -1,6 +1,6 @@
 # Multiple background categories and veto maps
 
-DalitzPlotFitter supports arbitrary named background categories and Laura++-style Dalitz vetoes.
+Jax-PWA supports arbitrary named background categories and Laura++-style Dalitz vetoes.
 
 ## Multiple background categories
 
@@ -192,7 +192,7 @@ modules, plain Dalitz invariants) and `SquareDalitzHistogramEfficiency`/
 all accept `folded=True`:
 
 ```python
-from dalitzplotfitter.efficiency import HistogramEfficiency
+from jaxpwa.efficiency import HistogramEfficiency
 
 # s12/s13 are the two invariants exchanged when swapping the identical pair
 # (e.g. the two pi+ in D+ -> pi- pi+ pi+); x_edges must equal y_edges.
@@ -203,7 +203,7 @@ efficiency = HistogramEfficiency(
 ```
 
 ```python
-from dalitzplotfitter import SquareDalitzHistogramEfficiency
+from jaxpwa import SquareDalitzHistogramEfficiency
 
 # pair must be the identical daughters themselves, so m' is already symmetric
 # and only theta' -> 1 - theta' needs folding; thetaprime_edges <= 0.5.

@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 
-from dalitzplotfitter import BackgroundCategory, MultiBackgroundNLL, Parameter
+from jaxpwa import BackgroundCategory, MultiBackgroundNLL, Parameter
 
 
 def test_nonextended_multiple_background_categories():

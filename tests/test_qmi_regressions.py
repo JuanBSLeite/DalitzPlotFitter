@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from dalitzplotfitter import (
+from jaxpwa import (
     QMI,
     QMI2D,
     DecayChannel,

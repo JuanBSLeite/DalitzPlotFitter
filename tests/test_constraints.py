@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 
-from dalitzplotfitter import ConstrainedNLL, GaussianConstraint, Parameter
+from jaxpwa import ConstrainedNLL, GaussianConstraint, Parameter
 
 
 def test_gaussian_constraint_matches_quadratic_penalty():

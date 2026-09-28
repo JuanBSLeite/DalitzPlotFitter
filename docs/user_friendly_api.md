@@ -1,11 +1,11 @@
 # User-friendly analysis API
 
-DalitzPlotFitter keeps the low-level classes available for validation and custom analyses, while common workflows can use `FitSession` and `CPFitSession`.
+Jax-PWA keeps the low-level classes available for validation and custom analyses, while common workflows can use `FitSession` and `CPFitSession`.
 
 ## Minimal signal fit
 
 ```python
-from dalitzplotfitter import FitSession
+from jaxpwa import FitSession
 
 session = FitSession(model, data)
 result = session.fit(simplex=True)
@@ -20,7 +20,7 @@ The fit parameters are collected automatically from the amplitude model.
 High-level toy generation uses **accept-reject by default**, following the Laura++ generation strategy:
 
 ```python
-from dalitzplotfitter import generate_toy
+from jaxpwa import generate_toy
 
 toy = generate_toy(model, 100_000, parameters=truth, seed=1)
 ```
@@ -82,7 +82,7 @@ The same efficiency and veto are included in the signal numerator and determinis
 ## Backgrounds without manual normalization
 
 ```python
-from dalitzplotfitter import BackgroundSpec, FitSession, Parameter
+from jaxpwa import BackgroundSpec, FitSession, Parameter
 
 f_sig = Parameter("signal_fraction", 0.8, bounds=(0.0, 1.0))
 
@@ -156,7 +156,7 @@ session.plot_projection(
 The manual `PreparedAmplitudeCache + CPJointNLL + Minimizer` assembly can be replaced by:
 
 ```python
-from dalitzplotfitter import CPFitSession
+from jaxpwa import CPFitSession
 
 session = CPFitSession(
     plus_model,
@@ -187,7 +187,7 @@ The acceptance is folded into both data numerators and the two normalization cac
 ### CP backgrounds
 
 ```python
-from dalitzplotfitter import CPBackgroundSpec
+from jaxpwa import CPBackgroundSpec
 
 session = CPFitSession(
     plus_model,
@@ -223,7 +223,7 @@ The CP projections use two weighted phase-space MC rendering samples, but their 
 ## Plot helpers
 
 ```python
-from dalitzplotfitter import plot_dalitz, plot_square_dalitz
+from jaxpwa import plot_dalitz, plot_square_dalitz
 
 plot_dalitz(data, x="s13", y="s23", title="Selected data")
 plot_dalitz(data, x="s13", y="s23", log_scale=True)

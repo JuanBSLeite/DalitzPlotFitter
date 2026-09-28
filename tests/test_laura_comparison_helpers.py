@@ -6,7 +6,7 @@ from pathlib import Path
 import jax.numpy as jnp
 import numpy as np
 
-from dalitzplotfitter import (
+from jaxpwa import (
     CPBackgroundCategory,
     MassWindowVeto,
     SquareDalitzGrid,

@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from dalitzplotfitter import (
+from jaxpwa import (
     CPRealImag,
     CPToyBackground,
     DecayChannel,
@@ -17,7 +17,7 @@ from dalitzplotfitter import (
     generate_toy,
     prepare_inverse_toy_generator,
 )
-from dalitzplotfitter.inverse_transform import (
+from jaxpwa.inverse_transform import (
     DalitzInverseTransformSampler,
     _inverse_row,
 )
@@ -48,7 +48,7 @@ def test_inverse_cdf_does_not_bridge_plateau():
 def test_inverse_support_and_relative_population(resolution):
     # Two disconnected strips; compare their populations with an independent
     # high-resolution integration of the physical Dalitz width.
-    from dalitzplotfitter.inverse_transform import _s13_limits
+    from jaxpwa.inverse_transform import _s13_limits
 
     def support(d):
         return ((d["s12"] < 0.8) | (d["s12"] > 1.2)) & (d["s13"] > 0.6)

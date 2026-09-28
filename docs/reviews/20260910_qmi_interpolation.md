@@ -33,7 +33,7 @@ distorts the field near the narrower grid's boundary instead of raising.
 
 ## 1. Medium: `QMI2D(folded=True, ...)` did not require `s12_edges == s13_edges`
 
-`src/dalitzplotfitter/dynamics/qmi2d.py`, `_coordinates()` (around line 251-253)
+`src/jaxpwa/dynamics/qmi2d.py`, `_coordinates()` (around line 251-253)
 and `__post_init__` (no prior check).
 
 `folded=True` computes `s_low = min(s12, s13)`, `s_high = max(s12, s13)`, then
@@ -138,7 +138,7 @@ on both axes.
 
 ## Validation
 
-- New/changed: `src/dalitzplotfitter/dynamics/qmi2d.py`, `docs/lineshapes.md`,
+- New/changed: `src/jaxpwa/dynamics/qmi2d.py`, `docs/lineshapes.md`,
   `tests/test_qmi2d.py` (1 new test).
 - `pytest tests/test_qmi2d.py tests/test_qmi.py tests/test_qmi_regressions.py`:
   52 passed (was 51 before the new regression test).

@@ -1,4 +1,4 @@
-# Learn DalitzPlotFitter
+# Learn Jax-PWA
 
 A progressive course in English, based on the [public API catalog](../docs/catalog.md).
 Each notebook contains explanations, executable examples, diagnostic checks and exercises.

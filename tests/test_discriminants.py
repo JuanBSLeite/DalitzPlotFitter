@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 
-from dalitzplotfitter import (
+from jaxpwa import (
     BreitWigner1D,
     Exponential1D,
     FactorizedDensity,

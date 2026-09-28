@@ -2,7 +2,7 @@ import math
 
 import jax.numpy as jnp
 
-from dalitzplotfitter.dynamics import (
+from jaxpwa.dynamics import (
     GooFitLegacyAngular,
     RelativisticBreitWigner,
     ResonanceContext,
@@ -19,7 +19,7 @@ from dalitzplotfitter.dynamics import (
     goofit_legacy_spin_factor,
     zemach_spin_factor,
 )
-from dalitzplotfitter.kinematics import CovariantKinematics
+from jaxpwa.kinematics import CovariantKinematics
 
 
 def _context(spin=1, *, pole_mass=0.775):

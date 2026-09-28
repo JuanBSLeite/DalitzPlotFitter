@@ -11,7 +11,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from dalitzplotfitter import (
+from jaxpwa import (
     DecayChannel,
     DecayModel,
     NonResonant,
@@ -37,13 +37,13 @@ class NoSympy(importlib.abc.MetaPathFinder):
         if fullname == "sympy" or fullname.startswith("sympy."):
             raise ImportError("blocked for optional dependency test")
 sys.meta_path.insert(0, NoSympy())
-import dalitzplotfitter as dpf
+import jaxpwa as dpf
 assert "sympy" not in sys.modules
 assert isinstance(dpf.Resonance("x", (0, 1), 1).lineshape, dpf.RelativisticBreitWigner)
 try:
     dpf.SympyLineshape(None, mass_symbol=None)
 except ImportError as error:
-    assert "dalitzplotfitter[sympy]" in str(error)
+    assert "jax-pwa[sympy]" in str(error)
 else:
     raise AssertionError("missing optional dependency was not reported")
 """

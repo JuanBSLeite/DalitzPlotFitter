@@ -18,7 +18,7 @@ import numpy as np
 from benchmark_fit_evaluation import make_model as make_isobar
 from benchmark_qmi_memory_speed import make_model as make_qmi
 
-from dalitzplotfitter import delta_method_errors, enable_x64
+from jaxpwa import delta_method_errors, enable_x64
 
 
 def main():

@@ -1,6 +1,6 @@
 # Goodness of fit
 
-DalitzPlotFitter provides two independent goodness-of-fit (GOF) methods for an unbinned
+Jax-PWA provides two independent goodness-of-fit (GOF) methods for an unbinned
 amplitude fit, both following M. Williams, "How good are your fits? Unbinned multivariate
 goodness-of-fit tests in high energy physics" (arXiv:1006.3019) — the reference that studies
 exactly this use case (a Dalitz-plot analysis) and is the method Laura++'s literature uses for
@@ -19,7 +19,7 @@ CP fit, including the reduced-data-session pattern PPD needs on a large real sam
 
 The low-level, physics-agnostic building blocks (`chi2_from_histograms`,
 `point_to_point_dissimilarity`, `BinnedChi2Result`, `PointToPointResult`) live in
-`dalitzplotfitter.goodness_of_fit` and consume plain arrays, not a session — use them directly
+`jaxpwa.goodness_of_fit` and consume plain arrays, not a session — use them directly
 for a custom binning or a workflow the session layer doesn't cover, per the project's
 [low-level/high-level design principle](user_friendly_api.md).
 
@@ -45,7 +45,7 @@ weighted phase-space sample reweighted to the fitted density, histogrammed exact
 Pearson's chi2 (Williams Eq. 3.2) is `sum_c (o_c - e_c)^2 / e_c`. When the model's free
 parameters are obtained from a binned fit that minimizes this same chi2, the degrees of freedom
 are exactly `n_bins - n_free_parameters - 1`. **That is never the case here**: every
-DalitzPlotFitter fit is an *unbinned* maximum-likelihood fit, so the true number of degrees of
+Jax-PWA fit is an *unbinned* maximum-likelihood fit, so the true number of degrees of
 freedom is not known. Williams shows only the bound
 
 ```text
@@ -149,7 +149,7 @@ at once is not a documented statistic and is not offered here — run it once pe
 ## Plotting pulls
 
 ```python
-from dalitzplotfitter import plot_pulls
+from jaxpwa import plot_pulls
 
 plot_pulls(session.goodness_of_fit_projection(result, "s13", bins=40))
 plot_pulls(session.goodness_of_fit_chi2(result, bins=25))

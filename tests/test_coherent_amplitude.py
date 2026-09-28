@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 
-from dalitzplotfitter import RealImag
-from dalitzplotfitter.amplitude import (
+from jaxpwa import RealImag
+from jaxpwa.amplitude import (
     AmplitudeComponent,
     CoherentAmplitudeModel,
     ConstantAmplitude,

@@ -26,7 +26,7 @@ import jax.numpy as jnp
 import uproot
 from laura_comparison_helpers import charge_scaled_background
 
-from dalitzplotfitter import (
+from jaxpwa import (
     SquareDalitzHistogramBackground,
     SquareDalitzHistogramEfficiency,
     square_dalitz_jacobian,

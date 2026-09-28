@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from dalitzplotfitter import (
+from jaxpwa import (
     BackgroundCategory,
     CPBackgroundCategory,
     CPFitSession,
@@ -18,8 +18,8 @@ from dalitzplotfitter import (
     NonResonant,
     RealImag,
 )
-from dalitzplotfitter.cp_workflow import _joint_scaled_weights
-from dalitzplotfitter.workflow import _scaled_projection_weights
+from jaxpwa.cp_workflow import _joint_scaled_weights
+from jaxpwa.workflow import _scaled_projection_weights
 
 
 @pytest.fixture

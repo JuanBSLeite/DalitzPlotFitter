@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from dalitzplotfitter import (
+from jaxpwa import (
     DecayChannel,
     DecayModel,
     Resonance,
@@ -13,7 +13,7 @@ from dalitzplotfitter import (
     model_from_spec,
     model_to_spec,
 )
-from dalitzplotfitter.dynamics import blatt_weisskopf_from_momenta
+from jaxpwa.dynamics import blatt_weisskopf_from_momenta
 
 
 def polynomial(z, spin):

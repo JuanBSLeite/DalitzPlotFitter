@@ -1,8 +1,8 @@
 import jax.numpy as jnp
 
-from dalitzplotfitter import CompositeVeto, FunctionalVeto, MassWindowVeto, SignalPDF
-from dalitzplotfitter.integration import GridIntegrator
-from dalitzplotfitter.kinematics import PhaseSpaceSample
+from jaxpwa import CompositeVeto, FunctionalVeto, MassWindowVeto, SignalPDF
+from jaxpwa.integration import GridIntegrator
+from jaxpwa.kinematics import PhaseSpaceSample
 
 
 def _sample():

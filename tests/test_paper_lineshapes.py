@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import jax.numpy as jnp
 
-from dalitzplotfitter import (
+from jaxpwa import (
     GounarisSakurai,
     PipiKKRescattering,
     ResonanceContext,

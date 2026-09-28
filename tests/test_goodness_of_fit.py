@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from dalitzplotfitter.goodness_of_fit import (
+from jaxpwa.goodness_of_fit import (
     BinnedChi2Result,
     chi2_from_histograms,
     point_to_point_dissimilarity,

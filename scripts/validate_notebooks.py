@@ -68,7 +68,7 @@ def worker(path, mode):
         namespace["display"] = print
     if mode == "smoke":
         # Defaults absent from notebook source must also be bounded.
-        from dalitzplotfitter import DecayModel
+        from jaxpwa import DecayModel
         init = DecayModel.__init__
         def small_init(self, *args, **kwargs):
             kwargs.update(normalization_resolution=24,
@@ -76,7 +76,7 @@ def worker(path, mode):
                           normalization_binning_factor=2.)
             return init(self, *args, **kwargs)
         DecayModel.__init__ = small_init
-        from dalitzplotfitter.fit import Minimizer
+        from jaxpwa.fit import Minimizer
         fit = Minimizer.fit
         def small_fit(self, *args, **kwargs):
             kwargs["ncall"] = 512

@@ -1,11 +1,11 @@
 import jax.numpy as jnp
 
-from dalitzplotfitter.integration import (
+from jaxpwa.integration import (
     GridIntegrator,
     matrix_normalization,
     normalization_matrix,
 )
-from dalitzplotfitter.kinematics import PhaseSpaceSample
+from jaxpwa.kinematics import PhaseSpaceSample
 
 
 def test_grid_integrator_is_deterministic_for_fixed_sample():

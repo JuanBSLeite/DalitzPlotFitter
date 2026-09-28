@@ -14,7 +14,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from dalitzplotfitter import (
+from jaxpwa import (
     AmplitudeComponent,
     DecayChannel,
     DecayModel,

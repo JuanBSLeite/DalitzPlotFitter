@@ -1,14 +1,14 @@
 import jax
 import jax.numpy as jnp
 
-from dalitzplotfitter.kinematics import PhaseSpaceMC
-from dalitzplotfitter.dynamics.lineshape.qmi import (
+from jaxpwa.kinematics import PhaseSpaceMC
+from jaxpwa.dynamics.lineshape.qmi import (
     _cubic_qmi_prepared,
     _hermite_qmi_prepared,
     _linear_cartesian_qmi_prepared,
 )
 
-from dalitzplotfitter import (
+from jaxpwa import (
     QMI,
     DecayChannel,
     DecayModel,

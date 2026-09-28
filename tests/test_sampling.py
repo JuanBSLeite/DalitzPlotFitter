@@ -1,8 +1,8 @@
 import jax
 import jax.numpy as jnp
 
-from dalitzplotfitter.kinematics import PhaseSpaceSample
-from dalitzplotfitter.sampling import weighted_resample
+from jaxpwa.kinematics import PhaseSpaceSample
+from jaxpwa.sampling import weighted_resample
 
 
 def test_weighted_resample_prefers_high_weight_candidates():

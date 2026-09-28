@@ -24,9 +24,9 @@ real bug was found and fixed: a silent-zero-gradient hazard when the low-level
 
 ## 1. Medium: `PreparedAmplitudeCache` and `Minimizer` can silently disagree on which DYNAMICS parameters are floating
 
-`src/dalitzplotfitter/amplitude/cache.py`, `PreparedAmplitudeCache.prepare()`
+`src/jaxpwa/amplitude/cache.py`, `PreparedAmplitudeCache.prepare()`
 (`floating_owners`/`fixed_indices`/`dynamic_indices`, around line 514) and
-`floating_dynamic_owners` (around line 659); `src/dalitzplotfitter/fit/minimizer.py`,
+`floating_dynamic_owners` (around line 659); `src/jaxpwa/fit/minimizer.py`,
 `Minimizer.__init__`/`_backend()`.
 
 `prepare()` decides once, from the `Parameter` sequence it is given, which
@@ -150,7 +150,7 @@ design").
 ## Validation
 
 - New/changed: `tests/test_amplitude_cache.py` (13 tests, including the 2 new
-  ones), `docs/performance.md`, `src/dalitzplotfitter/amplitude/cache.py`.
+  ones), `docs/performance.md`, `src/jaxpwa/amplitude/cache.py`.
 - `pytest tests/test_amplitude_cache.py tests/test_dynamic_fit_consistency.py
   tests/test_qmi2d.py tests/test_qmi_regressions.py tests/test_minimizer.py`: 58
   passed.

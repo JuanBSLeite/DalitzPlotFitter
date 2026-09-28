@@ -1,6 +1,6 @@
 # Resonance dynamics and angular terms
 
-DalitzPlotFitter implements resonance dynamics directly in JAX. Laura++ and published LHCb amplitude analyses are principal references used to define and validate the conventions.
+Jax-PWA implements resonance dynamics directly in JAX. Laura++ and published LHCb amplitude analyses are principal references used to define and validate the conventions.
 
 ## Available dynamics models
 
@@ -139,7 +139,7 @@ coefficients and `Lambda = 1` GeV are the Laura++ defaults. The two Chebyshev
 expansions are constructed to be continuous at 1.47 GeV.
 
 ```python
-from dalitzplotfitter import RealImag, Rescattering2, Resonance
+from jaxpwa import RealImag, Rescattering2, Resonance
 
 rescattering = Resonance(
     "rescattering",
@@ -450,12 +450,12 @@ discrepancies.
 Existing classes, custom JAX callables, and the default `RelativisticBreitWigner()`
 are unchanged. Install the optional dependency with
 `python -m pip install -e ".[sympy]"` from the repository root (or
-`python -m pip install "dalitzplotfitter[sympy]"` for an installed distribution).
+`python -m pip install "jax-pwa[sympy]"` for an installed distribution).
 Importing the package or using existing lineshapes does not import SymPy.
 
 ```python
 import sympy as sp
-from dalitzplotfitter import Parameter, RealImag, Resonance, SympyLineshape
+from jaxpwa import Parameter, RealImag, Resonance, SympyLineshape
 
 m, m0, gamma, alpha = sp.symbols("m m0 gamma alpha", real=True)
 mass = Parameter.dynamics("custom.mass", 0.77, owner="custom", bounds=(0.7, 0.85))

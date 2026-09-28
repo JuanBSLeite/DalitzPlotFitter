@@ -1,11 +1,11 @@
-# Conda environment for DalitzPlotFitter (CPU by default).
+# Conda environment for Jax-PWA (CPU by default).
 #
 # Create and install:
 #   conda env create -f environment.yml   # run from the repo root: the
 #                                          # "-e ." pip entry below is
 #                                          # resolved relative to the CWD,
 #                                          # not to this file's location.
-#   conda activate dalitzplotfitter
+#   conda activate jaxpwa
 #   pytest
 #
 # Update an existing environment after pulling changes:
@@ -25,7 +25,7 @@
 #                                  # unreleased ND cubature, installed from a
 #                                  # pinned GitHub commit -- see
 #                                  # docs/mc_integration.md)
-name: dalitzplotfitter
+name: jaxpwa
 channels:
   - conda-forge
 dependencies:

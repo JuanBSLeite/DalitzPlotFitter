@@ -1,13 +1,13 @@
 import jax.numpy as jnp
 import pytest
 
-from dalitzplotfitter import DecayChannel, DecayModel, RealImag, Resonance, enable_x64
-from dalitzplotfitter.dynamics import ResonanceAmplitude, ResonanceContext
-from dalitzplotfitter.dynamics.lineshape import (
+from jaxpwa import DecayChannel, DecayModel, RealImag, Resonance, enable_x64
+from jaxpwa.dynamics import ResonanceAmplitude, ResonanceContext
+from jaxpwa.dynamics.lineshape import (
     bachelor_momentum_parent_frame,
     bachelor_momentum_resonance_frame,
 )
-from dalitzplotfitter.kinematics import PhaseSpaceMC
+from jaxpwa.kinematics import PhaseSpaceMC
 
 
 enable_x64()

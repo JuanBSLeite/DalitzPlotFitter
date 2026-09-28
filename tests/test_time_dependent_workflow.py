@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from dalitzplotfitter import (
+from jaxpwa import (
     DecayChannel,
     DecayModel,
     NeutralMesonMixing,
@@ -15,7 +15,7 @@ from dalitzplotfitter import (
     RealImag,
     TimeDependentFitSession,
 )
-from dalitzplotfitter.time_dependent_workflow import _ReflectedAmplitude
+from jaxpwa.time_dependent_workflow import _ReflectedAmplitude
 
 
 def _channel():
@@ -97,7 +97,7 @@ def test_parameters_collect_model_and_mixing_deduplicated():
 
 
 def test_session_matches_hand_built_time_dependent_nll():
-    from dalitzplotfitter import (
+    from jaxpwa import (
         AmplitudeComponent,
         PreparedAmplitudeCache,
         TimeDependentDalitzNLL,
@@ -156,7 +156,7 @@ def test_explicit_abar_model_is_used_directly_not_reflected():
 
 
 def test_fit_update_model_returns_fitted_values():
-    from dalitzplotfitter import GaussianConstraint
+    from jaxpwa import GaussianConstraint
 
     session = _session(mixing=_fixed_mixing())
     # A lone NR coefficient is a global scale, unidentifiable in this PDF.
@@ -267,7 +267,7 @@ def test_plot_projection_rejects_event_wise_wrong_tag():
 
 
 def _resonant_model(name="rho", *, normalize=True, override=None):
-    from dalitzplotfitter import Resonance
+    from jaxpwa import Resonance
 
     return DecayModel(
         _channel(),

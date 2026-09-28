@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass
 import jax
 import numpy as np
 
-from dalitzplotfitter import (
+from jaxpwa import (
     BaBarFlatte,
     DecayChannel,
     DecayModel,

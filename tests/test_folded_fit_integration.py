@@ -11,7 +11,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from dalitzplotfitter import (
+from jaxpwa import (
     BackgroundSpec,
     CPBackgroundSpec,
     CPFitSession,
@@ -26,8 +26,8 @@ from dalitzplotfitter import (
     SquareDalitzHistogramEfficiency,
     enable_x64,
 )
-from dalitzplotfitter.background import HistogramBackground
-from dalitzplotfitter.efficiency import HistogramEfficiency
+from jaxpwa.background import HistogramBackground
+from jaxpwa.efficiency import HistogramEfficiency
 
 enable_x64()
 

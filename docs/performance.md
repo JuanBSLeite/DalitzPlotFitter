@@ -1,6 +1,6 @@
 # Fit performance and GPU execution
 
-DalitzPlotFitter separates expensive one-time preparation from repeated likelihood evaluation. This distinction is especially important on GPUs, where recomputing resonance dynamics on a large normalization grid can dominate the fit even when the final coefficient algebra is small.
+Jax-PWA separates expensive one-time preparation from repeated likelihood evaluation. This distinction is especially important on GPUs, where recomputing resonance dynamics on a large normalization grid can dominate the fit even when the final coefficient algebra is small.
 
 ## Prepared single-sample fits
 
@@ -494,7 +494,7 @@ The five-channel K-matrix has a particularly expensive fixed operation,
 D(s)=\left[I-iK(s)\rho(s)\right]^{-1}.
 \]
 
-For the pi-pi production amplitude only the first row of `D(s)` is needed. During prepared resonance evaluation, DalitzPlotFitter now stores that row once for each event/normalization point. A later change of production coefficients therefore evaluates
+For the pi-pi production amplitude only the first row of `D(s)` is needed. During prepared resonance evaluation, Jax-PWA now stores that row once for each event/normalization point. A later change of production coefficients therefore evaluates
 
 \[
 F_{\pi\pi}(s)=D_{0j}(s)P_j(s)

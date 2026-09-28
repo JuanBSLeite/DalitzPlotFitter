@@ -1,13 +1,13 @@
 # ROOT input with uproot
 
-DalitzPlotFitter reads ROOT files with `uproot`; PyROOT is not required.
+Jax-PWA reads ROOT files with `uproot`; PyROOT is not required.
 
 ## TTree input
 
 Use `read_root_tree` when arbitrary branches are needed:
 
 ```python
-from dalitzplotfitter import read_root_tree
+from jaxpwa import read_root_tree
 
 arrays = read_root_tree(
     "data.root",
@@ -41,7 +41,7 @@ the same branch renaming, cuts and entry ranges as the default mode.
 For a three-body fit sample use `read_phase_space_sample`:
 
 ```python
-from dalitzplotfitter import read_phase_space_sample
+from jaxpwa import read_phase_space_sample
 
 data = read_phase_space_sample(
     "data.root", "DecayTree",
@@ -55,7 +55,7 @@ If no weight branch is supplied, all event weights are one. Optional four-moment
 ## ROOT histograms in ordinary Dalitz coordinates
 
 ```python
-from dalitzplotfitter import histogram_background_from_root, histogram_efficiency_from_root
+from jaxpwa import histogram_background_from_root, histogram_efficiency_from_root
 
 efficiency = histogram_efficiency_from_root(
     "maps.root", "efficiency_s13_s23",
@@ -74,7 +74,7 @@ These return `HistogramEfficiency` and `HistogramBackground`.
 For B-decay analyses it is common to store efficiency and background maps directly in Square-Dalitz coordinates `(m', theta')`. This is supported natively:
 
 ```python
-from dalitzplotfitter import (
+from jaxpwa import (
     square_dalitz_background_from_root,
     square_dalitz_efficiency_from_root,
 )
@@ -128,7 +128,7 @@ both generation and fitting.
 The classes can also be constructed directly without ROOT:
 
 ```python
-from dalitzplotfitter import (
+from jaxpwa import (
     SquareDalitzHistogramEfficiency,
     SquareDalitzHistogramBackground,
 )

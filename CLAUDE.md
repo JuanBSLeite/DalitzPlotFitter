@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-DalitzPlotFitter is an unbinned amplitude-fit package for three-body decays. The numerical
+Jax-PWA is an unbinned amplitude-fit package for three-body decays. The numerical
 pipeline is **JAX end to end**: phase-space generation, kinematics, amplitude dynamics,
 normalization, likelihoods and gradients all run as JAX arrays/ops. `iminuit` only performs the
 final minimization, consuming a JAX `value_and_grad` objective. `particle` supplies standard
@@ -46,10 +46,10 @@ and `notebooks/benchmark/` with `nbformat` and compiles (not executes) each code
 not run on every push. There is no GPU CI; `docs/gpu_ubuntu_24_04.md` documents the manual
 WSL2/CUDA reference environment used for GPU validation.
 
-Importing `dalitzplotfitter` enables JAX 64-bit precision automatically (unless
+Importing `jaxpwa` enables JAX 64-bit precision automatically (unless
 `JAX_ENABLE_X64` was already set in the environment, which stays authoritative) — the project
 deliberately runs float64/complex128 for amplitude-analysis stability, and this is not JAX's own
-default. `enable_x64(False)` (`from dalitzplotfitter import enable_x64`) remains available to opt
+default. `enable_x64(False)` (`from jaxpwa import enable_x64`) remains available to opt
 back into float32 for an explicit, validated experiment; nothing in the numerical path is expected
 to be correct or to converge reliably (Minuit's EDM-based convergence check in particular) under
 float32.
@@ -209,7 +209,7 @@ special case of the other.
 
 ## Where to look before changing behavior
 
-`docs/catalog.md` indexes every name in `dalitzplotfitter.__all__` (the whole public,
+`docs/catalog.md` indexes every name in `jaxpwa.__all__` (the whole public,
 top-level-importable API) — one line per class/function plus a pointer to the doc/notebook that
 covers it in depth. Check it first for "does something already do X" or "where is X" questions
 before searching the source directly.

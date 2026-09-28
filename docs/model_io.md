@@ -8,7 +8,7 @@ component (`Resonance`/`NonResonant`/`DalitzAmplitude`, including their `linesha
 reconstructed later without re-running the Python script that built it.
 
 ```python
-from dalitzplotfitter import DecayChannel, DecayModel, Resonance, RealImag, export_model, import_model
+from jaxpwa import DecayChannel, DecayModel, Resonance, RealImag, export_model, import_model
 
 model = DecayModel(
     DecayChannel("D+", ("pi-", "pi+", "pi+")),
@@ -87,7 +87,7 @@ You can also do this yourself for a model you did not just fit, e.g. one loaded 
 `import_model` and combined with externally-known best-fit values:
 
 ```python
-from dalitzplotfitter import model_with_fitted_values
+from jaxpwa import model_with_fitted_values
 
 updated_model = model_with_fitted_values(model, session.result_values(result))
 # or, equivalently, straight from the session:
@@ -127,7 +127,7 @@ re-supplying `data` (and any efficiency/veto/backgrounds/constraints) yourself.
 a `CPFitSession` raises `TypeError` naming `export_cp_models` as the alternative:
 
 ```python
-from dalitzplotfitter import export_cp_models, import_cp_models
+from jaxpwa import export_cp_models, import_cp_models
 
 export_cp_models(session, "cp_models.json")  # or export_cp_models(plus_model, "cp_models.json", minus_model)
 
@@ -142,9 +142,9 @@ just an equal one. This matters for `CPFitSession`, whose joint normalization (s
 `docs/cp_coefficients.md`, "CP fits share one normalization across charges") is built from the
 same underlying `Parameter` list threaded through both charge models.
 
-## Only dalitzplotfitter classes are ever imported
+## Only jaxpwa classes are ever imported
 
 `import_model`/`model_from_spec` resolve every serialized component/plugin type against a fixed,
-built-in registry (`dalitzplotfitter.io.model._REGISTRY`) -- the file never names a Python module
+built-in registry (`jaxpwa.io.model._REGISTRY`) -- the file never names a Python module
 path to import. Loading an untrusted model file therefore cannot execute arbitrary code; at worst
 an unrecognized `"type"` value raises `ValueError`.

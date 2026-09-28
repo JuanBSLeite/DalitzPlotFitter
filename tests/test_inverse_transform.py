@@ -1,8 +1,8 @@
 import jax.numpy as jnp
 import numpy as np
 
-from dalitzplotfitter.inverse_transform import DalitzInverseTransformSampler
-from dalitzplotfitter.kinematics import dalitz_s13_limits
+from jaxpwa.inverse_transform import DalitzInverseTransformSampler
+from jaxpwa.kinematics import dalitz_s13_limits
 
 
 def _mass_squared(momentum):

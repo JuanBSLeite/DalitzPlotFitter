@@ -3,7 +3,7 @@ import math
 import numpy as np
 import pytest
 
-from dalitzplotfitter import Minimizer, Parameter, enable_x64
+from jaxpwa import Minimizer, Parameter, enable_x64
 
 enable_x64()
 
@@ -393,7 +393,7 @@ def test_verbose_reports_optimizer_stages(capsys):
 def test_jax_hessian_through_prepared_qmi_matches_gradient_differences(interpolation):
     import jax.numpy as jnp
 
-    from dalitzplotfitter import (
+    from jaxpwa import (
         QMI,
         DecayChannel,
         DecayModel,
@@ -450,7 +450,7 @@ def test_jax_hessian_recovers_from_negative_curvature_start():
 
 @pytest.mark.parametrize('session_name', ['FitSession', 'CPFitSession'])
 def test_session_hessian_option_reaches_single_and_multistart_fit(session_name):
-    import dalitzplotfitter as dpf
+    import jaxpwa as dpf
 
     # Isolate the composition layer with a well-identified correlated objective.
     session_type = getattr(dpf, session_name)

@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from dalitzplotfitter import QMI, ResonanceContext
+from jaxpwa import QMI, ResonanceContext
 
 
 def context():

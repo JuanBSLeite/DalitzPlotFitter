@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 
-from dalitzplotfitter import KMatrix, RealImag, ResonanceContext, enable_x64
+from jaxpwa import KMatrix, RealImag, ResonanceContext, enable_x64
 
 
 enable_x64()

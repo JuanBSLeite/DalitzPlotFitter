@@ -36,7 +36,7 @@ could silently under-resolve a resonance narrower than
 
 ## 1. Low-medium: `AdaptiveSquareDalitzGrid` silently under-resolved resonances narrower than `max_depth` could reach
 
-`src/dalitzplotfitter/integration/adaptive_square_dalitz.py`, `_mprime_cells()`
+`src/jaxpwa/integration/adaptive_square_dalitz.py`, `_mprime_cells()`
 (previously lines 119-140).
 
 The adaptive m' tree stops refining a cell once `depth == max_depth`
@@ -127,7 +127,7 @@ sample indicating it.
 
 ## Validation
 
-- New/changed: `src/dalitzplotfitter/integration/adaptive_square_dalitz.py`,
+- New/changed: `src/jaxpwa/integration/adaptive_square_dalitz.py`,
   `tests/test_gauss_legendre_integration.py` (1 new test).
 - `pytest tests/test_square_dalitz.py tests/test_integration.py
   tests/test_decay_model.py tests/test_mc_integration_regressions.py

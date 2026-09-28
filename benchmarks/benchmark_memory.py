@@ -14,7 +14,7 @@ import argparse
 import json
 import time
 
-from dalitzplotfitter import (
+from jaxpwa import (
     DecayChannel,
     DecayModel,
     NonResonant,

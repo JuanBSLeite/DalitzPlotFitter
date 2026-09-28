@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 
-from dalitzplotfitter import (
+from jaxpwa import (
     LASS,
     QMI,
     Flatte,

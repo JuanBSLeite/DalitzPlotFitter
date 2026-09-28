@@ -2,7 +2,7 @@ import math
 
 import jax.numpy as jnp
 
-from dalitzplotfitter import Rescattering2, ResonanceContext, enable_x64
+from jaxpwa import Rescattering2, ResonanceContext, enable_x64
 
 
 enable_x64()

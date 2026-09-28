@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import jax.numpy as jnp
 
-from dalitzplotfitter import (
+from jaxpwa import (
     SquareDalitzHistogramBackground,
     SquareDalitzHistogramEfficiency,
     square_dalitz_jacobian,

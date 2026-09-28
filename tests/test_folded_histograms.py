@@ -1,15 +1,15 @@
 import jax.numpy as jnp
 import pytest
 
-from dalitzplotfitter import (
+from jaxpwa import (
     SquareDalitzHistogramBackground,
     SquareDalitzHistogramEfficiency,
     enable_x64,
     fold_thetaprime,
     square_dalitz_to_invariants,
 )
-from dalitzplotfitter.background import HistogramBackground
-from dalitzplotfitter.efficiency import HistogramEfficiency
+from jaxpwa.background import HistogramBackground
+from jaxpwa.efficiency import HistogramEfficiency
 
 enable_x64()
 

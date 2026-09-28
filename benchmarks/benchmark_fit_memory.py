@@ -20,7 +20,7 @@ import jax
 import numpy as np
 from benchmark_qmi_memory_speed import make_model
 
-from dalitzplotfitter import DecayModel, FitSession, Parameter
+from jaxpwa import DecayModel, FitSession, Parameter
 
 
 def main():

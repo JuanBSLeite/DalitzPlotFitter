@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 
-from dalitzplotfitter import BaBarFlatte, ResonanceContext
+from jaxpwa import BaBarFlatte, ResonanceContext
 
 
 def _context():

@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 
-from dalitzplotfitter.coefficients import CPRealImag, RealImag
-from dalitzplotfitter.fit import Parameter
+from jaxpwa.coefficients import CPRealImag, RealImag
+from jaxpwa.fit import Parameter
 
 
 def test_real_imag_is_x_plus_iy():

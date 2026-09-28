@@ -1,8 +1,8 @@
 import jax
 import jax.numpy as jnp
 
-from dalitzplotfitter import enable_x64
-from dalitzplotfitter.kinematics import PhaseSpaceMC, invariant_mass_squared
+from jaxpwa import enable_x64
+from jaxpwa.kinematics import PhaseSpaceMC, invariant_mass_squared
 
 
 enable_x64()

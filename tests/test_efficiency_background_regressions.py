@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from dalitzplotfitter import (
+from jaxpwa import (
     BackgroundCategory,
     CPBackgroundCategory,
     DecayChannel,
@@ -14,7 +14,7 @@ from dalitzplotfitter import (
     Parameter,
     RealImag,
 )
-from dalitzplotfitter.workflow import _acceptance
+from jaxpwa.workflow import _acceptance
 
 
 def background(**kw):

@@ -32,7 +32,7 @@ normalization, and the unvetoed path was not actually the integral of its own
 
 ## 1. Medium: `SCFSignalPDF.normalization()`'s unvetoed shortcut was inconsistent with the vetoed formula and with its own `numerator()`
 
-`src/dalitzplotfitter/pdf/scf_signal.py`, `normalization()` (previously lines
+`src/jaxpwa/pdf/scf_signal.py`, `normalization()` (previously lines
 51-71).
 
 The vetoed branch computes the total density as a split: a continuously
@@ -123,7 +123,7 @@ inherent to any histogram-based efficiency/background model in this codebase
 
 ## Validation
 
-- New/changed: `src/dalitzplotfitter/pdf/scf_signal.py`, `docs/scf.md`,
+- New/changed: `src/jaxpwa/pdf/scf_signal.py`, `docs/scf.md`,
   `tests/test_scf.py` (2 new tests, now 11 total).
 - `pytest tests/test_scf.py`: 11 passed.
 - `ruff check` on the changed files reports the same pre-existing error count

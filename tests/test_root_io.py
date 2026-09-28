@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 import uproot
 
-from dalitzplotfitter import (
+from jaxpwa import (
     PhaseSpaceSample,
     histogram_background_from_root,
     histogram_efficiency_from_root,

@@ -1,9 +1,9 @@
 import jax.numpy as jnp
 import pytest
 
-from dalitzplotfitter.integration.adaptive_square_dalitz import AdaptiveSquareDalitzGrid
+from jaxpwa.integration.adaptive_square_dalitz import AdaptiveSquareDalitzGrid
 
-from dalitzplotfitter import (
+from jaxpwa import (
     DalitzGaussLegendreGrid,
     DecayChannel,
     DecayModel,
@@ -12,7 +12,7 @@ from dalitzplotfitter import (
     SquareDalitzGrid,
     enable_x64,
 )
-from dalitzplotfitter.integration import (
+from jaxpwa.integration import (
     AdaptiveDalitzGaussLegendreGrid,
     GridIntegrator,
     matrix_normalization,

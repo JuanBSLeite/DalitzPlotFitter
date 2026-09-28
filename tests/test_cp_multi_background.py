@@ -1,9 +1,9 @@
 import jax.numpy as jnp
 
-from dalitzplotfitter import CPBackgroundCategory, RealImag, enable_x64
-from dalitzplotfitter.amplitude import AmplitudeComponent, PreparedAmplitudeCache
-from dalitzplotfitter.fit import Parameter
-from dalitzplotfitter.likelihood import CPJointNLL
+from jaxpwa import CPBackgroundCategory, RealImag, enable_x64
+from jaxpwa.amplitude import AmplitudeComponent, PreparedAmplitudeCache
+from jaxpwa.fit import Parameter
+from jaxpwa.likelihood import CPJointNLL
 
 
 enable_x64()

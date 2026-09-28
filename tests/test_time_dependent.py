@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from scipy.integrate import quad
 
-from dalitzplotfitter import (
+from jaxpwa import (
     AmplitudeComponent,
     NeutralMesonMixing,
     Parameter,
@@ -71,7 +71,7 @@ def belle_rate(t, a, b, x, y, tau, r):
 
 @pytest.mark.parametrize("x,y", [(0.0056, 0.003), (0.0, 0.0), (-0.2, 0.15)])
 def test_belle_equations_and_exact_integrals(x, y):
-    from dalitzplotfitter.likelihood.time_dependent import _rate
+    from jaxpwa.likelihood.time_dependent import _rate
 
     mix = NeutralMesonMixing(x, y, 0.4103)
     a, b, r = 0.4 + 0.8j, 1.1 - 0.2j, 0.9 * np.exp(-0.1j)
@@ -159,7 +159,7 @@ def test_dalitz_integrated_time_pdf_matches_manual_overlap_combination():
     )
     times = np.array([0.0, 0.3, 1.2, 3.0])
     _, ia, ib, cross, ratio = nll._overlap_and_ratio({})
-    from dalitzplotfitter.likelihood.time_dependent import _rate
+    from jaxpwa.likelihood.time_dependent import _rate
 
     basis = nll.mixing.basis(times, {})
     integral = nll.mixing.integrals(nll.time_range, {})
@@ -216,7 +216,7 @@ def test_tag_marginal_density_matches_manual_overlap_combination():
     a = 1 + 0.7 * zn + 1j * zn * zn
     b = (0.8 + 0.3j) * (1 + 0.7 * (1 - zn) + 1j * (1 - zn) ** 2)
     _, ia, ib, cross, ratio = nll._overlap_and_ratio({})
-    from dalitzplotfitter.likelihood.time_dependent import _rate
+    from jaxpwa.likelihood.time_dependent import _rate
 
     integral = nll.mixing.integrals(nll.time_range, {})
     r2 = abs(ratio) ** 2
@@ -408,7 +408,7 @@ def test_invalid_floating_parameters_reject_objective():
 def test_gaussian_matches_independent_scipy_convolution():
     from scipy.special import ndtr
 
-    from dalitzplotfitter.likelihood.time_dependent import _rate
+    from jaxpwa.likelihood.time_dependent import _rate
 
     nodes, weights = quadrature(220, 0, 9.0)
     times = np.array([-0.1, 0.25, 1.0])
