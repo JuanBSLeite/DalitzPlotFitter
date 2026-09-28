@@ -293,3 +293,48 @@ def test_plot_projection_show_pulls_rejects_explicit_ax():
     with pytest.raises(ValueError, match="show_pulls=True"):
         session.plot_projection(_toy_result(), "s13", show_pulls=True, ax=ax)
     plt.close("all")
+
+
+def test_fit_session_sweight_covariance_updates_result_errors_and_matrix():
+    model = _model()
+    constraint = GaussianConstraint(model.parameters[0], mean=1.0, sigma=0.2)
+    session = FitSession(model, _data(), constraints=(constraint,))
+    result = session.fit(
+        {"NR.x": 0.8},
+        weights=jnp.asarray([1.0, -0.25]),
+        covariance="sweight",
+        strategy=1,
+        hessian="jax",
+        ncall=100,
+    )
+
+    assert result.valid
+    assert float(result.values["NR.x"]) == pytest.approx(1.0, abs=1e-6)
+    assert float(result.covariance["NR.x", "NR.x"]) == pytest.approx(
+        0.2**2, rel=1e-6
+    )
+    assert float(result.errors["NR.x"]) == pytest.approx(0.2, rel=1e-6)
+
+
+def test_fit_session_sweight_covariance_requires_weights():
+    session = FitSession(_model(), _data())
+    with pytest.raises(ValueError, match="requires event weights"):
+        session.fit(covariance="sweight")
+
+
+def test_fit_session_weighted_fit_rejects_explicit_background_mixture():
+    model = _model()
+    session = FitSession(
+        model,
+        _data(),
+        backgrounds=(BackgroundSpec("comb", lambda d: jnp.ones_like(d["s12"])),),
+        signal_fraction=0.8,
+    )
+    with pytest.raises(ValueError, match="signal-only FitSession"):
+        session.fit(weights=jnp.ones(session.data.size))
+
+
+def test_fit_session_rejects_unknown_covariance_mode():
+    session = FitSession(_model(), _data())
+    with pytest.raises(ValueError, match="covariance must be"):
+        session.fit(covariance="bootstrap")
