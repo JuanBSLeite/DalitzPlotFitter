@@ -161,6 +161,7 @@ def _install_minuit_covariance(result, names: Sequence[str], covariance) -> None
     result._covariance = matrix
     result.errors = np.sqrt(np.clip(diagonal, 0.0, None))
 
+
 @dataclass(frozen=True)
 class FitSession:
     """Compose a common single-sample amplitude fit in a few lines.
