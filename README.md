@@ -14,6 +14,7 @@
 [![tests](https://github.com/JuanBSLeite/Jax-PWA/actions/workflows/tests.yml/badge.svg)](https://github.com/JuanBSLeite/Jax-PWA/actions/workflows/tests.yml)
 ![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-blue)
 ![JAX](https://img.shields.io/badge/backend-JAX-orange)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/JuanBSLeite/Jax-PWA/main?filepath=notebooks/tutorials)
 
 Jax-PWA is a Python package for **unbinned amplitude fits of three-body decays**
 ("Dalitz plot analyses"), the technique used across flavour physics (LHCb, BaBar, Belle,
