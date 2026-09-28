@@ -373,13 +373,79 @@ class CPFitSession:
             "mean": dict(zip(plus_names, (float(v) for v in np.sqrt(variance_mean)))),
         }
 
-    def print_fit_fractions(self, result, *, acceptance_weighted=False, include_interference=False, precision=3):
-        """Print and return each charge's per-component fit fractions."""
+    def interference_fraction_errors(self, result, *, acceptance_weighted=False):
+        """Delta-method standard errors for interference_fractions(), per charge.
+
+        Same joint-covariance propagation as ``fit_fraction_errors()`` --
+        including the plus/minus cross-term needed for a "mean" error -- but
+        for the pairwise interference terms instead of the per-component
+        fractions. Each returned dict is keyed by ``(name_i, name_j)``.
+        """
         values = self.result_values(result)
+        plus_cache = self.plus_model._fraction_cache(None, self.plus_efficiency if acceptance_weighted else None)
+        minus_cache = self.minus_model._fraction_cache(None, self.minus_efficiency if acceptance_weighted else None)
+        plus_names = [component.name for component in plus_cache.components]
+        minus_names = [component.name for component in minus_cache.components]
+        if plus_names != minus_names:
+            raise ValueError("plus_model and minus_model must declare the same components in the same order")
+
+        parameter_names = sorted({
+            parameter.name
+            for parameter in (*self.plus_model.parameters, *self.minus_model.parameters)
+            if not parameter.fixed
+        })
+
+        plus_jacobian, pairs = self.plus_model._interference_jacobian(plus_cache, values, parameter_names)
+        minus_jacobian, _ = self.minus_model._interference_jacobian(minus_cache, values, parameter_names)
+
+        jacobian = jnp.concatenate([plus_jacobian, minus_jacobian])
+        parameter_covariance = _covariance_matrix(result.covariance, parameter_names)
+        covariance = np.asarray(jacobian @ parameter_covariance @ jacobian.T)
+        n = len(pairs)
+        variance_plus = np.clip(np.diag(covariance)[:n], 0.0, None)
+        variance_minus = np.clip(np.diag(covariance)[n:], 0.0, None)
+        cross = np.diag(covariance[:n, n:])
+        variance_mean = np.clip(0.25 * (variance_plus + variance_minus + 2.0 * cross), 0.0, None)
+
+        pair_names = [(plus_cache.components[i].name, plus_cache.components[j].name) for i, j in pairs]
+        return {
+            "plus": dict(zip(pair_names, (float(v) for v in np.sqrt(variance_plus)))),
+            "minus": dict(zip(pair_names, (float(v) for v in np.sqrt(variance_minus)))),
+            "mean": dict(zip(pair_names, (float(v) for v in np.sqrt(variance_mean)))),
+        }
+
+    def print_fit_fractions(self, result, *, acceptance_weighted=False, include_interference=False, precision=3, with_errors=False):
+        """Print and return each charge's per-component fit fractions.
+
+        ``with_errors=True`` -- the same flag ``DecayModel.print_fit_fractions``
+        exposes -- also prints each charge's delta-method standard errors as
+        an extra column in each table, including for the interference terms
+        when ``include_interference=True``. Each charge's errors are
+        propagated from its own restriction of the shared postfit
+        ``result.covariance`` (equivalent to the "plus"/"minus" entries of
+        ``fit_fraction_errors()``/``interference_fraction_errors()``, which
+        remain the way to also get the cross-charge "mean" error).
+        """
+        values = self.result_values(result)
+        covariance = result.covariance if with_errors else None
         print("B+ fit fractions")
-        plus = self.plus_model.print_fit_fractions(values, efficiency=self.plus_efficiency if acceptance_weighted else None, include_interference=include_interference, precision=precision)
+        plus = self.plus_model.print_fit_fractions(
+            values,
+            efficiency=self.plus_efficiency if acceptance_weighted else None,
+            include_interference=include_interference,
+            precision=precision,
+            with_errors=with_errors,
+            covariance=covariance,
+        )
         print("\nB- fit fractions")
-        minus = self.minus_model.print_fit_fractions(values, efficiency=self.minus_efficiency if acceptance_weighted else None, include_interference=include_interference, precision=precision)
+        minus = self.minus_model.print_fit_fractions(
+            values,
+            efficiency=self.minus_efficiency if acceptance_weighted else None,
+            include_interference=include_interference,
+            precision=precision,
+            with_errors=with_errors,
+            covariance=covariance,
+        )
         return {"plus": plus, "minus": minus}
 
     def report(self, result, *, include_fit_fractions=True, acceptance_weighted_fractions=False, include_correlation=True):
@@ -517,15 +583,22 @@ class CPFitSession:
         grid = None
         pulls_axes = (None, None)
         if axes is None:
+            # Two side-by-side charge panels (and, with pulls, a second row
+            # below each) at the active style's own base size
+            # (`plt.style.use(...)`, e.g. mplhep), scaled by panel count
+            # rather than a hardcoded absolute figsize.
+            base_w, base_h = plt.rcParams["figure.figsize"]
             if show_pulls:
                 _, grid = plt.subplots(
-                    2, 2, figsize=(12, 7.2), sharex="col",
+                    2, 2, figsize=(base_w * 2, base_h * 1.2), sharex="col",
                     gridspec_kw={"height_ratios": (3, 1)},
                     constrained_layout=True,
                 )
                 axes, pulls_axes = grid[0], grid[1]
             else:
-                _, axes = plt.subplots(1, 2, figsize=(12, 4.8), constrained_layout=True)
+                _, axes = plt.subplots(
+                    1, 2, figsize=(base_w * 2, base_h), constrained_layout=True
+                )
         plus_sample = self.plus_model.generate_phase_space(projection_size, seed=projection_seed)
         minus_sample = self.minus_model.generate_phase_space(projection_size, seed=projection_seed + 1)
         plus_components, minus_components = self._projection_components_pair(values, plus_sample, minus_sample)

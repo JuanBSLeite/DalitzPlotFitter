@@ -97,13 +97,24 @@ def test_plot_dalitz_folded_matches_pre_folded_data():
     fig1, ax1 = plt.subplots()
     plot_dalitz(sample, x="s12", y="s13", bins=4, ax=ax1, colorbar=False, folded=True)
     folded_counts = np.asarray(ax1.collections[0].get_array())
+    x_edges = ax1.collections[0].get_coordinates()[0, :, 0]
+    y_edges = ax1.collections[0].get_coordinates()[:, 0, 1]
+    # folded=True must force identical bin edges on both axes -- the same
+    # x_edges==y_edges convention `HistogramEfficiency`/`QMI2D(folded=True)`
+    # require -- otherwise the two axes autoscale independently and skew the
+    # physical x==y fold boundary.
+    assert np.allclose(x_edges, y_edges)
 
     pre_folded = {
         "s12": np.minimum(sample["s12"], sample["s13"]),
         "s13": np.maximum(sample["s12"], sample["s13"]),
     }
+    shared_range = (float(x_edges[0]), float(x_edges[-1]))
     fig2, ax2 = plt.subplots()
-    plot_dalitz(pre_folded, x="s12", y="s13", bins=4, ax=ax2, colorbar=False)
+    ax2.hist2d(
+        pre_folded["s12"], pre_folded["s13"], bins=4,
+        range=(shared_range, shared_range),
+    )
     reference_counts = np.asarray(ax2.collections[0].get_array())
 
     assert np.array_equal(folded_counts, reference_counts)

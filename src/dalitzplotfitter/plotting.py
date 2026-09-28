@@ -27,6 +27,20 @@ def _bin_width_label(edges, unit: str) -> str:
     return f"Candidates / {width} {unit}" if unit else f"Candidates / {width}"
 
 
+def _bin_area_label(x_edges, y_edges, unit: str) -> str:
+    """Two-dimensional analogue of ``_bin_width_label`` for a colorbar label."""
+    x_widths = np.diff(np.asarray(x_edges, dtype=float))
+    y_widths = np.diff(np.asarray(y_edges, dtype=float))
+    if x_widths.size == 0 or y_widths.size == 0:
+        return "Candidates / bin"
+    if not np.allclose(x_widths, x_widths[0], rtol=1e-10, atol=1e-12) or not np.allclose(
+        y_widths, y_widths[0], rtol=1e-10, atol=1e-12
+    ):
+        return "Candidates / bin"
+    area = f"{float(x_widths[0]) * float(y_widths[0]):.3g}"
+    return f"Candidates / {area} {unit}" if unit else f"Candidates / {area}"
+
+
 def binned_data(
     values,
     *,
@@ -73,7 +87,7 @@ def plot_binned_data(
     """
 
     if ax is None:
-        _, ax = plt.subplots(figsize=(7, 5))
+        _, ax = plt.subplots()
     centers, counts, errors, edges = binned_data(
         values, bins=bins, range=range, weights=weights
     )
@@ -104,14 +118,37 @@ def plot_dalitz(
     x: str = "s13",
     y: str = "s23",
     weights=None,
-    bins: int = 70,
+    bins: int = 100,
+    range: tuple[float, float] | None = None,
+    margin: float = 0.0,
     ax=None,
     title: str | None = None,
+    x_label: str | None = None,
+    y_label: str | None = None,
+    unit: str | None = "GeV$^2$",
     colorbar: bool = True,
     log_scale: bool = False,
     folded: bool = False,
 ):
     """Plot a standard two-dimensional Dalitz histogram in one call.
+
+    ``range``, when given, is a single ``(low, high)`` applied to both axes
+    (matplotlib's ``hist2d`` otherwise autoscales each axis independently to
+    its own data min/max, which is only appropriate for ``folded=False``: for
+    ``folded=True`` a shared range is required, see below). ``margin`` -- a
+    fraction of the auto-computed span, 0 by default -- pads that same
+    exact-data-extent range on both ends instead of starting/ending exactly
+    at the min/max value (matplotlib's ``hist2d`` sets the axis view limits
+    to the tight data extent, unlike most other plots' default 5% autoscale
+    margin); it has no effect when ``range`` is given explicitly. ``x_label``/
+    ``y_label`` override the default axis text (which otherwise always
+    overwrite whatever the caller may have set on a supplied ``ax``); either
+    way, ``unit`` -- ``"GeV$^2$"`` by default, matching the invariant-mass-
+    squared convention used everywhere else -- is still appended in brackets
+    unless explicitly set to ``None``. The colorbar is labelled with the
+    (uniform) bin area, e.g. ``Candidates / 0.05 GeV^4`` -- the
+    two-dimensional analogue of ``plot_binned_data``'s
+    ``Candidates / <width> <unit>`` y-axis label.
 
     Set ``log_scale=True`` to display the bin contents with logarithmic color
     normalization. Set ``folded=True`` when ``x`` and ``y`` are two
@@ -119,34 +156,81 @@ def plot_dalitz(
     bachelor particle) to plot only the physically distinct half
     ``x <= y``, folding each point via ``min``/``max`` first.
     """
+    if margin < 0:
+        raise ValueError("margin must be non-negative")
 
     x_values = _values(sample, x)
     y_values = _values(sample, y)
+    hist_range = (range, range) if range is not None else None
+    auto_folded_range = folded and hist_range is None
     if folded:
+        if auto_folded_range:
+            # Force identical bin edges on both axes -- the same
+            # x_edges==y_edges convention `HistogramEfficiency`/
+            # `HistogramBackground`/`QMI2D` already require for a folded
+            # domain. Without it, matplotlib's `hist2d` autoscales each axis
+            # to its own data range; since folding systematically sends the
+            # smaller of the pair to `x_values` and the larger to
+            # `y_values`, those ranges differ, giving each axis a different
+            # bin width and skewing the physical x==y fold boundary away
+            # from a clean diagonal.
+            low = float(min(np.min(x_values), np.min(y_values)))
+            high = float(max(np.max(x_values), np.max(y_values)))
+            hist_range = ((low, high), (low, high))
         x_values, y_values = (
             np.minimum(x_values, y_values),
             np.maximum(x_values, y_values),
         )
 
     if ax is None:
-        _, ax = plt.subplots(figsize=(7, 5.5))
-    hist = ax.hist2d(
+        _, ax = plt.subplots()
+    counts, x_edges, y_edges, image = ax.hist2d(
         x_values,
         y_values,
         bins=bins,
         weights=weights,
+        range=hist_range,
         norm=LogNorm() if log_scale else None,
     )
-    if folded:
-        ax.set_xlabel(rf"min(${x}$, ${y}$) [GeV$^2$]")
-        ax.set_ylabel(rf"max(${x}$, ${y}$) [GeV$^2$]")
+    if auto_folded_range:
+        # `x_values` (=min) can never reach the shared upper bound used above
+        # to align bin edges with `y_values` (=max) -- e.g. at the diagonal
+        # corner x==y==high is a single kinematic point, not a range -- so
+        # the *binning* needs that full shared span, but *displaying* it on
+        # the x axis would just pad the plot with an empty margin. Crop the
+        # visible limits to what each folded variable actually reaches,
+        # without touching the underlying (correctly aligned) bin edges.
+        pad = margin * (high - low)
+        ax.set_xlim(float(np.min(x_values)) - pad, float(np.max(x_values)) + pad)
+        ax.set_ylim(float(np.min(y_values)) - pad, float(np.max(y_values)) + pad)
+    elif range is None and margin > 0:
+        # `hist2d` sets the view limits to the exact data extent (unlike most
+        # other matplotlib plots' default 5% autoscale margin); restore some
+        # breathing room around it when requested.
+        x_pad = margin * (float(np.max(x_values)) - float(np.min(x_values)))
+        y_pad = margin * (float(np.max(y_values)) - float(np.min(y_values)))
+        ax.set_xlim(float(np.min(x_values)) - x_pad, float(np.max(x_values)) + x_pad)
+        ax.set_ylim(float(np.min(y_values)) - y_pad, float(np.max(y_values)) + y_pad)
+    if x_label is not None:
+        x_text = x_label
+    elif folded:
+        x_text = rf"min(${x}$, ${y}$)"
     else:
-        ax.set_xlabel(rf"${x}$ [GeV$^2$]")
-        ax.set_ylabel(rf"${y}$ [GeV$^2$]")
+        x_text = rf"${x}$"
+    if y_label is not None:
+        y_text = y_label
+    elif folded:
+        y_text = rf"max(${x}$, ${y}$)"
+    else:
+        y_text = rf"${y}$"
+    ax.set_xlabel(f"{x_text} [{unit}]" if unit else x_text)
+    ax.set_ylabel(f"{y_text} [{unit}]" if unit else y_text)
     if title is not None:
         ax.set_title(title)
     if colorbar:
-        ax.figure.colorbar(hist[3], ax=ax)
+        ax.figure.colorbar(
+            image, ax=ax, label=_bin_area_label(x_edges, y_edges, "GeV$^4$")
+        )
     return ax
 
 
@@ -183,7 +267,7 @@ def plot_square_dalitz(
     if folded:
         tp = fold_thetaprime(tp)
     if ax is None:
-        _, ax = plt.subplots(figsize=(7, 5.5))
+        _, ax = plt.subplots()
     hist = ax.hist2d(
         np.asarray(mp),
         np.asarray(tp),
@@ -235,7 +319,7 @@ def plot_pulls(result, *, ax=None):
     """
 
     if ax is None:
-        _, ax = plt.subplots(figsize=(7, 5))
+        _, ax = plt.subplots()
     pulls = np.asarray(result.pulls)
     if pulls.ndim == 1:
         (edges,) = result.edges
@@ -286,7 +370,7 @@ def plot_contour(result, x: str, y: str, *, cl=(0.68, 0.95), size: int = 100, ax
     ``mncontour``); this is expected, not a bug in either.
     """
     if ax is None:
-        _, ax = plt.subplots(figsize=(6, 6), constrained_layout=True)
+        _, ax = plt.subplots(constrained_layout=True)
     for level in cl:
         points = np.asarray(result.mncontour(x, y, cl=level, size=size))
         label = f"{level * 100:.1f}%" if level < 1 else rf"{level:g}$\sigma$"

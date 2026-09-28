@@ -585,13 +585,22 @@ class FitSession:
         acceptance_weighted: bool = False,
         include_interference: bool = False,
         precision: int = 3,
+        with_errors: bool = True,
     ):
-        """Print and return per-component fit fractions at `result`'s fitted values."""
+        """Print and return per-component fit fractions at `result`'s fitted values.
+
+        ``with_errors=True`` -- the same flag ``DecayModel.print_fit_fractions``
+        exposes -- also prints each fraction's (and, with
+        ``include_interference=True``, each interference term's) delta-method
+        standard error (see ``fit_fraction_errors()``) as an extra column.
+        """
         return self.model.print_fit_fractions(
             self.result_values(result),
             efficiency=self.efficiency if acceptance_weighted else None,
             include_interference=include_interference,
             precision=precision,
+            with_errors=with_errors,
+            covariance=result.covariance if with_errors else None,
         )
 
     def fit_fraction_errors(
@@ -735,7 +744,7 @@ class FitSession:
         show_components: bool = True,
         show_pulls: bool = False,
         log_scale: bool = False,
-        projection_size: int = 100_000,
+        projection_size: int = 1_000_000,
         projection_seed: int = 20260901,
         projection_sample: PhaseSpaceSample | None = None,
         folded: bool = False,
@@ -800,13 +809,18 @@ class FitSession:
         ax_pulls = None
         if ax is None:
             if show_pulls:
+                # Stack the pulls panel below the main one at the active
+                # style's own base size (`plt.style.use(...)`, e.g. mplhep),
+                # rather than a hardcoded absolute figsize -- only the extra
+                # panel's proportional height is added on top of it.
+                base_w, base_h = plt.rcParams["figure.figsize"]
                 _, (ax, ax_pulls) = plt.subplots(
-                    2, 1, figsize=(7, 6.5), sharex=True,
+                    2, 1, figsize=(base_w, base_h * 1.3), sharex=True,
                     gridspec_kw={"height_ratios": (3, 1)},
                     constrained_layout=True,
                 )
             else:
-                _, ax = plt.subplots(figsize=(7, 5))
+                _, ax = plt.subplots()
         unit = r"GeV$^2$" if variable in ("s12", "s13", "s23") else ""
         _, observed, _, _ = plot_binned_data(
             data_values,

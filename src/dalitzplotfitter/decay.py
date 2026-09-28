@@ -406,6 +406,7 @@ class DecayModel:
     _compact_data_kernels: dict[bool, object]
     _fixed_normalization_templates: dict[bool, tuple[object, object]]
     _fraction_jacobian_kernels: dict[tuple, object]
+    _interference_jacobian_kernels: dict[tuple, object]
 
     def __init__(
         self,
@@ -507,6 +508,7 @@ class DecayModel:
         object.__setattr__(self, "_compact_data_kernels", {})
         object.__setattr__(self, "_fixed_normalization_templates", {})
         object.__setattr__(self, "_fraction_jacobian_kernels", {})
+        object.__setattr__(self, "_interference_jacobian_kernels", {})
         if not self.components:
             raise ValueError("DecayModel requires at least one amplitude component")
         names = [component.name for component in self.components]
@@ -1173,12 +1175,57 @@ class DecayModel:
         efficiency=None,
         include_interference: bool = False,
         precision: int = 3,
-    ) -> dict[str, float]:
-        """Print fit fractions as percentages and return them by component name."""
+        with_errors: bool = False,
+        covariance=None,
+        parameter_names: Sequence[str] | None = None,
+    ) -> dict[str, float] | dict[str, object]:
+        """Print fit fractions as percentages and return them by component name.
+
+        ``with_errors=True`` -- the same flag ``FitSession``/``CPFitSession``/
+        ``TimeDependentFitSession.print_fit_fractions`` expose -- additionally
+        computes and prints each fraction's (and, with
+        ``include_interference=True``, each interference term's) delta-method
+        standard error via ``fit_fraction_errors()``/
+        ``interference_fraction_errors()``, requiring a postfit ``covariance``
+        (e.g. ``result.covariance`` from ``Minimizer.fit``); ``parameter_names``
+        is forwarded to those methods unchanged.
+
+        With ``with_errors=False`` and no ``include_interference``, the
+        return value is the plain ``{component_name: fraction}`` dict
+        (backward compatible with the no-error, no-interference call). As
+        soon as either is requested, the return value instead becomes
+        ``{"fractions": ..., "errors": ...?, "interference": ...?,
+        "interference_errors": ...?}``, each optional key present only when
+        the corresponding input was supplied/requested.
+        """
 
         if precision < 0:
             raise ValueError("precision must be non-negative")
+        if with_errors and covariance is None:
+            raise ValueError("with_errors=True requires covariance")
         values = {} if fit_values is None else fit_values
+        errors = (
+            self.fit_fraction_errors(
+                values,
+                covariance,
+                parameter_names,
+                normalization_sample=normalization_sample,
+                efficiency=efficiency,
+            )
+            if with_errors
+            else None
+        )
+        interference_errors = (
+            self.interference_fraction_errors(
+                values,
+                covariance,
+                parameter_names,
+                normalization_sample=normalization_sample,
+                efficiency=efficiency,
+            )
+            if with_errors and include_interference
+            else None
+        )
         cache = self._fraction_cache(normalization_sample, efficiency)
         fractions = cache.fit_fractions(values)
         result = {
@@ -1187,24 +1234,60 @@ class DecayModel:
         }
         convention = "acceptance-weighted" if efficiency is not None else "physical"
         print(f"Fit fractions ({convention})")
-        print(f"{'component':24s} {'fraction [%]':>16s}")
-        for name, fraction in result.items():
-            print(f"{name:24s} {100.0 * fraction:16.{precision}f}")
-        print(f"{'sum':24s} {100.0 * sum(result.values()):16.{precision}f}")
+        if errors is None:
+            print(f"{'component':24s} {'fraction [%]':>16s}")
+            for name, fraction in result.items():
+                print(f"{name:24s} {100.0 * fraction:16.{precision}f}")
+            print(f"{'sum':24s} {100.0 * sum(result.values()):16.{precision}f}")
+        else:
+            print(f"{'component':24s} {'fraction [%]':>16s} {'error [%]':>16s}")
+            for name, fraction in result.items():
+                print(
+                    f"{name:24s} {100.0 * fraction:16.{precision}f} "
+                    f"{100.0 * errors.get(name, 0.0):16.{precision}f}"
+                )
+            print(f"{'sum':24s} {100.0 * sum(result.values()):16.{precision}f}")
 
+        interference_result: dict[tuple[str, str], float] = {}
         if include_interference:
             interference = cache.interference_fractions(values)
             print("\nInterference fractions")
-            print(f"{'pair':49s} {'fraction [%]':>16s}")
+            if interference_errors is None:
+                print(f"{'pair':49s} {'fraction [%]':>16s}")
+            else:
+                print(f"{'pair':49s} {'fraction [%]':>16s} {'error [%]':>16s}")
             for i, first in enumerate(cache.components):
                 for j in range(i + 1, len(cache.components)):
                     second = cache.components[j]
                     fraction = float(interference[i, j])
-                    print(
-                        f"{first.name + ' x ' + second.name:49s} "
-                        f"{100.0 * fraction:16.{precision}f}"
-                    )
-        return result
+                    interference_result[(first.name, second.name)] = fraction
+                    if interference_errors is None:
+                        print(
+                            f"{first.name + ' x ' + second.name:49s} "
+                            f"{100.0 * fraction:16.{precision}f}"
+                        )
+                    else:
+                        error = interference_errors.get((first.name, second.name), 0.0)
+                        print(
+                            f"{first.name + ' x ' + second.name:49s} "
+                            f"{100.0 * fraction:16.{precision}f} "
+                            f"{100.0 * error:16.{precision}f}"
+                        )
+
+        # Plain fraction-only return by default (backward compatible); the
+        # return value only grows a wrapping dict once there is something
+        # extra -- errors and/or interference -- to attach to it.
+        if errors is None and not include_interference:
+            return result
+
+        output: dict[str, object] = {"fractions": result}
+        if errors is not None:
+            output["errors"] = errors
+        if include_interference:
+            output["interference"] = interference_result
+            if interference_errors is not None:
+                output["interference_errors"] = interference_errors
+        return output
 
     def fit_fraction_errors(
         self,
@@ -1258,3 +1341,47 @@ class DecayModel:
             kernel = cache._build_fraction_jacobian_kernel(names)
             self._fraction_jacobian_kernels[key] = kernel
         return kernel(values, cache._fraction_jacobian_arrays())
+
+    def interference_fraction_errors(
+        self,
+        fit_values,
+        covariance,
+        parameter_names: Sequence[str] | None = None,
+        *,
+        normalization_sample: PhaseSpaceSample | None = None,
+        efficiency=None,
+    ) -> dict[tuple[str, str], float]:
+        """Delta-method standard errors for ``interference_fractions()``.
+
+        Same convention as ``fit_fraction_errors()`` (same ``fit_values``/
+        ``covariance``/``parameter_names`` semantics, same linear-propagation
+        caveat), but for the pairwise interference terms instead of the
+        per-component fractions. Returned dict is keyed by
+        ``(name_i, name_j)`` for every ``i < j`` pair in component order.
+        """
+        if parameter_names is None:
+            parameter_names = tuple(
+                parameter.name for parameter in self.parameters if not parameter.fixed
+            )
+        values = {
+            parameter.name: parameter.resolve(fit_values) for parameter in self.parameters
+        }
+        cache = self._fraction_cache(normalization_sample, efficiency)
+        jacobian, pairs = self._interference_jacobian(cache, values, parameter_names)
+        matrix = _covariance_matrix(covariance, parameter_names)
+        variance = jnp.diag(jacobian @ matrix @ jacobian.T)
+        errors = jnp.sqrt(jnp.clip(variance, 0.0))
+        return {
+            (cache.components[i].name, cache.components[j].name): float(errors[index])
+            for index, (i, j) in enumerate(pairs)
+        }
+
+    def _interference_jacobian(self, cache, values, parameter_names):
+        names = tuple(parameter_names)
+        key = (names, cache.normalize_components, cache._component_partitions())
+        entry = self._interference_jacobian_kernels.get(key)
+        if entry is None:
+            entry = cache._build_interference_jacobian_kernel(names)
+            self._interference_jacobian_kernels[key] = entry
+        kernel, pairs = entry
+        return kernel(values, cache._fraction_jacobian_arrays()), pairs

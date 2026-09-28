@@ -258,10 +258,20 @@ def test_decay_model_computes_and_prints_fit_fractions(capsys):
         jnp.sum(fractions) + jnp.sum(jnp.triu(interference, k=1)),
         1.0,
     )
-    assert printed == {"first": 0.25, "second": 0.25}
+    # include_interference=True switches the return value from the plain
+    # {component: fraction} dict to a wrapping dict that also carries the
+    # interference fractions.
+    assert printed == {
+        "fractions": {"first": 0.25, "second": 0.25},
+        "interference": {("first", "second"): 0.5},
+    }
     assert "Fit fractions (physical)" in output
     assert "first x second" in output
     assert "50.00" in output
+
+    plain = model.print_fit_fractions(precision=2)
+    capsys.readouterr()
+    assert plain == {"first": 0.25, "second": 0.25}
 
 
 def test_decay_model_acceptance_weighted_fit_fractions_validate_efficiency():

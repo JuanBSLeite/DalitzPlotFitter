@@ -1742,3 +1742,51 @@ class PreparedAmplitudeCache:
             self.coefficient_vector(fit_values),
             self.normalization_matrix(fit_values),
         )
+
+    def _build_interference_jacobian_kernel(self, parameter_names):
+        """Compile reusable sequential VJP rows for the upper-triangle pairwise
+        interference fractions (i < j, in component order)."""
+        components = self.components
+        parameters = self.parameters
+        normalize = self.normalize_components
+        dynamics_microbatch_size = self.dynamics_microbatch_size
+        fixed, dynamic = self._component_partitions()
+        names = tuple(parameter_names)
+        n = len(components)
+        pairs = tuple((i, j) for i in range(n) for j in range(i + 1, n))
+
+        @jax.jit
+        def kernel(values, arrays):
+            data, weights, columns, matrix, efficiency, scales, chunks = arrays
+            cache = PreparedAmplitudeCache(
+                components=components,
+                parameters=parameters,
+                data=data,
+                normalization_data=data,
+                normalization_weights=weights,
+                data_components=jnp.empty((0, 0)),
+                normalization_components=columns,
+                normalization_matrix_fixed=matrix,
+                efficiency_normalization=efficiency,
+                component_scales=scales,
+                normalize_components=normalize,
+                fixed_component_indices=fixed,
+                dynamic_component_indices=dynamic,
+                normalization_chunks=chunks,
+                dynamics_microbatch_size=dynamics_microbatch_size,
+            )
+
+            def pairwise(vector):
+                patched = dict(values)
+                patched.update(zip(names, vector, strict=True))
+                full = cache.interference_fractions(patched)
+                return jnp.asarray([full[i, j] for i, j in pairs])
+
+            vector = jnp.asarray([values[name] for name in names], dtype=float)
+            output, pullback = jax.vjp(pairwise, vector)
+            return jax.lax.map(
+                lambda row: pullback(row)[0],
+                jnp.eye(output.size, dtype=output.dtype),
+            )
+
+        return kernel, pairs

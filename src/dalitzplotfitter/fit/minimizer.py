@@ -474,6 +474,36 @@ class Minimizer:
 
         return result
 
+    def jax_covariance(
+        self, values: Mapping[str, float] | None = None,
+    ) -> tuple[tuple[str, ...], np.ndarray]:
+        """Exact-Hessian covariance from JAX autodiff, without running Minuit's HESSE.
+
+        Returns ``(names, covariance)``: ``names`` in the same free-parameter
+        order the rest of ``Minimizer`` uses internally, and ``covariance =
+        2 * errordef * inverse(Hessian(objective))`` evaluated at ``values``
+        (each free parameter's current value if omitted, or the fitted
+        ``result.values`` for a postfit covariance) -- the identical
+        errordef relation Minuit's own HESSE uses (see
+        ``test_jax_hessian_correlated_covariance_with_bounds_and_fixed_parameter``,
+        which checks this formula against Minuit's own covariance). Unlike
+        ``hessian="jax"`` (which only feeds this same exact Hessian *into*
+        Minuit's HESSE/MIGRAD), this computes the covariance directly and
+        never calls Minuit for it. The Hessian must be invertible, or
+        ``numpy.linalg.inv`` raises ``LinAlgError``. The returned dense array
+        is accepted directly by ``_covariance_matrix``/``fit_fraction_errors``
+        as long as ``parameter_names`` is passed as this same ``names``.
+        """
+        free, names, _, _, hessian_callback = self._backend()
+        supplied = self._validate_start_values(values)
+        point = np.asarray(
+            [float(supplied.get(parameter.name, parameter.value)) for parameter in free],
+            dtype=float,
+        )
+        hessian = np.asarray(hessian_callback(*point), dtype=float)
+        covariance = 2.0 * self.errordef * np.linalg.inv(hessian)
+        return names, 0.5 * (covariance + covariance.T)
+
     def _run(
         self,
         free,

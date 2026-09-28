@@ -609,19 +609,26 @@ class TimeDependentFitSession:
     def print_fit_fractions(
         self, result, *, acceptance_weighted: bool = False,
         include_interference: bool = False, precision: int = 3,
+        with_errors: bool = False,
     ) -> dict[str, float]:
         """Print and return the A-model's (D0's) fit fractions at `result`'s values.
 
         Delegates to ``self.model.print_fit_fractions`` -- the same c^dagger M
         c convention used everywhere else in the package, evaluated on
         ``model``'s own normalization_sample/method, independent of the
-        time-dependent likelihood wrapping it.
+        time-dependent likelihood wrapping it. ``with_errors=True`` -- the
+        same flag ``DecayModel.print_fit_fractions`` exposes -- also prints
+        each fraction's (and, with ``include_interference=True``, each
+        interference term's) delta-method standard error (see
+        ``fit_fraction_errors()``) as an extra column.
         """
         return self.model.print_fit_fractions(
             self.result_values(result),
             efficiency=self.efficiency if acceptance_weighted else None,
             include_interference=include_interference,
             precision=precision,
+            with_errors=with_errors,
+            covariance=result.covariance if with_errors else None,
         )
 
     def fit_fraction_errors(
@@ -759,7 +766,7 @@ class TimeDependentFitSession:
         minus_curve = np.asarray(minus_curve)
 
         if ax is None:
-            _, ax = plt.subplots(figsize=(7, 5))
+            _, ax = plt.subplots()
         # Each tag gets its own colour, shared between its data points and its
         # fit curve, so the two tags (both otherwise plotted as circular
         # markers) stay visually distinguishable -- unlike plot_binned_data's
@@ -873,14 +880,21 @@ class TimeDependentFitSession:
         grid = None
         pulls_axes = (None, None)
         if axes is None:
+            # Two side-by-side tag panels (and, with pulls, a second row
+            # below each) at the active style's own base size
+            # (`plt.style.use(...)`, e.g. mplhep), scaled by panel count
+            # rather than a hardcoded absolute figsize.
+            base_w, base_h = plt.rcParams["figure.figsize"]
             if show_pulls:
                 _, grid = plt.subplots(
-                    2, 2, figsize=(12, 7.2), sharex="col",
+                    2, 2, figsize=(base_w * 2, base_h * 1.2), sharex="col",
                     gridspec_kw={"height_ratios": (3, 1)}, constrained_layout=True,
                 )
                 axes, pulls_axes = grid[0], grid[1]
             else:
-                _, axes = plt.subplots(1, 2, figsize=(12, 4.8), constrained_layout=True)
+                _, axes = plt.subplots(
+                    1, 2, figsize=(base_w * 2, base_h), constrained_layout=True
+                )
 
         unit = r"GeV$^2$" if variable in ("s12", "s13", "s23") else ""
         axis_label = rf"${variable}$" + (" [GeV$^2$]" if unit else "")
