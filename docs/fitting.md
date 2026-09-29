@@ -265,7 +265,7 @@ equation under the usual regularity assumptions for fixed weights. In
 particular, `B` is a score outer product, not a second Hessian. This distinction
 matters because the information identity need not survive event weighting.
 `covariance="sandwich"` implements this expression and is the recommended
-choice for signed sWeight/COW amplitude fits.
+fixed-weight covariance for signed sWeight/COW amplitude fits.
 
 Jax-PWA computes `B` without materializing the huge event-by-parameter score
 matrix. At `theta_hat` it defines the auxiliary scalar
@@ -330,10 +330,15 @@ be modeled jointly or propagated separately if that contribution matters.
 
 Likewise, the formulas above condition on the observed event weights. They do
 not automatically propagate uncertainty from the mass fit or other procedure
-used to determine sWeights/COWs. Langenbruch discusses additional terms caused
-by weight/nuisance-parameter uncertainty, and the COW paper gives the
-corresponding asymptotic treatment in the orthogonal-weight setting. Toy or
-bootstrap studies remain advisable for final coverage validation.
+used to determine sWeights/COWs. This is an important distinction for our
+current two-stage mass-fit -> COW -> Dalitz-fit workflow. Langenbruch derives
+additional nuisance/weight-estimation terms, while Dembinski et al. formulate
+the complete two-step M-estimator and its sandwich covariance in Eqs. (33--35).
+Implementing those first-stage terms would require carrying the mass-fit yield
+and shape estimating equations (or their covariance/cross-derivatives) into the
+Dalitz covariance. The current `"sandwich"` mode is therefore the **fixed-weight
+Godambe covariance**, not yet the full two-step COW covariance. Toy or bootstrap
+studies remain advisable for final coverage validation.
 
 The usual sPlot assumption that the discriminating variable and control/Dalitz
 variables are sufficiently independent within each species still applies to
