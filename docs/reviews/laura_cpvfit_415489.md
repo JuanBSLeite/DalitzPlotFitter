@@ -1,7 +1,7 @@
 # Laura++ CP fit 415489: histogram convention audit
 
 Audit date: 2026-09-14. Notebook:
-`notebooks/data_analyses/22_b2pipipi_cpvfit_laura_comparison.ipynb`.
+`notebooks/_data_analyses/22_b2pipipi_cpvfit_laura_comparison.ipynb`.
 
 ## Finding
 

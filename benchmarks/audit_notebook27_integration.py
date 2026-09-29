@@ -20,7 +20,7 @@ def main():
     parser.add_argument("--mass-orders", nargs="*", type=int, default=[24, 48, 96])
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    path = Path("notebooks/data_analyses/27_b2pipipi_cpvfit_qmi_step_cp_bins.ipynb")
+    path = Path("notebooks/_data_analyses/27_b2pipipi_cpvfit_qmi_step_cp_bins.ipynb")
     notebook = json.loads(path.read_text())
     scope = {}
 

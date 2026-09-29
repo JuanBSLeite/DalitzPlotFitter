@@ -13,7 +13,7 @@ from jaxpwa import (
     square_dalitz_to_invariants,
 )
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "notebooks/data_analyses"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "notebooks/_data_analyses"))
 from laura_comparison_helpers import (  # noqa: E402
     LauraBackground,
     LauraEfficiency,

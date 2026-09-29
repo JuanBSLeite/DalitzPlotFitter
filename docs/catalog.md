@@ -58,7 +58,7 @@ Each is passed as `Resonance(..., lineshape=...)`; all implement `lineshape(mass
 | `QMI` | class | Quasi-model-independent S-wave specified at fixed mass knots; `interpolation=` selects constant bins (`none`) or `linear`/`cubic`/`hermite`/`natural`, polar or Cartesian knot parameters. |
 | `Rescattering2` | class | Port of Laura++ `LauRescattering2Res`: two-region Chebyshev pi-pi/KK rescattering S-wave, zero below the `2*m_K` threshold. |
 
-Docs: `docs/lineshapes.md` (formulas + references). Notebooks: `notebooks/data_analyses/22_rescattering2_toy.ipynb`
+Docs: `docs/lineshapes.md` (formulas + references). Notebooks: `notebooks/_data_analyses/22_rescattering2_toy.ipynb`
 (Rescattering2 diagnostics), `notebooks/benchmark/paper_isobar_benchmark.ipynb` and
 `notebooks/benchmark/paper_isobar_benchmark_squaredp_01.ipynb` (`SigmaPole`/`RhoOmegaMixing`/
 `PipiKKRescattering` reproduction of the LHCb `B -> 3pi` isobar model, Phys. Rev. D 101, 012006).
@@ -316,7 +316,7 @@ array already ordered like the requested parameter names. Docs:
 `point_to_point_dissimilarity` methods, reusing the same reweighted-MC-projection machinery as
 `plot_projection`. Docs: `docs/goodness_of_fit.md`. Notebooks:
 `notebooks/tutorials/tutorial_09_goodness_of_fit.ipynb`,
-`notebooks/data_analyses/12_b2kkk_cpvfit.ipynb` (real per-charge GOF section).
+`notebooks/_data_analyses/12_b2kkk_cpvfit.ipynb` (real per-charge GOF section).
 
 ## Plotting
 

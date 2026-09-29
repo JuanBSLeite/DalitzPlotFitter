@@ -94,7 +94,7 @@ basic flow.
   course — efficiency/background fits, multiple backgrounds, veto maps, SCF migration, Gaussian
   constraints, ROOT I/O, folded Dalitz plots for identical particles, resolution convolution, and
   more — plus `notebooks/benchmark/` (numeric reproductions of published analyses) and
-  `notebooks/data_analyses/` (in-progress analyses using the public API).
+  `notebooks/_data_analyses/` (in-progress analyses using the public API).
 
 ## Installation
 
