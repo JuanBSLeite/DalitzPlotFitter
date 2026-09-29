@@ -648,11 +648,10 @@ class FitSession:
             #
             # In corrected weighted covariance modes, hessian="jax" keeps the
             # ordinary JAX gradient during minimization but not the Hessian.
-            # JAX gradient during minimization, let Minuit estimate its search
-            # metric numerically, then evaluate the exact memory-aware JAX
-            # Hessians at the fitted point for the sandwich covariance below.
-            # The low-level Minimizer and non-sWeight fits retain the historical
-            # behavior where hessian="jax" is supplied directly to MIGRAD.
+            # Minuit estimates its search curvature numerically; the exact
+            # memory-aware JAX matrices are evaluated only at the fitted point.
+            # The low-level Minimizer and ordinary covariance="minuit" fits
+            # retain the historical direct-to-MIGRAD JAX Hessian behavior.
             minimization_hessian = (
                 "numerical"
                 if corrected_weight_covariance and hessian == "jax"
