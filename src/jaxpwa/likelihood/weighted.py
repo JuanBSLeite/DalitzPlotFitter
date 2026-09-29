@@ -48,6 +48,81 @@ class WeightedUnbinnedNLL:
         return -jnp.sum(self.weights * values)
 
 
+def _sandwich_covariance(
+    estimating_hessian,
+    variability_matrix,
+    *,
+    label: str,
+) -> np.ndarray:
+    """Return ``A^-1 B A^-1`` with validation and symmetric solves."""
+
+    hessian = np.asarray(estimating_hessian, dtype=float)
+    variability = np.asarray(variability_matrix, dtype=float)
+    if hessian.ndim != 2 or hessian.shape[0] != hessian.shape[1]:
+        raise ValueError("estimating_hessian must be a square matrix")
+    if variability.shape != hessian.shape:
+        raise ValueError(
+            "variability_matrix must have the same shape as estimating_hessian"
+        )
+    if not np.all(np.isfinite(hessian)) or not np.all(np.isfinite(variability)):
+        raise ValueError(f"{label} covariance matrices must be finite")
+
+    hessian = 0.5 * (hessian + hessian.T)
+    variability = 0.5 * (variability + variability.T)
+    try:
+        left = np.linalg.solve(hessian, variability)
+        covariance = np.linalg.solve(hessian, left.T).T
+    except np.linalg.LinAlgError as exc:
+        raise np.linalg.LinAlgError(
+            f"estimating Hessian is singular; cannot compute {label} covariance"
+        ) from exc
+    return 0.5 * (covariance + covariance.T)
+
+
+def sandwich_covariance_from_score_outer(
+    weighted_hessian,
+    score_outer,
+) -> np.ndarray:
+    r"""Return the Godambe/sandwich covariance for a weighted score equation.
+
+    Let
+
+    .. math::
+
+       U(\\theta)=\\sum_i w_i s_i(\\theta), \\qquad
+       s_i(\\theta)=\\partial_\\theta \\log p_i(\\theta),
+
+    and define
+
+    .. math::
+
+       A=-\\partial_\\theta U
+        =-\\sum_i w_i\\,\\partial_\\theta^2\\log p_i,
+       \\qquad
+       B=\\sum_i w_i^2 s_i s_i^T.
+
+    This function returns
+
+    .. math::
+
+       C_{\\rm sandwich}=A^{-1}BA^{-1}.
+
+    ``score_outer`` is the empirical variability matrix ``B`` evaluated at the
+    fitted point. This is the asymptotically correct M-estimator/Godambe
+    covariance for fixed event weights under the usual regularity conditions.
+    It does not by itself propagate uncertainty from the procedure that
+    estimated the event weights. See C. Langenbruch, Eur. Phys. J. C 82
+    (2022) 393, arXiv:1911.01303, especially Eqs. (18--21), and H. Dembinski
+    et al., arXiv:2112.04574 for the COW/sWeight setting.
+    """
+
+    return _sandwich_covariance(
+        weighted_hessian,
+        score_outer,
+        label="sandwich",
+    )
+
+
 def sweight_covariance_from_hessians(
     weighted_hessian,
     squared_weight_hessian,
@@ -85,15 +160,8 @@ def sweight_covariance_from_hessians(
         )
     if not np.all(np.isfinite(hessian)) or not np.all(np.isfinite(squared)):
         raise ValueError("sWeight covariance Hessians must be finite")
-
-    # Numerical Hessians/HVP assembly can leave tiny antisymmetric roundoff.
-    hessian = 0.5 * (hessian + hessian.T)
-    squared = 0.5 * (squared + squared.T)
-    try:
-        left = np.linalg.solve(hessian, squared)
-        covariance = np.linalg.solve(hessian, left.T).T
-    except np.linalg.LinAlgError as exc:
-        raise np.linalg.LinAlgError(
-            "weighted Hessian is singular; cannot compute sWeight covariance"
-        ) from exc
-    return 0.5 * (covariance + covariance.T)
+    return _sandwich_covariance(
+        hessian,
+        squared,
+        label="sWeight SumW2",
+    )
