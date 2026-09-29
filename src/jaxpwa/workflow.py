@@ -592,7 +592,8 @@ class FitSession:
         Pass ``weights=sweights`` to minimize the signal-only weighted objective
         :math:`-\\sum_i w_i \\log p(x_i)`. ``covariance="sandwich"`` uses the
         Godambe form :math:`H_w^{-1}(\\sum_i w_i^2 s_i s_i^T)H_w^{-1}` and is
-        the recommended fixed-weight signed-weight covariance. ``covariance="sumw2"`` uses
+        the recommended fixed-weight signed-weight covariance.
+        ``covariance="sumw2"`` uses
         :math:`H_w^{-1}H_{w^2}H_w^{-1}`; ``"sweight"`` is retained as a
         backwards-compatible alias for ``"sumw2"``.
 
