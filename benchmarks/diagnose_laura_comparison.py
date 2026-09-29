@@ -71,7 +71,7 @@ def main():
     args = parser.parse_args()
     notebook = json.loads(
         (
-            REPO / "notebooks/data_analyses/22_b2pipipi_cpvfit_laura_comparison.ipynb"
+            REPO / "notebooks/_data_analyses/22_b2pipipi_cpvfit_laura_comparison.ipynb"
         ).read_text()
     )
     scope = {"REPO_ROOT": REPO}

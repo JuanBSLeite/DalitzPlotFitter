@@ -37,7 +37,7 @@ python benchmarks/benchmark_time_dependent.py --resolution 20
 ```
 
 CI (`.github/workflows/tests.yml`) runs `pytest tests` on Python 3.12, 3.13, and 3.14, plus a notebook
-sanity check that parses every notebook under `notebooks/tutorials/`, `notebooks/data_analyses/`
+sanity check that parses every notebook under `notebooks/tutorials/`, `notebooks/_data_analyses/`
 and `notebooks/benchmark/` with `nbformat` and compiles (not executes) each code cell —
 `notebooks/Tests/` and `notebooks/genfit/` are scratch/informal work and not covered.
 `full-validation.yml` and `toy-benchmark.yml` are `workflow_dispatch`-only and
@@ -220,6 +220,6 @@ write-ups (concrete inputs, reproduced numbers, "Applied fixes" sections) — th
 style is to reproduce a suspected discrepancy numerically before changing formulas, and to update
 the corresponding `docs/*.md` in the same change that fixes the code. `notebooks/tutorials/` are
 the tutorial/example set referenced by the docs and README (`notebooks/tutorials/TUTORIALS.md`);
-`notebooks/data_analyses/` holds
+`notebooks/_data_analyses/` holds
 in-progress physics analyses (not tutorials) that consume the same public API and can break
 silently when a lineshape or normalization convention changes underneath them.

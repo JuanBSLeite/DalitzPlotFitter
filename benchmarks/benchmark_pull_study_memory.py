@@ -39,7 +39,7 @@ from jaxpwa import read_root_tree
 
 DEFAULT_NOTEBOOK = (
     Path(__file__).resolve().parents[1]
-    / "notebooks/data_analyses"
+    / "notebooks/_data_analyses"
     / "23_b2pipipi_cpvfit_toy_pull_study_SqDP_FreeMasses.ipynb"
 )
 

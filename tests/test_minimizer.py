@@ -476,3 +476,22 @@ def test_session_hessian_option_reaches_single_and_multistart_fit(session_name):
     )
     assert scan.best.valid
     assert scan.best.nhessian > 0
+
+
+def test_jax_hessian_returns_exact_objective_curvature():
+    parameters = (
+        Parameter("x", 0.4),
+        Parameter("fixed", 2.0, fixed=True),
+        Parameter("y", -0.3),
+    )
+
+    def objective(values):
+        x = values["x"]
+        y = values["y"]
+        return 0.5 * (4.0 * x**2 + 2.0 * x * y + 3.0 * y**2)
+
+    names, hessian = Minimizer(objective, parameters).jax_hessian(
+        {"x": 0.2, "y": -0.1}
+    )
+    assert names == ("x", "y")
+    np.testing.assert_allclose(hessian, [[4.0, 1.0], [1.0, 3.0]], rtol=1e-12)

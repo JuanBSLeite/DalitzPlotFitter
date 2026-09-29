@@ -14,7 +14,7 @@ GOF in isobar fits:
 
 Notebooks: `notebooks/tutorials/tutorial_09_goodness_of_fit.ipynb` (self-contained walkthrough of
 both methods, including a deliberately wrong model to show what a rejected fit looks like) and
-`notebooks/data_analyses/12_b2kkk_cpvfit.ipynb` (a real per-charge GOF section on top of an actual
+`notebooks/_data_analyses/12_b2kkk_cpvfit.ipynb` (a real per-charge GOF section on top of an actual
 CP fit, including the reduced-data-session pattern PPD needs on a large real sample).
 
 The low-level, physics-agnostic building blocks (`chi2_from_histograms`,
@@ -128,7 +128,7 @@ routine for a real analysis), rebuilding it from scratch just to subsample is un
 `FitSession`/`CPFitSession` are frozen dataclasses, `dataclasses.replace(session, data=subsample)`
 (or `plus_data=`/`minus_data=` for `CPFitSession`) gives a second session sharing the same model,
 backgrounds, efficiency and veto, with only the data swapped — exactly the pattern
-`notebooks/data_analyses/12_b2kkk_cpvfit.ipynb` uses for its PPD section.
+`notebooks/_data_analyses/12_b2kkk_cpvfit.ipynb` uses for its PPD section.
 
 ## CP fits
 

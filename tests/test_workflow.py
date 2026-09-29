@@ -293,3 +293,123 @@ def test_plot_projection_show_pulls_rejects_explicit_ax():
     with pytest.raises(ValueError, match="show_pulls=True"):
         session.plot_projection(_toy_result(), "s13", show_pulls=True, ax=ax)
     plt.close("all")
+
+
+def test_fit_session_sweight_covariance_updates_result_errors_and_matrix():
+    model = _model()
+    constraint = GaussianConstraint(model.parameters[0], mean=1.0, sigma=0.2)
+    session = FitSession(model, _data(), constraints=(constraint,))
+    result = session.fit(
+        {"NR.x": 0.8},
+        weights=jnp.asarray([1.0, -0.25]),
+        covariance="sweight",
+        strategy=1,
+        hesse=False,
+        hessian="jax",
+        ncall=100,
+    )
+
+    assert result.valid
+    # hessian="jax" in sWeight mode is postfit-only: MIGRAD must not receive
+    # the signed-weight Hessian as its search curvature.
+    assert result.nhessian == 0
+    assert float(result.values["NR.x"]) == pytest.approx(1.0, abs=1e-5)
+    assert float(result.covariance["NR.x", "NR.x"]) == pytest.approx(
+        0.2**2, rel=1e-6
+    )
+    assert float(result.errors["NR.x"]) == pytest.approx(0.2, rel=1e-6)
+
+
+def test_fit_session_sandwich_covariance_matches_weighted_mean_formula():
+    class GaussianLocationSession(FitSession):
+        @property
+        def parameters(self):
+            return (Parameter("mu", 0.0, step=0.1),)
+
+        def _cached_signal_logpdf(self, data, parameters):
+            return -0.5 * (jnp.asarray(data["s12"]) - parameters["mu"]) ** 2
+
+        def _weighted_objective(self, weights):
+            from jaxpwa.likelihood import WeightedUnbinnedNLL
+
+            return WeightedUnbinnedNLL(
+                self._cached_signal_logpdf,
+                self.data.as_dict(),
+                weights,
+            )
+
+    data = PhaseSpaceSample(
+        s12=jnp.asarray([0.0, 1.0, 2.0]),
+        s13=jnp.asarray([0.2, 0.2, 0.2]),
+        s23=jnp.asarray([1.0, 1.0, 1.0]),
+        weights=jnp.ones(3),
+    )
+    weights = jnp.asarray([1.0, 1.0, -0.2])
+    session = GaussianLocationSession(model=None, data=data)
+    result = session.fit(
+        {"mu": 0.0},
+        weights=weights,
+        covariance="sandwich",
+        strategy=1,
+        hesse=False,
+        hessian="jax",
+        ncall=100,
+    )
+
+    expected_mu = float(jnp.sum(weights * data.s12) / jnp.sum(weights))
+    score = np.asarray(data.s12) - expected_mu
+    expected_variance = float(
+        np.sum(np.asarray(weights) ** 2 * score**2) / float(jnp.sum(weights)) ** 2
+    )
+
+    assert result.valid
+    assert result.nhessian == 0
+    assert float(result.values["mu"]) == pytest.approx(expected_mu, abs=1e-7)
+    assert float(result.covariance["mu", "mu"]) == pytest.approx(
+        expected_variance, rel=1e-6
+    )
+
+
+def test_fit_session_sweight_covariance_requires_weights():
+    session = FitSession(_model(), _data())
+    with pytest.raises(ValueError, match="requires event weights"):
+        session.fit(covariance="sweight")
+
+
+@pytest.mark.parametrize("covariance", ["sandwich", "sumw2", "sweight"])
+def test_invalid_weighted_fit_skips_postfit_covariance(monkeypatch, covariance):
+    from types import SimpleNamespace
+
+    from jaxpwa.fit import Minimizer
+
+    failed = SimpleNamespace(valid=False, fval=123.0, covariance=None)
+    monkeypatch.setattr(Minimizer, "fit", lambda *args, **kwargs: failed)
+
+    def forbidden_hessian(*args, **kwargs):
+        pytest.fail("An invalid fit must not evaluate postfit Hessians")
+
+    monkeypatch.setattr(Minimizer, "jax_hessian", forbidden_hessian)
+    session = FitSession(_model(), _data())
+    with pytest.warns(RuntimeWarning, match="did not converge"):
+        result = session.fit(weights=jnp.asarray([1.0, -0.25]), covariance=covariance)
+    assert result is failed
+    assert not result.valid
+    assert result.covariance is None
+
+
+def test_fit_session_weighted_fit_rejects_explicit_background_mixture():
+    model = _model()
+    session = FitSession(
+        model,
+        _data(),
+        backgrounds=(BackgroundSpec("comb", lambda d: jnp.ones_like(d["s12"])),),
+        signal_fraction=0.8,
+    )
+    with pytest.raises(ValueError, match="signal-only FitSession"):
+        session.fit(weights=jnp.ones(session.data.size))
+
+
+def test_fit_session_rejects_unknown_covariance_mode():
+    session = FitSession(_model(), _data())
+    with pytest.raises(ValueError, match="covariance must be"):
+        session.fit(covariance="bootstrap")

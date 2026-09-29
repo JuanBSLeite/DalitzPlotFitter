@@ -204,6 +204,169 @@ gradient_check = minimizer.check_gradient(
 
 This should be used when introducing a new dynamical parameter or lineshape.
 
+## sWeight / COW Dalitz fits
+
+`FitSession.fit()` accepts per-event signal weights directly:
+
+```python
+result = session.fit(
+    weights=sweights,
+    covariance="sandwich",
+    strategy=1,
+    hessian="jax",
+)
+```
+
+### Weighted estimating equation
+
+The fitted point is obtained from the weighted objective
+
+```text
+Q(theta) = -sum_i w_i log p(x_i; theta),
+```
+
+equivalently from the weighted score equation
+
+```text
+U(theta) = sum_i w_i s_i(theta) = 0,
+s_i(theta) = d log p_i(theta) / d theta.
+```
+
+Finite negative weights are allowed. With negative sWeights/COW weights, `Q`
+is best regarded as an M-estimation / pseudo-likelihood objective rather than
+a literal event probability likelihood. The weight multiplies the log-PDF; it
+is never inserted inside the logarithm. A weighted `FitSession` must therefore
+be signal-only: do not simultaneously configure an explicit Dalitz background
+mixture, signal fraction/yield, or extended likelihood.
+
+### Nominal covariance: Godambe / sandwich
+
+For fixed event weights, define the sensitivity matrix at the fitted point
+`theta_hat`
+
+```text
+A = -sum_i w_i d2 log p_i / dtheta dtheta^T
+```
+
+and the empirical score-variability matrix
+
+```text
+B = sum_i w_i^2 s_i s_i^T.
+```
+
+The Godambe/sandwich covariance is
+
+```text
+C_sandwich = inv(A) B inv(A).
+```
+
+This is the asymptotically correct covariance for the weighted estimating
+equation under the usual regularity assumptions for fixed weights. In
+particular, `B` is a score outer product, not a second Hessian. This distinction
+matters because the information identity need not survive event weighting.
+`covariance="sandwich"` implements this expression and is the recommended
+fixed-weight covariance for signed sWeight/COW amplitude fits.
+
+Jax-PWA computes `B` without materializing the huge event-by-parameter score
+matrix. At `theta_hat` it defines the auxiliary scalar
+
+```text
+R(theta) = 0.5 * sum_i w_i^2
+           * [log p_i(theta) - log p_i(theta_hat)]^2.
+```
+
+All residuals vanish at the reference point, therefore
+
+```text
+Hessian[R](theta_hat) = sum_i w_i^2 s_i s_i^T = B.
+```
+
+The existing memory-aware JAX Hessian/HVP backend can thus evaluate `B`
+directly, including large floating-QMI fits, without constructing an
+`N_events x N_parameters` Jacobian.
+
+### SumW2 / squared-weight Hessian alternative
+
+For compatibility with common RooFit-style weighted-error prescriptions,
+Jax-PWA also provides
+
+```text
+H_w2 = -sum_i w_i^2 d2 log p_i / dtheta dtheta^T
+C_sumw2 = inv(A) H_w2 inv(A).
+```
+
+Use `covariance="sumw2"` for this prescription. The historical
+`covariance="sweight"` spelling is retained as a backwards-compatible alias
+for `"sumw2"`. The squared-weight Hessian expression is commonly used but is
+not generally identical to the Godambe covariance; equality requires an
+additional score/Hessian information-identity relation.
+
+### JAX Hessian behavior during minimization
+
+For all corrected weighted covariance modes (`"sandwich"`, `"sumw2"`, and
+the `"sweight"` alias), `hessian="jax"` is intentionally **postfit-only**.
+A signed-weight objective can have an indefinite exact Hessian away from its
+minimum. Passing that matrix into MIGRAD's seed/search metric can trigger
+negative-curvature recovery and forced positive-definite error matrices even
+when the objective and gradient are finite. Jax-PWA therefore:
+
+1. minimizes with the JAX gradient and Minuit's numerical search curvature;
+2. evaluates the exact memory-aware JAX matrix `A` at `theta_hat`;
+3. evaluates either `B` (sandwich) or `H_w2` (SumW2) with JAX;
+4. replaces `result.covariance` and `result.errors` by the chosen corrected
+   covariance.
+
+If the optimizer result is invalid or its objective is non-finite, the corrected
+covariance is skipped with a `RuntimeWarning`. The invalid result is returned
+for diagnosis; any covariance it already contains is the uncorrected optimizer
+estimate, not a sandwich result. Correcting errors cannot repair a failed fit.
+
+The low-level `Minimizer` and ordinary `covariance="minuit"` fits retain the
+usual behavior in which `hessian="jax"` can be supplied directly to MIGRAD.
+
+### Constraints and weight uncertainty
+
+The sandwich `A` matrix contains the curvature of the complete fitted
+objective, including deterministic penalty/regularization terms. The `B`
+matrix is built from event score fluctuations only. This is appropriate for a
+fixed regularization penalty. A Gaussian constraint representing an actual
+independent auxiliary measurement has its own sampling uncertainty and should
+be modeled jointly or propagated separately if that contribution matters.
+
+Likewise, the formulas above condition on the observed event weights. They do
+not automatically propagate uncertainty from the mass fit or other procedure
+used to determine sWeights/COWs. This is an important distinction for our
+current two-stage mass-fit -> COW -> Dalitz-fit workflow. Langenbruch derives
+additional nuisance/weight-estimation terms, while Dembinski et al. formulate
+the complete two-step M-estimator and its sandwich covariance in Eqs. (33--35).
+Implementing those first-stage terms would require carrying the mass-fit yield
+and shape estimating equations (or their covariance/cross-derivatives) into the
+Dalitz covariance. The current `"sandwich"` mode is therefore the **fixed-weight
+Godambe covariance**, not yet the full two-step COW covariance. Toy or bootstrap
+studies remain advisable for final coverage validation.
+
+The usual sPlot assumption that the discriminating variable and control/Dalitz
+variables are sufficiently independent within each species still applies to
+ordinary sWeights. COWs generalize the weighting construction and can relax
+that factorization under their stated conditions.
+
+### References
+
+- M. Pivk and F. R. Le Diberder, *sPlot: a statistical tool to unfold data
+  distributions*, Nucl. Instrum. Meth. A **555** (2005) 356,
+  arXiv:physics/0402083.
+- C. Langenbruch, *Parameter uncertainties in weighted unbinned maximum
+  likelihood fits*, Eur. Phys. J. C **82** (2022) 393,
+  doi:10.1140/epjc/s10052-022-10254-8, arXiv:1911.01303. See especially the
+  asymptotically correct weighted covariance and the discussion of sWeight
+  nuisance-parameter uncertainty.
+- H. Dembinski, M. Kenzie, C. Langenbruch and M. Schmelling, *Custom
+  Orthogonal Weight functions (COWs) for event classification*, Nucl. Instrum.
+  Meth. A **1040** (2022) 167270,
+  doi:10.1016/j.nima.2022.167270, arXiv:2112.04574. The paper treats COWs,
+  sWeights as a special case, and asymptotic covariance for parameters fitted
+  to weighted control-variable distributions.
+
 ## Slow HESSE in large fits
 
 `MnHesse: Using analytical gradient but a numerical Hessian calculator` means
@@ -233,9 +396,11 @@ minimizer = Minimizer(
 )
 ```
 
-`hessian="numerical"` remains the library default. `"jax"` also supplies the
+`hessian="numerical"` remains the library default. For ordinary fits, `"jax"` also supplies the
 Hessian during MIGRAD; Minuit still handles bounds, covariance inversion and the
-`errordef` scaling. It requires an objective differentiable twice. For floating
+`errordef` scaling. The exception is `FitSession.fit(..., covariance="sweight")`,
+where `"jax"` is reserved for the postfit squared-weight covariance as described
+above. It requires an objective differentiable twice. For floating
 dynamics, `hessian_batch_size=1` evaluates Hessian-vector products sequentially
 and minimizes peak memory. Larger values evaluate several columns together and
 can improve throughput on GPUs with more VRAM. This supports QMI's custom VJPs
