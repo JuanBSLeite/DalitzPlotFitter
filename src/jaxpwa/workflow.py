@@ -558,8 +558,12 @@ class FitSession:
         ``covariance="sweight"``, the reported ``result.covariance`` and
         ``result.errors`` are replaced after minimization by
         :math:`H_w^{-1} H_{w^2} H_w^{-1}`, evaluated with the memory-aware JAX
-        Hessian backend. ``covariance="minuit"`` preserves Minuit's ordinary
-        weighted-HESSE covariance.
+        Hessian backend. In this mode, ``hessian="jax"`` deliberately does not
+        inject the signed-weight Hessian into MIGRAD\'s search metric: Minuit
+        uses numerical curvature during minimization and the exact JAX Hessians
+        are evaluated only at the fitted point for the corrected covariance.
+        ``covariance="minuit"`` preserves Minuit\'s ordinary weighted-HESSE
+        covariance and the usual ``hessian`` behavior.
 
         Weighted fits are intentionally signal-only: do not also configure an
         explicit Dalitz background mixture, signal fraction/yield, or extended
@@ -593,12 +597,30 @@ class FitSession:
                 hessian_batch_size=hessian_batch_size,
             )
         else:
+            weighted_objective = self._weighted_objective(weights)
+
+            # A signed-weight likelihood is not guaranteed to have positive
+            # curvature away from the minimum. Supplying its exact Hessian to
+            # MIGRAD can therefore make Minuit's seed/error matrix indefinite
+            # even when the objective and gradient are perfectly finite.
+            #
+            # For covariance="sweight", hessian="jax" means: use the ordinary
+            # JAX gradient during minimization, let Minuit estimate its search
+            # metric numerically, then evaluate the exact memory-aware JAX
+            # Hessians at the fitted point for the sandwich covariance below.
+            # The low-level Minimizer and non-sWeight fits retain the historical
+            # behavior where hessian="jax" is supplied directly to MIGRAD.
+            minimization_hessian = (
+                "numerical"
+                if covariance == "sweight" and hessian == "jax"
+                else hessian
+            )
             minimizer = Minimizer(
-                self._weighted_objective(weights),
+                weighted_objective,
                 self.parameters,
                 tolerance=tolerance,
                 verbose=verbose,
-                hessian=hessian,
+                hessian=minimization_hessian,
                 hessian_batch_size=hessian_batch_size,
             )
 
