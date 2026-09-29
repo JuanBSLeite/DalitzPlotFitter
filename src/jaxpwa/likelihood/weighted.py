@@ -20,7 +20,7 @@ class WeightedUnbinnedNLL:
     Negative finite weights are permitted, which is useful for sWeight/COW and
     other externally weighted objectives. The low-level class defines only the
     weighted estimating objective. High-level :class:`jaxpwa.workflow.FitSession`
-    can apply either the recommended Godambe score-outer-product covariance with
+    can apply the fixed-weight Godambe score-outer-product covariance with
     ``fit(weights=..., covariance="sandwich")`` or the historical squared-weight
     Hessian correction with ``covariance="sumw2"`` (``"sweight"`` alias).
     """
