@@ -17,11 +17,12 @@ LogPDF = Callable[[dict[str, Array], Parameters], Array]
 class WeightedUnbinnedNLL:
     """Weighted objective ``-sum_i w_i log p(x_i)``.
 
-    Negative finite weights are permitted, which is useful for diagnostic or
-    externally weighted objectives. The low-level objective only defines the
-    weighted NLL. High-level :class:`jaxpwa.workflow.FitSession` can apply the
-    explicit squared-weight Hessian covariance correction with
-    ``fit(weights=..., covariance="sweight")``.
+    Negative finite weights are permitted, which is useful for sWeight/COW and
+    other externally weighted objectives. The low-level class defines only the
+    weighted estimating objective. High-level :class:`jaxpwa.workflow.FitSession`
+    can apply either the recommended Godambe score-outer-product covariance with
+    ``fit(weights=..., covariance="sandwich")`` or the historical squared-weight
+    Hessian correction with ``covariance="sumw2"`` (``"sweight"`` alias).
     """
 
     logpdf: LogPDF
