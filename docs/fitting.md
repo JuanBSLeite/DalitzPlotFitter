@@ -350,6 +350,51 @@ variables are sufficiently independent within each species still applies to
 ordinary sWeights. COWs generalize the weighting construction and can relax
 that factorization under their stated conditions.
 
+### Experimental event-dependent log barrier
+
+The [COW log-barrier notebook](../notebooks/examples/ds_pipipi_lhcb2023_goofit_real_data_fit_cow_sweights_logbarrier.ipynb)
+contains a notebook-local experiment, not a new public constraint API. It adds
+`lambda * max(-w_i, 0) * h_i**2` to each event's weighted loss, where
+`h_i = max(0, log(epsilon * q_i / p_i))`. The fixed reference density `q` is a
+constant phase-space intensity multiplied by the same acceptance, normalized
+with `mean(normalization_sample.weights * acceptance)` in the model's measure.
+
+Unlike a fixed parameter-only penalty, this barrier changes the event score
+fluctuations as well as the total Hessian. Its fixed-weight sandwich uses
+
+```text
+ell_i = -w_i log p_i + lambda max(-w_i, 0) h_i^2
+u_i   = w_i + 2 lambda max(-w_i, 0) h_i
+g_i   = grad(ell_i) = -u_i grad(log p_i)
+A     = Hessian(sum_i ell_i)
+B     = sum_i g_i g_i^T
+C     = inv(A) B inv(A)^T
+```
+
+After a valid fit, the notebook evaluates `A` from the complete objective and
+`B` as the Hessian of `0.5 * sum_i u_i(theta_hat)**2 *
+[log p_i(theta) - log p_i(theta_hat)]**2` at `theta_hat`. Only this auxiliary
+calculation freezes the effective score weights and reference log-PDF. It
+uses `Minimizer.jax_hessian()` and the existing memory-aware HVP backend,
+without constructing an event-by-parameter Jacobian. At zero barrier strength
+this reduces to the ordinary fixed-weight sandwich.
+
+`COMPUTE_BARRIER_COVARIANCE=True` enables the correction for the nominal fit
+and optional scan. Successful correction replaces `result.covariance` and
+`result.errors`, and enables fit-fraction error propagation.
+`barrier_covariance_reports[id(result)]` records the correction status, `A`,
+`B`, corrected and original covariance matrices, and the condition number of
+`A`. Invalid fits or unusable matrices retain explicitly uncorrected optimizer
+errors; no ridge or pseudoinverse is used to force a covariance. Running HESSE
+or MIGRAD again can overwrite the correction.
+
+This estimates local asymptotic variance conditional on the COW weights,
+reference density and regularization hyperparameters. It excludes the mass-fit
+and weight-estimation uncertainty, data-driven hyperparameter selection, and
+regularization bias. Parameter boundaries or hinge thresholds can invalidate
+ordinary local covariance assumptions. Toy/full-bootstrap coverage validation
+is still required for a final measurement.
+
 ### References
 
 - M. Pivk and F. R. Le Diberder, *sPlot: a statistical tool to unfold data

@@ -17,6 +17,12 @@ where `k` labels signal or a background category.  Each one-dimensional factor i
 Available basic models are:
 
 - `Gaussian1D(mean, sigma, low, high)`;
+- `CrystalBall1D(mean, sigma, alpha, n, low, high)` — Gaussian core with a
+  power-law tail (`alpha > 0`, `n > 1`, the `scipy.stats.crystalball`
+  convention), normalized on `[low, high]` in closed form (`erf` for the
+  Gaussian half, the power law's elementary antiderivative for the tail) so
+  it stays cheap and JAX-differentiable under a many-event unbinned
+  likelihood, unlike wrapping `scipy.stats.crystalball` directly;
 - `Exponential1D(slope, low, high)`;
 - `Histogram1D(edges, values)`;
 - `FactorizedDensity(base_density, observables, pdfs)`.

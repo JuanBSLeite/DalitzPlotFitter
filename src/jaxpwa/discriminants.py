@@ -95,6 +95,76 @@ class BreitWigner1D:
 
 
 @dataclass(frozen=True)
+class CrystalBall1D:
+    """Crystal Ball PDF normalized on a finite interval.
+
+    Follows the standard convention (matching ``scipy.stats.crystalball``):
+    a Gaussian core for ``z = (x-mean)/sigma >= -alpha`` and a power-law tail
+    on the left, ``alpha > 0`` and ``n > 1``. Normalization is closed-form —
+    the Gaussian half via ``erf`` and the power-law half via its elementary
+    antiderivative — rather than numerical quadrature, so it stays cheap
+    under a JAX-compiled unbinned likelihood with many events.
+    """
+
+    mean: object
+    sigma: object
+    alpha: object
+    n: object
+    low: float
+    high: float
+    floor: float = 1e-300
+
+    def __post_init__(self) -> None:
+        if self.high <= self.low:
+            raise ValueError("CrystalBall1D requires low < high")
+
+    def __call__(self, x: Array, parameters: Parameters | None = None) -> Array:
+        x = jnp.asarray(x)
+        mu = jnp.asarray(_resolve(self.mean, parameters))
+        sigma = jnp.asarray(_resolve(self.sigma, parameters))
+        alpha = jnp.asarray(_resolve(self.alpha, parameters))
+        n = jnp.asarray(_resolve(self.n, parameters))
+
+        valid_shape = (sigma > 0.0) & (alpha > 0.0) & (n > 1.0)
+        safe_sigma = jnp.where(valid_shape, sigma, 1.0)
+        safe_alpha = jnp.where(valid_shape, alpha, 1.0)
+        safe_n = jnp.where(valid_shape, n, 2.0)
+
+        a_coeff = (safe_n / safe_alpha) ** safe_n * jnp.exp(-0.5 * safe_alpha**2)
+        b_coeff = safe_n / safe_alpha - safe_alpha
+        z_split = -safe_alpha
+
+        def gauss_antideriv(z: Array) -> Array:
+            return jnp.sqrt(0.5 * jnp.pi) * jax_erf(z / jnp.sqrt(2.0))
+
+        def power_antideriv(z: Array) -> Array:
+            base = jnp.clip(b_coeff - z, min=1e-300)
+            return a_coeff * base ** (1.0 - safe_n) / (safe_n - 1.0)
+
+        z_low = (self.low - mu) / safe_sigma
+        z_high = (self.high - mu) / safe_sigma
+
+        power_hi = jnp.minimum(z_high, z_split)
+        power_norm = jnp.where(
+            power_hi > z_low, power_antideriv(power_hi) - power_antideriv(z_low), 0.0
+        )
+        gauss_lo = jnp.maximum(z_low, z_split)
+        gauss_norm = jnp.where(
+            z_high > gauss_lo, gauss_antideriv(z_high) - gauss_antideriv(gauss_lo), 0.0
+        )
+        norm = power_norm + gauss_norm
+
+        z = (x - mu) / safe_sigma
+        base = jnp.clip(b_coeff - z, min=1e-300)
+        power_pdf = a_coeff * base ** (-safe_n)
+        gauss_pdf = jnp.exp(-0.5 * z**2)
+        raw = jnp.where(z >= z_split, gauss_pdf, power_pdf) / safe_sigma
+
+        inside = (x >= self.low) & (x <= self.high) & valid_shape & (norm > 0.0)
+        return jnp.where(inside, jnp.clip(raw / norm, min=self.floor), 0.0)
+
+
+@dataclass(frozen=True)
 class LineshapeIntensity1D:
     """Normalize the intensity of an existing complex resonance lineshape.
 
@@ -259,6 +329,7 @@ class FactorizedDensity:
 
 __all__ = [
     "BreitWigner1D",
+    "CrystalBall1D",
     "Exponential1D",
     "FactorizedDensity",
     "Gaussian1D",
