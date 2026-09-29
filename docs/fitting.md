@@ -316,6 +316,11 @@ when the objective and gradient are finite. Jax-PWA therefore:
 4. replaces `result.covariance` and `result.errors` by the chosen corrected
    covariance.
 
+If the optimizer result is invalid or its objective is non-finite, the corrected
+covariance is skipped with a `RuntimeWarning`. The invalid result is returned
+for diagnosis; any covariance it already contains is the uncorrected optimizer
+estimate, not a sandwich result. Correcting errors cannot repair a failed fit.
+
 The low-level `Minimizer` and ordinary `covariance="minuit"` fits retain the
 usual behavior in which `hessian="jax"` can be supplied directly to MIGRAD.
 

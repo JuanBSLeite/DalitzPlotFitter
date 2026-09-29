@@ -376,6 +376,27 @@ def test_fit_session_sweight_covariance_requires_weights():
         session.fit(covariance="sweight")
 
 
+@pytest.mark.parametrize("covariance", ["sandwich", "sumw2", "sweight"])
+def test_invalid_weighted_fit_skips_postfit_covariance(monkeypatch, covariance):
+    from types import SimpleNamespace
+
+    from jaxpwa.fit import Minimizer
+
+    failed = SimpleNamespace(valid=False, fval=123.0, covariance=None)
+    monkeypatch.setattr(Minimizer, "fit", lambda *args, **kwargs: failed)
+
+    def forbidden_hessian(*args, **kwargs):
+        pytest.fail("An invalid fit must not evaluate postfit Hessians")
+
+    monkeypatch.setattr(Minimizer, "jax_hessian", forbidden_hessian)
+    session = FitSession(_model(), _data())
+    with pytest.warns(RuntimeWarning, match="did not converge"):
+        result = session.fit(weights=jnp.asarray([1.0, -0.25]), covariance=covariance)
+    assert result is failed
+    assert not result.valid
+    assert result.covariance is None
+
+
 def test_fit_session_weighted_fit_rejects_explicit_background_mixture():
     model = _model()
     session = FitSession(

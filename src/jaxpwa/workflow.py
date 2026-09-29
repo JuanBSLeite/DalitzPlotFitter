@@ -6,6 +6,7 @@ This module only composes them for common analysis workflows with less boilerpla
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, fields, is_dataclass, replace
 from functools import cached_property
 from pathlib import Path
@@ -678,7 +679,18 @@ class FitSession:
             nesterov_gtol=nesterov_gtol,
         )
 
-        if corrected_weight_covariance:
+        if corrected_weight_covariance and (
+            not bool(result.valid) or not np.isfinite(float(result.fval))
+        ):
+            warnings.warn(
+                "Weighted fit did not converge; skipping corrected covariance. "
+                "Inspect the objective and gradients before reporting uncertainties. "
+                "The returned result retains its invalid fit status and any "
+                "uncorrected optimizer covariance.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        elif corrected_weight_covariance:
             fitted = {
                 name: float(result.values[name])
                 for name in result.parameters
