@@ -36,7 +36,10 @@ from jaxpwa.kinematics import (
     invariants_to_square_dalitz,
 )
 from jaxpwa.likelihood import MultiBackgroundNLL, UnbinnedNLL, WeightedUnbinnedNLL
-from jaxpwa.likelihood.weighted import sweight_covariance_from_hessians
+from jaxpwa.likelihood.weighted import (
+    sandwich_covariance_from_score_outer,
+    sweight_covariance_from_hessians,
+)
 from jaxpwa.pdf import SignalPDF
 from jaxpwa.plotting import _draw_pulls_1d, plot_binned_data
 from jaxpwa.sampling import weighted_resample
@@ -492,6 +495,36 @@ class FitSession:
             nll = ConstrainedNLL(nll, *self.constraints)
         return nll
 
+    def _score_outer_objective(
+        self,
+        weights,
+        reference_parameters: Mapping[str, float],
+    ):
+        r"""Return a scalar whose Hessian is the weighted score outer product.
+
+        At the reference point ``theta_hat``, define
+
+        ``R(theta) = 0.5 * sum_i w_i^2 [log p_i(theta)-log p_i(theta_hat)]^2``.
+
+        Every residual vanishes at ``theta_hat``, so
+        ``H_R(theta_hat) = sum_i w_i^2 s_i s_i^T`` exactly. This lets the
+        memory-aware JAX Hessian/HVP backend compute the Godambe variability
+        matrix without materializing the event-by-parameter score Jacobian.
+        """
+
+        _ = self._weighted_objective(weights)
+        data = self.data.as_dict()
+        weights_array = jnp.asarray(weights)
+        reference = jax.lax.stop_gradient(
+            jnp.asarray(self._cached_signal_logpdf(data, reference_parameters))
+        )
+
+        def objective(parameters):
+            delta = jnp.asarray(self._cached_signal_logpdf(data, parameters)) - reference
+            return 0.5 * jnp.sum(jnp.square(weights_array) * jnp.square(delta))
+
+        return objective
+
     @property
     def parameters(self) -> tuple[Parameter, ...]:
         """All fit `Parameter`s from model, yield/fraction, backgrounds, constraints.
@@ -580,13 +613,17 @@ class FitSession:
         -- the return value then becomes ``(result, updated_model)`` instead
         of plain ``result``.
         """
-        if covariance not in ("minuit", "sweight"):
-            raise ValueError("covariance must be 'minuit' or 'sweight'")
-        if covariance == "sweight" and weights is None:
-            raise ValueError("covariance='sweight' requires event weights")
-        if covariance == "sweight" and method == "nesterov":
+        covariance_modes = ("minuit", "sweight", "sumw2", "sandwich")
+        if covariance not in covariance_modes:
             raise ValueError(
-                "covariance='sweight' requires a Minuit-refined fit result"
+                "covariance must be 'minuit', 'sweight', 'sumw2', or 'sandwich'"
+            )
+        corrected_weight_covariance = covariance in ("sweight", "sumw2", "sandwich")
+        if corrected_weight_covariance and weights is None:
+            raise ValueError(f"covariance={covariance!r} requires event weights")
+        if corrected_weight_covariance and method == "nesterov":
+            raise ValueError(
+                f"covariance={covariance!r} requires a Minuit-refined fit result"
             )
 
         if weights is None:
@@ -612,7 +649,7 @@ class FitSession:
             # behavior where hessian="jax" is supplied directly to MIGRAD.
             minimization_hessian = (
                 "numerical"
-                if covariance == "sweight" and hessian == "jax"
+                if corrected_weight_covariance and hessian == "jax"
                 else hessian
             )
             minimizer = Minimizer(
@@ -635,29 +672,50 @@ class FitSession:
             nesterov_gtol=nesterov_gtol,
         )
 
-        if covariance == "sweight":
+        if corrected_weight_covariance:
             fitted = {
                 name: float(result.values[name])
                 for name in result.parameters
             }
             names, weighted_hessian = minimizer.jax_hessian(fitted)
-            squared_minimizer = Minimizer(
-                self._weighted_objective(jnp.square(jnp.asarray(weights))),
-                self.parameters,
-                tolerance=tolerance,
-                verbose=verbose,
-                hessian="jax",
-                hessian_batch_size=hessian_batch_size,
-            )
-            squared_names, squared_hessian = squared_minimizer.jax_hessian(fitted)
-            if squared_names != names:
-                raise RuntimeError(
-                    "weighted and squared-weight Hessians use different parameters"
+
+            if covariance in ("sweight", "sumw2"):
+                squared_minimizer = Minimizer(
+                    self._weighted_objective(jnp.square(jnp.asarray(weights))),
+                    self.parameters,
+                    tolerance=tolerance,
+                    verbose=verbose,
+                    hessian="jax",
+                    hessian_batch_size=hessian_batch_size,
                 )
-            corrected = sweight_covariance_from_hessians(
-                weighted_hessian,
-                squared_hessian,
-            )
+                second_names, variability = squared_minimizer.jax_hessian(fitted)
+                if second_names != names:
+                    raise RuntimeError(
+                        "weighted and squared-weight Hessians use different parameters"
+                    )
+                corrected = sweight_covariance_from_hessians(
+                    weighted_hessian,
+                    variability,
+                )
+            else:
+                score_outer_minimizer = Minimizer(
+                    self._score_outer_objective(weights, fitted),
+                    self.parameters,
+                    tolerance=tolerance,
+                    verbose=verbose,
+                    hessian="jax",
+                    hessian_batch_size=hessian_batch_size,
+                )
+                second_names, variability = score_outer_minimizer.jax_hessian(fitted)
+                if second_names != names:
+                    raise RuntimeError(
+                        "weighted Hessian and score-outer matrix use different parameters"
+                    )
+                corrected = sandwich_covariance_from_score_outer(
+                    weighted_hessian,
+                    variability,
+                )
+
             _install_minuit_covariance(result, names, corrected)
 
         if not update_model:
