@@ -304,11 +304,15 @@ def test_fit_session_sweight_covariance_updates_result_errors_and_matrix():
         weights=jnp.asarray([1.0, -0.25]),
         covariance="sweight",
         strategy=1,
+        hesse=False,
         hessian="jax",
         ncall=100,
     )
 
     assert result.valid
+    # hessian="jax" in sWeight mode is postfit-only: MIGRAD must not receive
+    # the signed-weight Hessian as its search curvature.
+    assert result.nhessian == 0
     assert float(result.values["NR.x"]) == pytest.approx(1.0, abs=1e-6)
     assert float(result.covariance["NR.x", "NR.x"]) == pytest.approx(
         0.2**2, rel=1e-6
