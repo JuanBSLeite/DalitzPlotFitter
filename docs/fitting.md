@@ -249,6 +249,16 @@ used for both matrices. `result.errors`, `result.covariance`,
 consume the corrected covariance automatically. Use `covariance="minuit"`
 to keep the ordinary weighted-HESSE covariance instead.
 
+For `covariance="sweight"`, `hessian="jax"` is intentionally **postfit-only**.
+The weighted objective can contain negative event weights, so its exact Hessian
+need not be positive definite away from the minimum. Feeding that matrix into
+MIGRAD's seed/search metric can trigger negative-curvature recovery and an
+artificially forced positive-definite error matrix. Jax-PWA therefore keeps the
+JAX gradient for minimization, lets Minuit determine its search curvature
+numerically, and evaluates the exact JAX `H_w` and `H_w2` only at the fitted
+point for the covariance above. The low-level `Minimizer` and ordinary
+`covariance="minuit"` fits retain the usual `hessian="jax"` behavior.
+
 Gaussian/external constraints are not event-weighted; they are included
 unchanged in both postfit Hessians. `covariance="sweight"` is not available
 for the standalone `method="nesterov"` result because that result is not a
@@ -293,9 +303,11 @@ minimizer = Minimizer(
 )
 ```
 
-`hessian="numerical"` remains the library default. `"jax"` also supplies the
+`hessian="numerical"` remains the library default. For ordinary fits, `"jax"` also supplies the
 Hessian during MIGRAD; Minuit still handles bounds, covariance inversion and the
-`errordef` scaling. It requires an objective differentiable twice. For floating
+`errordef` scaling. The exception is `FitSession.fit(..., covariance="sweight")`,
+where `"jax"` is reserved for the postfit squared-weight covariance as described
+above. It requires an objective differentiable twice. For floating
 dynamics, `hessian_batch_size=1` evaluates Hessian-vector products sequentially
 and minimizes peak memory. Larger values evaluate several columns together and
 can improve throughput on GPUs with more VRAM. This supports QMI's custom VJPs
