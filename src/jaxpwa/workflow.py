@@ -584,19 +584,21 @@ class FitSession:
         nesterov_gtol: float = 1e-4,
         update_model: bool = False,
     ):
-        """Fit with optional event weights and corrected sWeight covariance.
+        """Fit with optional event weights and corrected weighted covariance.
 
         Pass ``weights=sweights`` to minimize the signal-only weighted objective
-        :math:`-\\sum_i w_i \\log p(x_i)`. With
-        ``covariance="sweight"``, the reported ``result.covariance`` and
-        ``result.errors`` are replaced after minimization by
-        :math:`H_w^{-1} H_{w^2} H_w^{-1}`, evaluated with the memory-aware JAX
-        Hessian backend. In this mode, ``hessian="jax"`` deliberately does not
-        inject the signed-weight Hessian into MIGRAD\'s search metric: Minuit
-        uses numerical curvature during minimization and the exact JAX Hessians
-        are evaluated only at the fitted point for the corrected covariance.
-        ``covariance="minuit"`` preserves Minuit\'s ordinary weighted-HESSE
-        covariance and the usual ``hessian`` behavior.
+        :math:`-\\sum_i w_i \\log p(x_i)`. ``covariance="sandwich"`` uses the
+        Godambe form :math:`H_w^{-1}(\\sum_i w_i^2 s_i s_i^T)H_w^{-1}` and is
+        the recommended signed-weight covariance. ``covariance="sumw2"`` uses
+        :math:`H_w^{-1}H_{w^2}H_w^{-1}`; ``"sweight"`` is retained as a
+        backwards-compatible alias for ``"sumw2"``.
+
+        In all corrected weighted modes, ``hessian="jax"`` deliberately does
+        not inject the signed-weight Hessian into MIGRAD\'s search metric:
+        Minuit uses numerical curvature during minimization and the exact JAX
+        matrices are evaluated only at the fitted point. ``covariance="minuit"``
+        preserves Minuit\'s ordinary weighted-HESSE covariance and the usual
+        ``hessian`` behavior.
 
         Weighted fits are intentionally signal-only: do not also configure an
         explicit Dalitz background mixture, signal fraction/yield, or extended
@@ -641,7 +643,7 @@ class FitSession:
             # MIGRAD can therefore make Minuit's seed/error matrix indefinite
             # even when the objective and gradient are perfectly finite.
             #
-            # For covariance="sweight", hessian="jax" means: use the ordinary
+            # For corrected weighted covariance modes, hessian="jax" means: use the ordinary
             # JAX gradient during minimization, let Minuit estimate its search
             # metric numerically, then evaluate the exact memory-aware JAX
             # Hessians at the fitted point for the sandwich covariance below.
