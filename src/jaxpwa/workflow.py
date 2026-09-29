@@ -520,7 +520,10 @@ class FitSession:
         )
 
         def objective(parameters):
-            delta = jnp.asarray(self._cached_signal_logpdf(data, parameters)) - reference
+            delta = (
+                jnp.asarray(self._cached_signal_logpdf(data, parameters))
+                - reference
+            )
             return 0.5 * jnp.sum(jnp.square(weights_array) * jnp.square(delta))
 
         return objective
@@ -643,7 +646,8 @@ class FitSession:
             # MIGRAD can therefore make Minuit's seed/error matrix indefinite
             # even when the objective and gradient are perfectly finite.
             #
-            # For corrected weighted covariance modes, hessian="jax" means: use the ordinary
+            # In corrected weighted covariance modes, hessian="jax" keeps the
+            # ordinary JAX gradient during minimization but not the Hessian.
             # JAX gradient during minimization, let Minuit estimate its search
             # metric numerically, then evaluate the exact memory-aware JAX
             # Hessians at the fitted point for the sandwich covariance below.
@@ -711,7 +715,8 @@ class FitSession:
                 second_names, variability = score_outer_minimizer.jax_hessian(fitted)
                 if second_names != names:
                     raise RuntimeError(
-                        "weighted Hessian and score-outer matrix use different parameters"
+                        "weighted Hessian and score-outer matrix use different "
+                        "parameters"
                     )
                 corrected = sandwich_covariance_from_score_outer(
                     weighted_hessian,
