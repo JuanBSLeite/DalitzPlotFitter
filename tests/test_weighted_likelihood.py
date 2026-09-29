@@ -5,7 +5,10 @@ import pytest
 
 from jaxpwa import enable_x64
 from jaxpwa.likelihood import WeightedUnbinnedNLL
-from jaxpwa.likelihood.weighted import sweight_covariance_from_hessians
+from jaxpwa.likelihood.weighted import (
+    sandwich_covariance_from_score_outer,
+    sweight_covariance_from_hessians,
+)
 
 enable_x64()
 
@@ -66,6 +69,15 @@ def test_sweight_covariance_from_hessians_matches_matrix_formula():
         weighted_hessian,
         squared_weight_hessian,
     )
+    np.testing.assert_allclose(actual, expected, rtol=1e-14, atol=1e-14)
+
+
+def test_sandwich_covariance_from_score_outer_matches_matrix_formula():
+    weighted_hessian = np.array([[5.0, 1.0], [1.0, 3.0]])
+    score_outer = np.array([[8.0, 1.5], [1.5, 6.0]])
+    inverse = np.linalg.inv(weighted_hessian)
+    expected = inverse @ score_outer @ inverse
+    actual = sandwich_covariance_from_score_outer(weighted_hessian, score_outer)
     np.testing.assert_allclose(actual, expected, rtol=1e-14, atol=1e-14)
 
 
