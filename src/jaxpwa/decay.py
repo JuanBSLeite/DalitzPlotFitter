@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass
 from itertools import permutations
 from typing import Literal
@@ -29,6 +29,7 @@ from jaxpwa.dynamics import (
 )
 from jaxpwa.dynamics.context import resolve_value
 from jaxpwa.fit import Parameter, ParameterKind
+from jaxpwa.fit.parameters import _fixed_parameter_updates, _replace_fixed_parameters
 from jaxpwa.integration import (
     AdaptiveDalitzGaussLegendreGrid,
     DalitzGaussLegendreGrid,
@@ -766,6 +767,43 @@ class DecayModel:
             for parameter in _collect_parameters(component):
                 unique.setdefault(parameter.name, parameter)
         return tuple(unique.values())
+
+    def with_fixed_parameters(
+        self,
+        *names: str,
+        values: Mapping[str, float] | None = None,
+    ) -> DecayModel:
+        """Return a new model with selected parameters fixed.
+
+        Positional names retain their current values. Entries in ``values``
+        are assigned the supplied value and fixed. The original model and its
+        parameters remain unchanged.
+        """
+        updates = _fixed_parameter_updates(self.parameters, names, values)
+        components = _replace_fixed_parameters(self.components, updates)
+        normalization_sample = (
+            self._normalization_sample
+            if self.normalization_method == "toy-mc"
+            else None
+        )
+        return DecayModel(
+            self.channel,
+            components,
+            normalize_components=self.normalize_components,
+            normalization_resolution=self.normalization_resolution,
+            normalization_method=self.normalization_method,
+            normalization_pair=self.normalization_pair,
+            normalization_bin_width=self.normalization_bin_width,
+            normalization_order_m13=self.normalization_order_m13,
+            normalization_order_m23=self.normalization_order_m23,
+            normalization_narrow_width=self.normalization_narrow_width,
+            normalization_narrow_window=self.normalization_narrow_window,
+            normalization_binning_factor=self.normalization_binning_factor,
+            normalization_sample=normalization_sample,
+            normalization_chunk_size=self.normalization_chunk_size,
+            dynamics_microbatch_size=self.dynamics_microbatch_size,
+            dynamics_microbatch_parallelism=self.dynamics_microbatch_parallelism,
+        )
 
     @property
     def normalization_sample(self) -> PhaseSpaceSample:

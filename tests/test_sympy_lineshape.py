@@ -12,9 +12,15 @@ import numpy as np
 import pytest
 
 from jaxpwa import (
+    AmplitudeComponent,
     DecayChannel,
     DecayModel,
+    FourBodyDecayModel,
+    Isobar,
+    NBodyDecayChannel,
+    NBodyPhaseSpaceMC,
     NonResonant,
+    PairChain,
     Parameter,
     Pole,
     RealImag,
@@ -219,6 +225,73 @@ def make_model(fixed=False, builtin=False):
         normalization_method="square-dalitz",
         normalization_resolution=16,
     )
+
+
+def test_model_can_fix_parameter_shared_with_sympy_lineshape():
+    model = make_model()
+
+    updated = model.with_fixed_parameters(values={"shape.mass": 0.78})
+    by_name = {parameter.name: parameter for parameter in updated.parameters}
+    resonance = updated.components[0]
+    bindings = resonance.lineshape.parameters
+
+    assert by_name["shape.mass"].fixed
+    assert by_name["shape.mass"].value == pytest.approx(0.78)
+    assert resonance.mass is by_name["shape.mass"]
+    assert bindings[m0] is by_name["shape.mass"]
+    assert not by_name["shape.width"].fixed
+
+    sample = model.generate_phase_space(64, seed=72)
+    values = {"shape.mass": 0.78, "shape.width": 0.15}
+    expected = model.intensity(sample.as_dict(), values)
+    actual = jax.jit(updated.intensity)(sample.as_dict())
+    np.testing.assert_allclose(actual, expected, rtol=2e-12, atol=2e-12)
+
+
+def test_four_body_model_can_fix_parameter_shared_with_sympy_isobar():
+    mass = Parameter.dynamics("pair.mass", 0.63, owner="pair")
+    gamma = Parameter.dynamics(
+        "pair.width", 0.15, owner="pair", backend_name="width"
+    )
+    shape = SympyLineshape(
+        1 / (m - m0 - sp.I * width / 2),
+        mass_symbol=m,
+        parameters={m0: mass, width: gamma},
+    )
+    component = AmplitudeComponent(
+        "pair",
+        PairChain(
+            Isobar(mass, gamma, spin=0, lineshape=shape),
+            Isobar(0.85, 0.18),
+        ),
+        RealImag(1.0, 0.0),
+    )
+    normalization = NBodyPhaseSpaceMC(
+        2.0, (0.1, 0.2, 0.3, 0.4)
+    ).generate(512, seed=73)
+    model = FourBodyDecayModel(
+        NBodyDecayChannel(2.0, (0.1, 0.2, 0.3, 0.4)),
+        [component],
+        normalization_sample=normalization,
+        normalize_components=False,
+    )
+
+    updated = model.with_fixed_parameters(values={"pair.mass": 0.67})
+    by_name = {parameter.name: parameter for parameter in updated.parameters}
+    isobar = updated.components[0].function.first
+    bindings = isobar.lineshape.parameters
+
+    assert by_name["pair.mass"].fixed
+    assert by_name["pair.mass"].value == pytest.approx(0.67)
+    assert isobar.mass is by_name["pair.mass"]
+    assert bindings[m0] is by_name["pair.mass"]
+    assert not by_name["pair.width"].fixed
+
+    data = normalization.take(jnp.arange(64))
+    values = {"pair.mass": 0.67, "pair.width": 0.15}
+    expected = model.intensity(data.as_dict(), values)
+    actual = jax.jit(updated.intensity)(data.as_dict())
+    np.testing.assert_allclose(actual, expected, rtol=2e-12, atol=2e-12)
 
 
 @pytest.mark.parametrize("fixed", [True, False])

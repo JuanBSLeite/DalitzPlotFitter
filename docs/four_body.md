@@ -91,6 +91,30 @@ separates the amplitude-component name from the particle-database name. The
 legacy `Resonance("rho", ..., mass=..., width=..., spin=...)` construction stays
 available for models with explicit values or non-catalogue effective states.
 
+## Fixing parameters after model construction
+
+`DecayModel` and `FourBodyDecayModel` expose the same immutable operation:
+
+```python
+# Keep the current values and fix these parameters.
+fixed_model = model.with_fixed_parameters("rho.mass", "rho.width")
+
+# Assign a new value and fix it in the returned model.
+fixed_model = model.with_fixed_parameters(values={"rho.mass": 0.77526})
+
+# Both forms can be combined.
+fixed_model = model.with_fixed_parameters(
+    "rho.width", values={"rho.mass": 0.77526}
+)
+```
+
+Only selected `Parameter` objects change. The original model remains unchanged,
+and an unknown name raises an error rather than being silently ignored. External
+Monte Carlo normalization samples are reused; compiled caches are rebuilt for
+the new free/fixed split. Parameters shared with a `SympyLineshape` remain the
+same object in both the resonance/isobar and its symbolic bindings. Build a new
+`FitSession` from the returned model.
+
 Numerical construction assumes scalar external particles. Equal masses do not
 establish particle identity. Supply `final_state_ids` to enable automatic Bose
 symmetrization (or use the particle constructor). The amplitude is the sum over

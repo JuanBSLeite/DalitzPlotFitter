@@ -23,7 +23,7 @@ and [closure notebook](../notebooks/tutorials/tutorial_66_four_body_closure.ipyn
 | `NBodyDecayChannel` | class | Declares N-body masses and optional identical-particle labels; `from_particles(...)` resolves named external particles. |
 | `NBodySample` | class | Covariant event storage, subset invariants, orientation and integration weights; JAX pytree. |
 | `NBodyPhaseSpaceMC` | class | Recursive physical weighted N-body phase-space generation. |
-| `FourBodyDecayModel` | class | Four-body coherent model using the existing normalization/cache/fit core. |
+| `FourBodyDecayModel` | class | Four-body coherent model using the existing normalization/cache/fit core; `with_fixed_parameters(...)` returns an updated immutable model. |
 | `Isobar` | class | Spin, mass, width, radius and reusable lineshape; `from_particle(name)` fills nominal properties from `particle`. |
 | `PairChain` | class | One LS wave for `P -> (ab)(cd)`. |
 | `CascadeChain` | class | One LS wave for `P -> R a, R -> S b, S -> c d`. |
@@ -34,7 +34,7 @@ and [closure notebook](../notebooks/tutorials/tutorial_66_four_body_closure.ipyn
 | Name | Kind | What it does |
 |---|---|---|
 | `DecayChannel` | class | Parent particle and ordered three-body final state; `from_particles(...)` mirrors the N-body named constructor. |
-| `DecayModel` | class | Build a coherent amplitude model with deterministic Dalitz-plane normalization; owns `normalization_method`/`normalize_components`. |
+| `DecayModel` | class | Build a coherent amplitude model with deterministic Dalitz-plane normalization; `with_fixed_parameters(...)` fixes selected parameters in a new model. |
 | `Resonance` | class | Declarative one-dimensional resonance component; `from_particle(...)` uses the same nominal-property resolver as `Isobar`, with interchangeable `lineshape`/`angular` plugins and form-factor conventions. |
 | `NonResonant` | class | Constant (S-wave, isotropic) non-resonant component with a complex coefficient. |
 | `DalitzAmplitude` | class | Attach a genuinely two-dimensional amplitude (e.g. `QMI2D`) that depends on both Dalitz invariants at once, bypassing the isobar construction. |

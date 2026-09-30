@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
 from itertools import permutations
@@ -17,6 +18,7 @@ from .amplitude import (
 from .amplitude.components import coefficient_value
 from .decay import _collect_parameters
 from .fit import ParameterKind
+from .fit.parameters import _fixed_parameter_updates, _replace_fixed_parameters
 from .integration import GridIntegrator
 from .kinematics.nbody import NBodyPhaseSpaceMC, NBodySample
 from .particle_properties import mass_gev, resolve_particle
@@ -191,6 +193,29 @@ class FourBodyDecayModel:
                     )
                 unique[parameter.name] = parameter
         return tuple(unique.values())
+
+    def with_fixed_parameters(
+        self,
+        *names: str,
+        values: Mapping[str, float] | None = None,
+    ) -> FourBodyDecayModel:
+        """Return a new model with selected parameters fixed.
+
+        Positional names retain their current values. Entries in ``values``
+        are assigned the supplied value and fixed. The original model and its
+        parameters remain unchanged.
+        """
+        updates = _fixed_parameter_updates(self.parameters, names, values)
+        components = _replace_fixed_parameters(self.components, updates)
+        return FourBodyDecayModel(
+            self.channel,
+            components,
+            normalization_sample=self.normalization_sample,
+            normalize_components=self.normalize_components,
+            symmetrize=self.symmetrize,
+            normalization_chunk_size=self.normalization_chunk_size,
+            dynamics_microbatch_size=self.dynamics_microbatch_size,
+        )
 
     @cached_property
     def amplitude_model(self):

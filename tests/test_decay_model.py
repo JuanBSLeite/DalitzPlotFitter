@@ -120,6 +120,46 @@ def test_resonance_and_isobar_share_particle_resolution():
         )
 
 
+def test_decay_model_with_fixed_parameters_is_immutable_and_selective():
+    model = _floating_rho_model()
+    original = {parameter.name: parameter for parameter in model.parameters}
+
+    updated = model.with_fixed_parameters(
+        "rho.mass", values={"rho.x": 0.91}
+    )
+    result = {parameter.name: parameter for parameter in updated.parameters}
+
+    assert result["rho.mass"].fixed
+    assert result["rho.mass"].value == original["rho.mass"].value
+    assert result["rho.x"].fixed
+    assert result["rho.x"].value == pytest.approx(0.91)
+    assert not result["rho.width"].fixed
+    assert not original["rho.mass"].fixed
+    assert not original["rho.x"].fixed
+    assert updated.normalization_method == model.normalization_method
+    assert updated.normalization_resolution == model.normalization_resolution
+
+    with pytest.raises(ValueError, match="unknown parameter"):
+        model.with_fixed_parameters("does.not.exist")
+    with pytest.raises(ValueError, match="at least one"):
+        model.with_fixed_parameters()
+
+
+def test_decay_model_with_fixed_parameters_preserves_toy_normalization_sample():
+    base = _floating_rho_model()
+    sample = base.generate_phase_space(250, seed=19)
+    model = DecayModel(
+        base.channel,
+        base.components,
+        normalization_sample=sample,
+    )
+
+    updated = model.with_fixed_parameters("rho.mass")
+
+    assert updated.normalization_method == "toy-mc"
+    assert updated.normalization_sample is sample
+
+
 def test_unphysical_decay_channel_is_rejected():
     with pytest.raises(ValueError, match="parent mass must exceed"):
         DecayChannel("pi0", ("pi0", "pi0", "pi0"))

@@ -314,6 +314,30 @@ def _model(sample, *, dynamic=False, normalize=True):
     )
 
 
+def test_four_body_model_with_fixed_parameters_is_uniform(sample):
+    model = _model(sample, dynamic=True)
+    original = {parameter.name: parameter for parameter in model.parameters}
+
+    updated = model.with_fixed_parameters("mass", values={"x": 0.61})
+    result = {parameter.name: parameter for parameter in updated.parameters}
+
+    assert result["mass"].fixed
+    assert result["mass"].value == original["mass"].value
+    assert result["x"].fixed
+    assert result["x"].value == pytest.approx(0.61)
+    assert not result["width"].fixed
+    assert not original["mass"].fixed
+    assert not original["x"].fixed
+    assert updated.normalization_sample is sample
+    assert updated.normalize_components == model.normalize_components
+    assert updated.symmetrize == model.symmetrize
+    assert updated.normalization_chunk_size == model.normalization_chunk_size
+    assert updated.dynamics_microbatch_size == model.dynamics_microbatch_size
+
+    with pytest.raises(ValueError, match="unknown parameter"):
+        model.with_fixed_parameters("does.not.exist")
+
+
 @pytest.mark.parametrize("dynamic", [False, True])
 @pytest.mark.parametrize("normalize", [False, True])
 def test_cache_pdf_gradients_and_fit_session(sample, dynamic, normalize):
