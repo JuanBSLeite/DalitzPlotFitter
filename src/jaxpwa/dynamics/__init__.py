@@ -35,8 +35,12 @@ from .lineshape import (
 )
 from .qmi2d import QMI2D, physical_bin_mask
 from .resonance import ResonanceAmplitude
+from .sequential import CascadeChain, Isobar, PairChain
 
 __all__ = [
+    "CascadeChain",
+    "Isobar",
+    "PairChain",
     "BaBarFlatte",
     "CovariantAngular",
     "Flatte",

@@ -15,6 +15,22 @@ The lessons explain the main fitting workflow and link to specialized examples b
 
 ## Model construction
 
+Initial four-body API (scalar external particles): see [four-body support](four_body.md)
+and [closure notebook](../notebooks/tutorials/tutorial_66_four_body_closure.ipynb).
+
+| Name | Kind | What it does |
+|---|---|---|
+| `NBodyDecayChannel` | class | Declares N-body masses and optional identical-particle labels. |
+| `NBodySample` | class | Covariant event storage, subset invariants, orientation and integration weights; JAX pytree. |
+| `NBodyPhaseSpaceMC` | class | Recursive physical weighted N-body phase-space generation. |
+| `FourBodyDecayModel` | class | Four-body coherent model using the existing normalization/cache/fit core. |
+| `Isobar` | class | Spin, mass, width, radius and reusable lineshape for a sequential resonance. |
+| `PairChain` | class | One LS wave for `P -> (ab)(cd)`. |
+| `CascadeChain` | class | One LS wave for `P -> R a, R -> S b, S -> c d`. |
+| `pair_coordinates` | function | Five invariant mass/helicity coordinates for `(ab)(cd)`. |
+| `cascade_coordinates` | function | Five invariant mass/helicity coordinates for `a(b(cd))`. |
+| `pair_coordinates_to_momenta` | function | Canonical four-vectors reconstructed from five pair-chain coordinates. |
+
 | Name | Kind | What it does |
 |---|---|---|
 | `DecayChannel` | class | Parent particle and ordered three-body final state (`("D+", ("pi-","pi+","pi+"))`). |

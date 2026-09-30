@@ -1,4 +1,4 @@
-"""Kinematic utilities for three-body amplitudes."""
+"""Kinematic utilities for three-body and sequential multibody amplitudes."""
 
 from .covariant import (
     CovariantKinematics,
@@ -8,8 +8,14 @@ from .covariant import (
     spatial_magnitude,
 )
 from .dalitz_grid import dalitz_s13_limits
+from .four_body import (
+    cascade_coordinates,
+    pair_coordinates,
+    pair_coordinates_to_momenta,
+)
+from .nbody import NBodyPhaseSpaceMC, NBodySample
 from .phase_space_mc import PhaseSpaceMC
-from .sample import PhaseSpaceSample
+from .sample import EventSample, PhaseSpaceSample
 from .square_dalitz import (
     SquareDalitzGrid,
     fold_thetaprime,
@@ -20,6 +26,12 @@ from .square_dalitz import (
 from .vectors import invariant_mass_squared
 
 __all__ = [
+    "EventSample",
+    "NBodyPhaseSpaceMC",
+    "NBodySample",
+    "cascade_coordinates",
+    "pair_coordinates",
+    "pair_coordinates_to_momenta",
     "CovariantKinematics",
     "PhaseSpaceMC",
     "PhaseSpaceSample",

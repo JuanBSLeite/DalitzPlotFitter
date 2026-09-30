@@ -3,9 +3,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Protocol
 
 import jax.numpy as jnp
 from jax import Array
+
+
+class EventSample(Protocol):
+    """Minimal dimension-independent interface used by integration and fitting."""
+
+    weights: Array
+
+    @property
+    def size(self) -> int: ...
+
+    def as_dict(self) -> dict[str, Array]: ...
+
+    def take(self, indices: Array) -> EventSample: ...
+
+    def validate_integration(self) -> None: ...
 
 
 @dataclass(frozen=True)

@@ -46,11 +46,14 @@ from .dynamics import (
     QMI,
     QMI2D,
     BaBarFlatte,
+    CascadeChain,
     CovariantAngular,
     Flatte,
     GooFitLegacyAngular,
     GounarisSakurai,
+    Isobar,
     KMatrix,
+    PairChain,
     PipiKKRescattering,
     Pole,
     RelativisticBreitWigner,
@@ -67,6 +70,7 @@ from .dynamics import (
     physical_bin_mask,
 )
 from .fit import Minimizer, MultiStartResult, NesterovResult, Parameter, ParameterKind
+from .four_body import FourBodyDecayModel, NBodyDecayChannel
 from .goodness_of_fit import (
     BinnedChi2Result,
     PointToPointResult,
@@ -99,15 +103,20 @@ from .io import (
 )
 from .kinematics import (
     CovariantKinematics,
+    NBodyPhaseSpaceMC,
+    NBodySample,
     PhaseSpaceMC,
     PhaseSpaceSample,
     SquareDalitzGrid,
     boost_to_rest_frame,
+    cascade_coordinates,
     covariant_kinematics,
     covariant_kinematics_from_invariants,
     dalitz_s13_limits,
     fold_thetaprime,
     invariants_to_square_dalitz,
+    pair_coordinates,
+    pair_coordinates_to_momenta,
     square_dalitz_jacobian,
     square_dalitz_to_invariants,
 )
@@ -167,6 +176,9 @@ from .veto import (
 from .workflow import BackgroundSpec, FitSession
 
 __all__ = [
+    "CascadeChain", "FourBodyDecayModel", "Isobar", "NBodyDecayChannel",
+    "NBodyPhaseSpaceMC", "NBodySample", "PairChain",
+    "cascade_coordinates", "pair_coordinates", "pair_coordinates_to_momenta",
     "NeutralMesonMixing",
     "TimeDependentDalitzNLL",
     "TimeDependentBackgroundCategory",

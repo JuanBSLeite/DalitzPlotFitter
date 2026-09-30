@@ -5,7 +5,7 @@
 
 # Jax-PWA
 
-**JAX-native, end-to-end unbinned amplitude fitting for three-body decays.**
+**JAX-native amplitude fitting for three-body decays, with initial four-body support.**
 
 </td>
 </tr>
@@ -21,6 +21,11 @@ Jax-PWA is a Python package for **unbinned amplitude fits of three-body decays**
 BESIII, E791, ...) to extract resonance parameters, branching fractions, CP asymmetries and
 interference structure from a sample of reconstructed decays such as `B+ -> K+ pi+ pi-` or
 `D+ -> pi- pi+ pi+`.
+
+Initial [four-body support](docs/four_body.md) adds invariant event coordinates,
+weighted N-body phase space and LS-coupled pair/cascade chains for scalar external
+particles, using the same JAX cache, normalization and `FitSession` minimization.
+Start with the [four-body closure example](examples/four_body_closure.py).
 
 The whole numerical pipeline — phase-space generation, kinematics, amplitude dynamics,
 normalization, likelihood and gradient evaluation — is written in **JAX**, end to end, on
@@ -166,4 +171,3 @@ K<sub>S</sub><sup>0</sup>K<sup>+</sup>K<sup>-</sup>*, Phys. Rev. D 78 (2008) 034
 Belle Collaboration, *Measurement of D<sup>0</sup>-D̄<sup>0</sup> mixing and search for indirect CP
 violation using D<sup>0</sup> → K<sub>S</sub><sup>0</sup>π<sup>+</sup>π<sup>-</sup> decays*,
 Phys. Rev. D 89 (2014) 091103, arXiv:1404.2412.
-
