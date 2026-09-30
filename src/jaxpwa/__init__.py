@@ -34,6 +34,7 @@ from .cp_workflow import CPBackgroundSpec, CPFitSession
 from .decay import DalitzAmplitude, DecayChannel, DecayModel, NonResonant, Resonance
 from .discriminants import (
     BreitWigner1D,
+    CrystalBall1D,
     Exponential1D,
     FactorizedDensity,
     Gaussian1D,
@@ -177,7 +178,7 @@ __all__ = [
     "AmplitudeComponent", "BackgroundCategory", "BackgroundSpec", "BinnedChi2Result", "BreitWigner1D", "CPBackgroundCategory", "kdtree_local_residuals",
     "CPBackgroundSpec", "CPFitSession", "CPJointNLL", "CPToyBackground", "BaBarFlatte", "CPRealImag",
     "CoherentAmplitudeModel", "CompositeVeto", "ConstrainedNLL", "ConstantAmplitude",
-    "ConvolvedPDF1D", "CovariantAngular", "CovariantKinematics", "DalitzAmplitude",
+    "ConvolvedPDF1D", "CovariantAngular", "CovariantKinematics", "CrystalBall1D", "DalitzAmplitude",
     "DecayChannel", "DecayModel", "Exponential1D", "FactorizedDensity", "FitSession",
     "Flatte", "FunctionalVeto", "Gaussian1D", "GaussianConstraint", "GaussianResolution1D",
     "GooFitLegacyAngular", "GounarisSakurai", "Histogram1D", "KMatrix", "LASS", "LineshapeIntensity1D", "DalitzGaussLegendreGrid",
