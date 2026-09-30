@@ -4,6 +4,7 @@ import pytest
 from jaxpwa import (
     DecayChannel,
     DecayModel,
+    Isobar,
     NonResonant,
     Parameter,
     PhaseSpaceSample,
@@ -65,6 +66,58 @@ def test_decay_channel_resolves_particle_masses_in_gev():
     assert all(0.139 < mass < 0.141 for mass in channel.daughter_masses)
     assert channel.final_state_ids[1] == channel.final_state_ids[2]
     assert channel.final_state_ids[0] != channel.final_state_ids[1]
+
+
+def test_decay_channel_from_particles_matches_named_constructor():
+    direct = DecayChannel("D+", ("pi-", "pi+", "pi+"))
+    assert DecayChannel.from_particles(
+        "D+", ("pi-", "pi+", "pi+")
+    ) == direct
+
+
+def test_resonance_and_isobar_share_particle_resolution():
+    coefficient = RealImag(1.0, 0.0)
+    resonance = Resonance.from_particle(
+        "rho(770)0",
+        pair=(0, 1),
+        coefficient=coefficient,
+        name="rho_12",
+    )
+    isobar = Isobar.from_particle("rho(770)0")
+
+    assert resonance.name == "rho_12"
+    assert resonance.particle_name == isobar.particle_name == "rho(770)0"
+    assert resonance.mass == pytest.approx(isobar.mass)
+    assert resonance.width == pytest.approx(isobar.width)
+    assert resonance.spin == isobar.spin == 1
+
+    overridden = Resonance.from_particle(
+        "rho(770)0",
+        pair=(0, 1),
+        coefficient=coefficient,
+        mass=0.77,
+        width=0.2,
+        spin=2,
+    )
+    assert overridden.mass == 0.77
+    assert overridden.width == 0.2
+    assert overridden.spin == 2
+
+    with pytest.raises(ValueError, match="Could not resolve"):
+        Resonance.from_particle(
+            "not-a-real-particle",
+            pair=(0, 1),
+            coefficient=coefficient,
+            mass=1.0,
+            width=0.1,
+            spin=0,
+        )
+    with pytest.raises(ValueError, match="integer spin"):
+        Resonance.from_particle(
+            "Delta(1232)++",
+            pair=(0, 1),
+            coefficient=coefficient,
+        )
 
 
 def test_unphysical_decay_channel_is_rejected():

@@ -1,0 +1,23 @@
+{
+  "valid": true,
+  "events": 6000,
+  "normalization": 200000,
+  "proposals": 320000,
+  "truth": {
+    "cascade.x": 0.55,
+    "cascade.y": 0.35
+  },
+  "fitted": {
+    "cascade.x": 0.5479225975210604,
+    "cascade.y": 0.3594250887703738
+  },
+  "errors": {
+    "cascade.x": 0.025594110087409194,
+    "cascade.y": 0.024955231117308657
+  },
+  "pulls": {
+    "cascade.x": -0.08116720885566468,
+    "cascade.y": 0.37767988307015576
+  },
+  "elapsed_seconds": 13.269798267981969
+}

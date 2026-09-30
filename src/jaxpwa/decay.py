@@ -8,7 +8,6 @@ from itertools import permutations
 from typing import Literal
 
 import jax.numpy as jnp
-from particle import Particle
 
 from jaxpwa.amplitude import (
     AmplitudeComponent,
@@ -16,13 +15,12 @@ from jaxpwa.amplitude import (
     ConstantAmplitude,
     PreparedAmplitudeCache,
 )
-from jaxpwa.amplitude.components import coefficient_value
 from jaxpwa.amplitude.cache import (
-    DEFAULT_DYNAMICS_MICROBATCH_SIZE,
     DEFAULT_DYNAMICS_MICROBATCH_PARALLELISM,
+    DEFAULT_DYNAMICS_MICROBATCH_SIZE,
     DEFAULT_NORMALIZATION_CHUNK_SIZE,
 )
-from jaxpwa.observables.errors import _covariance_matrix
+from jaxpwa.amplitude.components import coefficient_value
 from jaxpwa.dynamics import (
     CovariantAngular,
     RelativisticBreitWigner,
@@ -38,46 +36,17 @@ from jaxpwa.integration import (
 )
 from jaxpwa.integration.adaptive_square_dalitz import AdaptiveSquareDalitzGrid
 from jaxpwa.kinematics import PhaseSpaceMC, PhaseSpaceSample, SquareDalitzGrid
+from jaxpwa.observables.errors import _covariance_matrix
+from jaxpwa.particle_properties import (
+    mass_gev as _mass_gev,
+)
+from jaxpwa.particle_properties import (
+    resolve_particle as _particle,
+)
+from jaxpwa.particle_properties import (
+    resolve_resonance_properties as _resolve_resonance_properties,
+)
 from jaxpwa.pdf import SignalPDF
-
-
-def _particle(name: str) -> Particle:
-    errors: list[Exception] = []
-    for resolver in (Particle.from_evtgen_name, Particle.from_name):
-        try:
-            return resolver(name)
-        except Exception as exc:
-            errors.append(exc)
-    raise ValueError(
-        f"Could not resolve particle {name!r} with the particle package"
-    ) from errors[-1]
-
-
-def _mass_gev(name: str) -> float:
-    particle = _particle(name)
-    if particle.mass is None:
-        raise ValueError(f"Particle {name!r} has no mass in the particle database")
-    return float(particle.mass) / 1000.0
-
-
-def _width_gev(name: str) -> float:
-    particle = _particle(name)
-    if particle.width is None:
-        raise ValueError(f"Particle {name!r} has no width in the particle database")
-    return float(particle.width) / 1000.0
-
-
-def _spin(name: str) -> int:
-    particle = _particle(name)
-    if particle.J is None:
-        raise ValueError(f"Particle {name!r} has no spin in the particle database")
-    spin = float(particle.J)
-    rounded = round(spin)
-    if abs(spin - rounded) > 1e-12:
-        raise ValueError(
-            f"Three-spinless-body resonance component requires integer spin, got J={spin} for {name!r}"
-        )
-    return int(rounded)
 
 
 def _collect_parameters(value: object) -> tuple[Parameter, ...]:
@@ -174,6 +143,13 @@ class DecayChannel:
                 "parent mass must exceed the sum of final-state masses for a physical three-body decay"
             )
 
+    @classmethod
+    def from_particles(
+        cls, parent: str, final_state: Sequence[str]
+    ) -> DecayChannel:
+        """Build a three-body channel from names in the particle database."""
+        return cls(parent, tuple(final_state))
+
     @property
     def parent_mass(self) -> float:
         """Parent particle mass in GeV, looked up by name from `particle`."""
@@ -213,6 +189,7 @@ class Resonance:
     bachelor_momentum_frame: Literal["resonance", "parent"] = "resonance"
     normalize_component: bool | None = None
     normalize_form_factors: bool = True
+    particle_name: str | None = None
 
     def __post_init__(self) -> None:
         if len(set(self.pair)) != 2 or any(
@@ -237,6 +214,74 @@ class Resonance:
             self.normalize_component, bool
         ):
             raise ValueError("normalize_component must be a boolean or None")
+        if self.particle_name is not None and (
+            not isinstance(self.particle_name, str) or not self.particle_name
+        ):
+            raise ValueError("particle_name must be a nonempty string or None")
+
+    @classmethod
+    def from_particle(
+        cls,
+        particle_name: str,
+        *,
+        pair: tuple[int, int],
+        coefficient: object,
+        name: str | None = None,
+        lineshape: object = RelativisticBreitWigner(),
+        angular: object = CovariantAngular(),
+        mass: object | None = None,
+        width: object | None = None,
+        spin: int | None = None,
+        resonance_radius: object = 1.5,
+        parent_radius: object = 5.0,
+        bachelor_momentum_frame: Literal["resonance", "parent"] = "resonance",
+        normalize_component: bool | None = None,
+        normalize_form_factors: bool = True,
+    ) -> Resonance:
+        """Build a resonance from the same particle lookup used by ``Isobar``.
+
+        Explicit mass, width and spin values take precedence. ``name`` may set
+        a distinct amplitude-component name while ``particle_name`` retains the
+        database identity used for provenance and unresolved properties.
+        """
+        resolved_mass, resolved_width, resolved_spin = _resolve_resonance_properties(
+            particle_name,
+            mass=mass,
+            width=width,
+            spin=spin,
+            context="Three-body resonance component",
+            validate_name=True,
+        )
+        return cls(
+            name=particle_name if name is None else name,
+            pair=pair,
+            coefficient=coefficient,
+            lineshape=lineshape,
+            angular=angular,
+            mass=resolved_mass,
+            width=resolved_width,
+            spin=resolved_spin,
+            resonance_radius=resonance_radius,
+            parent_radius=parent_radius,
+            bachelor_momentum_frame=bachelor_momentum_frame,
+            normalize_component=normalize_component,
+            normalize_form_factors=normalize_form_factors,
+            particle_name=particle_name,
+        )
+
+
+def _resolved_resonance_properties(
+    component: Resonance,
+) -> tuple[object, object, int]:
+    particle_name = component.particle_name or component.name
+    return _resolve_resonance_properties(
+        particle_name,
+        mass=component.mass,
+        width=component.width,
+        spin=component.spin,
+        context="Three-body resonance component",
+        validate_name=component.particle_name is not None,
+    )
 
 
 @dataclass(frozen=True)
@@ -572,14 +617,11 @@ class DecayModel:
             if not isinstance(component, Resonance):
                 continue
 
-            nominal_mass = _nominal_float(
-                component.mass,
-                _mass_gev(component.name) if component.mass is None else 0.0,
+            resolved_mass, resolved_width, _ = _resolved_resonance_properties(
+                component
             )
-            nominal_width = _nominal_float(
-                component.width,
-                _width_gev(component.name) if component.width is None else 0.0,
-            )
+            nominal_mass = _nominal_float(resolved_mass, 0.0)
+            nominal_width = _nominal_float(resolved_width, 0.0)
             if (
                 nominal_width <= 0.0
                 or nominal_width > self.normalization_narrow_width
@@ -849,9 +891,7 @@ class DecayModel:
         i, j = component.pair
         bachelor = next(index for index in range(3) if index not in component.pair)
         masses = self.channel.daughter_masses
-        mass0 = component.mass if component.mass is not None else _mass_gev(component.name)
-        width0 = component.width if component.width is not None else _width_gev(component.name)
-        spin = component.spin if component.spin is not None else _spin(component.name)
+        mass0, width0, spin = _resolved_resonance_properties(component)
         context = ResonanceContext(
             parent_mass=self.channel.parent_mass,
             daughter_masses=(masses[i], masses[j]),

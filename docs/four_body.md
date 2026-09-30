@@ -32,8 +32,9 @@ goodness-of-fit test; mass/angle projections are diagnostics, not complete 5D GO
 
 ```python
 from jaxpwa import (
-    AmplitudeComponent, CascadeChain, FitSession, FourBodyDecayModel,
-    Isobar, NBodyDecayChannel, NBodyPhaseSpaceMC, PairChain, Parameter, RealImag,
+    AmplitudeComponent, CascadeChain, DecayChannel, FitSession,
+    FourBodyDecayModel, Isobar, NBodyDecayChannel, NBodyPhaseSpaceMC, PairChain,
+    Parameter, RealImag, Resonance,
 )
 
 channel = NBodyDecayChannel(2.0, (0.1, 0.2, 0.3, 0.4))
@@ -59,8 +60,37 @@ model = FourBodyDecayModel(channel, [
 # session.plot_projection(result, "s234", projection_sample=normalization)
 ```
 
-`NBodyDecayChannel.from_particles("B0", ("K+", "K-", "pi+", "pi-"))`
-resolves particle masses and checks that the external spins are zero.
+Three-body and N-body declarations expose the same particle-backed factories:
+
+```python
+three_body = DecayChannel.from_particles("D+", ("pi-", "pi+", "pi+"))
+four_body = NBodyDecayChannel.from_particles(
+    "B0", ("K+", "K-", "pi+", "pi-")
+)
+
+rho_three_body = Resonance.from_particle(
+    "rho(770)0", pair=(0, 1), coefficient=RealImag(1.0, 0.0)
+)
+rho = Isobar.from_particle("rho(770)0")
+# mass=0.77526 GeV, width=0.1474 GeV and spin=1 in the installed database
+```
+
+Both channel factories resolve masses and particle identities; the N-body
+factory additionally checks that the external spins are zero. `Resonance` and
+`Isobar` call the same internal resolver for their nominal mass, width and spin.
+The database stores mass and width in MeV; Jax-PWA converts both to GeV.
+Explicit `mass=`, `width=`, `spin=`, `lineshape=` and `radius=` values override
+the database. Mass, width and radius overrides may be fit `Parameter` objects;
+spin must remain a static integer because it fixes the compiled helicity sum.
+The original lookup label is retained as `particle_name` for provenance. Database
+values depend on the installed `particle` version and should be recorded with an
+analysis configuration rather than assumed to be immutable.
+
+For three-body components, `Resonance.from_particle(..., name="rho_12")`
+separates the amplitude-component name from the particle-database name. The
+legacy `Resonance("rho", ..., mass=..., width=..., spin=...)` construction stays
+available for models with explicit values or non-catalogue effective states.
+
 Numerical construction assumes scalar external particles. Equal masses do not
 establish particle identity. Supply `final_state_ids` to enable automatic Bose
 symmetrization (or use the particle constructor). The amplitude is the sum over

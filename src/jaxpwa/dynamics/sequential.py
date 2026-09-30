@@ -14,6 +14,7 @@ import jax.numpy as jnp
 
 from jaxpwa.kinematics.four_body import cascade_coordinates, pair_coordinates
 from jaxpwa.kinematics.vectors import invariant_mass_squared
+from jaxpwa.particle_properties import resolve_resonance_properties
 
 from .context import ResonanceContext, resolve_value
 from .lineshape.common import blatt_weisskopf_from_momenta, breakup_momentum
@@ -114,6 +115,7 @@ class Isobar:
     spin: int = 0
     lineshape: object = field(default_factory=Pole)
     radius: object = 1.5
+    particle_name: str | None = None
 
     def __post_init__(self):
         _angular_integer(self.spin, "spin")
@@ -121,6 +123,45 @@ class Isobar:
             value = float(resolve_value(getattr(self, name)))
             if not jnp.isfinite(value) or value < 0 or (name == "mass" and value == 0):
                 raise ValueError(f"{name} must be finite and physically nonnegative")
+        if self.particle_name is not None and (
+            not isinstance(self.particle_name, str) or not self.particle_name
+        ):
+            raise ValueError("particle_name must be a nonempty string or None")
+
+    @classmethod
+    def from_particle(
+        cls,
+        name: str,
+        *,
+        mass: object | None = None,
+        width: object | None = None,
+        spin: int | None = None,
+        lineshape: object | None = None,
+        radius: object = 1.5,
+    ) -> Isobar:
+        """Build an isobar from an EvtGen or PDG name in ``particle``.
+
+        Database masses and widths are converted from MeV to GeV. Explicit
+        overrides take precedence and may include fit ``Parameter`` objects for
+        mass, width, and radius. Spin remains a static integer because it fixes
+        the compiled angular sum. The default lineshape remains ``Pole``.
+        """
+        resolved_mass, resolved_width, resolved_spin = resolve_resonance_properties(
+            name,
+            mass=mass,
+            width=width,
+            spin=spin,
+            context="Four-body isobar",
+            validate_name=True,
+        )
+        return cls(
+            mass=resolved_mass,
+            width=resolved_width,
+            spin=resolved_spin,
+            lineshape=Pole() if lineshape is None else lineshape,
+            radius=radius,
+            particle_name=name,
+        )
 
     def evaluate(self, mass, m1, m2, parent_mass, bachelor_mass, orbital, values):
         context = ResonanceContext(

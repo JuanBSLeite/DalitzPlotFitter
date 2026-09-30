@@ -1,9 +1,10 @@
 """D0 -> pi+ pi- pi+ pi- isobar model after BESIII, arXiv:2312.02524 (Tables 5-11).
 
-Built on the helicity/LS four-body API (``jaxpwa.four_body``); the paper uses the
-covariant Zemach (Rarita-Schwinger) tensor formalism, so complex couplings are
-NOT transferable. Only fit fractions / interference fractions are compared
-(see the notebook). Daughter order everywhere: (pi+_0, pi-_1, pi+_2, pi-_3).
+Provides both the paper's covariant Zemach (Rarita-Schwinger) tensors and the
+native helicity/LS four-body chains in ``jaxpwa.four_body``. The notebook uses
+the covariant implementation as its main model and helicity/LS as a comparison;
+complex couplings are not transferable between them. Daughter order everywhere:
+(pi+_0, pi-_1, pi+_2, pi-_3).
 
 Waves (all 14 groups of Table 11, 17 components):
   a1(1260)+-pi-+  = rho pi[S] + rho pi[D] + f2 pi[P] + (pipi)_S pi[P]   (Table 9)
@@ -20,9 +21,9 @@ the other sub-decays and the pi+pi0pi0 channel are neglected in Gamma(s) and the
 result is normalised to Gamma0 at the pole). Other 3-pi resonances use a
 constant width, as in the paper.
 
-Deviations (documented in the notebook): helicity/LS instead of Zemach tensors;
-raw Blatt-Weisskopf barriers of the package; PDG-like inputs for the parameters
-the paper does not tabulate (a1(1420), a1(1640), a2(1320), rho(1450), f2 P-vector).
+The helicity/LS comparison uses the package's raw Blatt-Weisskopf barriers.
+Both implementations use PDG-like inputs for parameters the paper does not
+tabulate (a1(1420), a1(1640), a2(1320), rho(1450), f2 P-vector).
 """
 
 from __future__ import annotations
@@ -57,8 +58,8 @@ from jaxpwa.dynamics.lineshape.relativistic_breit_wigner import (
 from jaxpwa.dynamics.sequential import _radial
 from jaxpwa.kinematics.vectors import invariant_mass_squared
 
-M_D0, M_PI = 1.86484, 0.13957039
-CHANNEL = NBodyDecayChannel(M_D0, (M_PI,) * 4, (211, -211, 211, -211))
+CHANNEL = NBodyDecayChannel.from_particles("D0", ("pi+", "pi-", "pi+", "pi-"))
+M_D0, M_PI = CHANNEL.parent_mass, CHANNEL.daughter_masses[0]
 R_RES = 3.0  # GeV^-1, intermediate resonances (paper Sec. 5)
 R_D = 5.0  # GeV^-1, D0
 
@@ -78,19 +79,43 @@ def cplx(mag, phase):
 
 
 def rho_iso():
-    return Isobar(RHO["mass"], RHO["width"], 1, GounarisSakurai(), R_RES)
+    return Isobar.from_particle(
+        "rho(770)0",
+        mass=RHO["mass"],
+        width=RHO["width"],
+        lineshape=GounarisSakurai(),
+        radius=R_RES,
+    )
 
 
 def rho1450_iso():
-    return Isobar(RHO1450["mass"], RHO1450["width"], 1, GounarisSakurai(), R_RES)
+    return Isobar.from_particle(
+        "rho(1450)0",
+        mass=RHO1450["mass"],
+        width=RHO1450["width"],
+        lineshape=GounarisSakurai(),
+        radius=R_RES,
+    )
 
 
 def f2_iso():
-    return Isobar(F2["mass"], F2["width"], 2, RelativisticBreitWigner(), R_RES)
+    return Isobar.from_particle(
+        "f(2)(1270)",
+        mass=F2["mass"],
+        width=F2["width"],
+        lineshape=RelativisticBreitWigner(),
+        radius=R_RES,
+    )
 
 
 def f0_980_iso():
-    return Isobar(0.965, 0.1, 0, Flatte.f0_980(), R_RES)
+    return Isobar.from_particle(
+        "f(0)(980)",
+        mass=0.965,
+        width=0.1,
+        lineshape=Flatte.f0_980(),
+        radius=R_RES,
+    )
 
 
 def s_iso(betas=(1.0,), f_pipi=0j, f_kk=0j):
@@ -548,7 +573,7 @@ def _iso(par, spin, lineshape):
 
 
 def a1_chains_z(order):
-    from besiii_zemach import ZCascade
+    from notebooks.examples.besiii_zemach import ZCascade
 
     a1 = lambda: _iso(A1, 1, RunningWidthPole("a1"))
     return (
@@ -560,7 +585,7 @@ def a1_chains_z(order):
 
 
 def pi_chains_z(order):
-    from besiii_zemach import ZCascade
+    from notebooks.examples.besiii_zemach import ZCascade
 
     pi1300 = lambda: _iso(PI1300, 0, RunningWidthPole("pi"))
     return (
@@ -571,7 +596,7 @@ def pi_chains_z(order):
 
 def zemach_single(name):
     """Covariant chain for every component that is a single chain."""
-    from besiii_zemach import ZCascade, ZPair
+    from notebooks.examples.besiii_zemach import ZCascade, ZPair
 
     bw = ConstWidthBW()
     return {

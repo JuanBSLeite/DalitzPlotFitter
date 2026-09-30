@@ -24,6 +24,7 @@ from jaxpwa import (
     NBodySample,
     PairChain,
     Parameter,
+    Pole,
     RealImag,
     RelativisticBreitWigner,
     cascade_coordinates,
@@ -251,6 +252,39 @@ def test_existing_running_width_lineshape(sample):
         )
 
 
+def test_isobar_from_particle_database_and_overrides():
+    rho = Isobar.from_particle("rho(770)0")
+    assert rho.particle_name == "rho(770)0"
+    assert rho.mass == pytest.approx(0.77526)
+    assert rho.width == pytest.approx(0.1474)
+    assert rho.spin == 1
+    assert isinstance(rho.lineshape, Pole)
+
+    # EvtGen aliases use the same resolver as DecayChannel.
+    assert Isobar.from_particle("rho0").mass == pytest.approx(rho.mass)
+
+    mass = Parameter.dynamics("rho.mass", 0.77, owner="rho")
+    lineshape = RelativisticBreitWigner()
+    overridden = Isobar.from_particle(
+        "rho(770)0",
+        mass=mass,
+        width=0.2,
+        spin=2,
+        lineshape=lineshape,
+        radius=4.0,
+    )
+    assert overridden.mass is mass
+    assert overridden.width == 0.2
+    assert overridden.spin == 2
+    assert overridden.lineshape is lineshape
+    assert overridden.radius == 4.0
+
+    with pytest.raises(ValueError, match="Could not resolve"):
+        Isobar.from_particle("not-a-real-particle", mass=1.0, width=0.1, spin=0)
+    with pytest.raises(ValueError, match="integer spin"):
+        Isobar.from_particle("Delta(1232)++")
+
+
 def _model(sample, *, dynamic=False, normalize=True):
     mass = (
         Parameter.dynamics("mass", 0.63, owner="pair", bounds=(0.5, 0.8))
@@ -347,16 +381,19 @@ def test_external_normalization_and_component_overrides(sample):
     components = list(base.components)
     components[1] = replace(components[1], normalize_component=False)
     model = FourBodyDecayModel(base.channel, components, normalization_sample=sample)
-    selected = sample.select_for_integration(sample.mass_squared(0, 1) < .7)
+    selected = sample.select_for_integration(sample.mass_squared(0, 1) < 0.7)
     data = selected.take(jnp.arange(13))
-    values = {"x": .3, "y": .1}
+    values = {"x": 0.3, "y": 0.1}
     cache = model.prepare_cache(data, selected)
     pdf = model.pdf(selected)
-    np.testing.assert_allclose(cache.intensity(values)/cache.normalization(values),
-                               pdf(data.as_dict(), values), rtol=2e-12)
+    np.testing.assert_allclose(
+        cache.intensity(values) / cache.normalization(values),
+        pdf(data.as_dict(), values),
+        rtol=2e-12,
+    )
     ff = cache.fit_fractions(values)
     interference = cache.interference_fractions(values)
-    np.testing.assert_allclose(jnp.sum(ff)+jnp.sum(jnp.triu(interference, 1)), 1.)
+    np.testing.assert_allclose(jnp.sum(ff) + jnp.sum(jnp.triu(interference, 1)), 1.0)
 
 
 def test_integration_selection_resampling_and_plotting(sample):

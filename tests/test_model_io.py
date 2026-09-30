@@ -83,6 +83,30 @@ def test_model_round_trip_preserves_parameters():
     assert original == reloaded
 
 
+def test_model_round_trip_preserves_particle_backed_resonance_identity():
+    model = DecayModel(
+        DecayChannel.from_particles("D+", ("pi-", "pi+", "pi+")),
+        [
+            Resonance.from_particle(
+                "rho(770)0",
+                name="rho_12",
+                pair=(0, 1),
+                coefficient=RealImag(1.0, 0.0),
+            )
+        ],
+        normalization_method="square-dalitz",
+        normalization_resolution=20,
+    )
+
+    restored = model_from_spec(model_to_spec(model))
+    resonance = restored.components[0]
+    assert resonance.name == "rho_12"
+    assert resonance.particle_name == "rho(770)0"
+    assert resonance.mass == pytest.approx(0.77526)
+    assert resonance.width == pytest.approx(0.1474)
+    assert resonance.spin == 1
+
+
 def test_model_round_trip_preserves_dynamic_microbatch_tuning():
     spec = model_to_spec(_floating_rho_model())
     spec["dynamics_microbatch_size"] = 12_345

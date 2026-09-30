@@ -15,10 +15,11 @@ from .amplitude import (
     PreparedAmplitudeCache,
 )
 from .amplitude.components import coefficient_value
-from .decay import _collect_parameters, _mass_gev, _particle
+from .decay import _collect_parameters
 from .fit import ParameterKind
 from .integration import GridIntegrator
 from .kinematics.nbody import NBodyPhaseSpaceMC, NBodySample
+from .particle_properties import mass_gev, resolve_particle
 from .pdf import SignalPDF
 
 
@@ -54,12 +55,12 @@ class NBodyDecayChannel:
 
     @classmethod
     def from_particles(cls, parent, final_state):
-        particles = tuple(_particle(name) for name in (parent, *final_state))
+        particles = tuple(resolve_particle(name) for name in (parent, *final_state))
         if any(p.J != 0 for p in particles):
             raise ValueError("initial four-body support requires spinless externals")
         return cls(
-            _mass_gev(parent),
-            tuple(_mass_gev(p) for p in final_state),
+            mass_gev(parent),
+            tuple(mass_gev(p) for p in final_state),
             tuple(int(p.pdgid) for p in particles[1:]),
         )
 
@@ -324,7 +325,7 @@ class FourBodyDecayModel:
                 * c.function(data, values)
                 for c in self.amplitude_model.components
             )
-            return jnp.abs(amplitude)**2
+            return jnp.abs(amplitude) ** 2
 
         return SignalPDF(intensity, GridIntegrator(sample), **kwargs)
 
