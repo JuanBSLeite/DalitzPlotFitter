@@ -142,6 +142,29 @@ Do not install both CUDA extras in the same virtual environment. CUDA wheels
 are currently provided for Linux; see the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html)
 for driver and platform requirements.
 
+### Google Colab
+
+Select a GPU runtime (Runtime → Change runtime type), then install straight from
+GitHub in the first cell:
+
+```python
+!pip install -q "jax-pwa[cuda12] @ git+https://github.com/JuanBSLeite/Jax-PWA.git"
+```
+
+Restart the session afterwards (Runtime → Restart session): Colab ships its own JAX,
+and the extra may replace it, so the running kernel keeps the old version until it is
+restarted. Then check that JAX sees the GPU:
+
+```python
+import jax
+print(jax.devices())  # expected: [CudaDevice(id=0)]
+```
+
+For CPU-only use, drop the extra: `!pip install -q "git+https://github.com/JuanBSLeite/Jax-PWA.git"`.
+For a private repository, put a GitHub token in Colab Secrets and use
+`git+https://{token}@github.com/...`. Note that `float64` (the project default, see
+below) is much slower on the free-tier T4 than on L4/A100 GPUs.
+
 The project deliberately runs `float64`/`complex128` rather than JAX's own default, for
 amplitude-analysis stability. `import jaxpwa` already enables double precision
 automatically, so no separate call is needed for normal use:
