@@ -465,7 +465,10 @@ def test_continuous_toy_minuit_closure():
     import importlib.util
     from pathlib import Path
 
-    path = Path(__file__).resolve().parents[1] / "examples/four_body_closure.py"
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "notebooks/examples/four_body_closure.py"
+    )
     spec = importlib.util.spec_from_file_location("four_body_closure", path)
     example = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(example)

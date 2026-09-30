@@ -246,7 +246,7 @@ coefficient/mass/width gradients against finite differences.
 ## Reproduce the closure and tests
 
 ```bash
-python examples/four_body_closure.py --events 6000 --normalization 200000
+python notebooks/examples/four_body_closure.py --events 6000 --normalization 200000
 pytest tests/test_four_body.py
 ```
 

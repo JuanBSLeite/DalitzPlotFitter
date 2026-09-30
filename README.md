@@ -15,6 +15,7 @@
 ![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-blue)
 ![JAX](https://img.shields.io/badge/backend-JAX-orange)
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/JuanBSLeite/Jax-PWA/main?filepath=notebooks/tutorials)
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/JuanBSLeite/Jax-PWA)
 
 Jax-PWA is a Python package for **unbinned amplitude fits of three-body decays**
 ("Dalitz plot analyses"), the technique used across flavour physics (LHCb, BaBar, Belle,
@@ -25,7 +26,9 @@ interference structure from a sample of reconstructed decays such as `B+ -> K+ p
 Initial [four-body support](docs/four_body.md) adds invariant event coordinates,
 weighted N-body phase space and LS-coupled pair/cascade chains for scalar external
 particles, using the same JAX cache, normalization and `FitSession` minimization.
-Start with the [four-body closure example](examples/four_body_closure.py).
+Start with the [four-body closure example](notebooks/examples/four_body_closure.py)
+or the [BESIII-inspired D0 -> pi+ pi- pi+ pi- reproduction](notebooks/examples/besiii_d0_4pi_toy_reproduction.ipynb), which includes covariant
+Zemach/Rarita-Schwinger tensors and a native helicity/LS comparison.
 
 The whole numerical pipeline — phase-space generation, kinematics, amplitude dynamics,
 normalization, likelihood and gradient evaluation — is written in **JAX**, end to end, on
@@ -43,6 +46,9 @@ deliberate deviation) while using its own, backend-neutral class names.
   non-resonant term), each with a complex coefficient and a lineshape (relativistic
   Breit-Wigner, Gounaris-Sakurai, Flatte, LASS, a K-matrix, various pole and rescattering
   parametrizations, or a fully two-dimensional QMI amplitude).
+- **Build initial four-body amplitude models** for scalar external particles with physical
+  weighted phase space, Lorentz-invariant event representations, reusable isobars, identical-
+  particle symmetrization, and sequential `P -> R1 R2` or `P -> R a -> S b a` decay chains.
 - **Fit** that model to data with an unbinned maximum-likelihood fit, including detector
   efficiency, vetoed regions, self-cross-feed (SCF) migration, an arbitrary number of background
   categories, additional discriminating variables (mass, BDT output, ...) and Gaussian external
@@ -50,6 +56,13 @@ deliberate deviation) while using its own, backend-neutral class names.
 - **Fit simultaneously for CP asymmetries**, treating the particle and antiparticle samples as
   one joint normalized likelihood rather than two independent fits, so the fit is directly
   sensitive to the integrated charge asymmetry.
+- **Fit tagged time-dependent neutral-meson amplitudes**, including coherent `D0`-`D0bar`
+  mixing in `D0 -> KS pi+ pi-`, JAX gradients, time acceptance, optional Gaussian time
+  resolution, multiple backgrounds, fraction or extended-yield fits, and signal/background
+  projections through `NeutralMesonMixing`, `TimeDependentDalitzNLL`, and
+  `TimeDependentFitSession`. The convention follows the Belle model (Eqs. 1-2); see the
+  [API and validation scope](docs/time_dependent.md) and
+  [`benchmarks/benchmark_time_dependent.py`](benchmarks/benchmark_time_dependent.py).
 - **Generate toy Monte Carlo** from a fitted or hypothesized model — signal, background, and
   simultaneous CP pseudo-experiments — either as an exact numerical inverse-transform (fast,
   default) or as a Laura++-style accept-reject sampler (used as an independent cross-check).
@@ -99,7 +112,8 @@ basic flow.
   course — efficiency/background fits, multiple backgrounds, veto maps, SCF migration, Gaussian
   constraints, ROOT I/O, folded Dalitz plots for identical particles, resolution convolution, and
   more — plus `notebooks/benchmark/` (numeric reproductions of published analyses) and
-  `notebooks/_data_analyses/` (in-progress analyses using the public API).
+  [`notebooks/examples/`](notebooks/examples) for focused examples such as the four-body closure
+  and BESIII-inspired model.
 
 ## Installation
 
@@ -138,18 +152,6 @@ from jaxpwa import enable_x64  # only needed to opt back out
 enable_x64(False)  # explicit, unvalidated float32 experiment
 ```
 
-### Time-dependent neutral-meson amplitudes
-
-Tagged D0 -> KS pi+ pi- fits are available through `NeutralMesonMixing` and
-`TimeDependentDalitzNLL`, with coherent mixing, JAX gradients, time acceptance
-and optional Gaussian time resolution, or through the higher-level
-`TimeDependentFitSession` composition layer with multiple backgrounds,
-fraction or extended-yield fits, and signal/background projections. The
-mixing convention follows the Belle paper above (Eqs. 1-2). See
-[the API and validation scope](docs/time_dependent.md) and the runnable
-`benchmarks/benchmark_time_dependent.py` example.
-
-
 ## Physics references
 
 J. Back et al., *Laura++: a Dalitz plot fitter*, Computer Physics Communications 231 (2018)
@@ -171,3 +173,6 @@ K<sub>S</sub><sup>0</sup>K<sup>+</sup>K<sup>-</sup>*, Phys. Rev. D 78 (2008) 034
 Belle Collaboration, *Measurement of D<sup>0</sup>-D̄<sup>0</sup> mixing and search for indirect CP
 violation using D<sup>0</sup> → K<sub>S</sub><sup>0</sup>π<sup>+</sup>π<sup>-</sup> decays*,
 Phys. Rev. D 89 (2014) 091103, arXiv:1404.2412.
+
+BESIII Collaboration, *Amplitude analysis of the decays D<sup>0</sup> → π<sup>+</sup>π<sup>-</sup>π<sup>+</sup>π<sup>-</sup>
+and D<sup>0</sup> → π<sup>+</sup>π<sup>-</sup>π<sup>0</sup>π<sup>0</sup>*, arXiv:2312.02524.

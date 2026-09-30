@@ -1,6 +1,6 @@
 """Independent continuous toy + MC-normalized four-body closure.
 
-Run: python examples/four_body_closure.py --events 6000 --normalization 200000
+Run: python notebooks/examples/four_body_closure.py --events 6000 --normalization 200000
 Uses two scalar chains and the existing fixed-width Pole convention. The
 rejection bound below is analytical for this particular model, not a generic
 envelope estimate. No toy candidate pool is reused for normalization.
