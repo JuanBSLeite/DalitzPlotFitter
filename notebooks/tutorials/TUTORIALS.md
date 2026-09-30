@@ -113,6 +113,7 @@ Use these existing notebooks and documents for extensions:
 
 | Topic | Next example or reference |
 |---|---|
+| Four-body amplitudes and toy closure | [Four-body closure](tutorial_66_four_body_closure.ipynb), [physics and scope](../../docs/four_body.md) |
 | Multiple backgrounds and extended fits | [Multiple backgrounds](08_b2kpipi_multiple_backgrounds.ipynb), [background conventions](../docs/backgrounds_and_vetoes.md) |
 | Detector migration / self-cross-feed | [SCF migration](07_b2kpipi_scf_migration.ipynb), [SCF with veto](12_b2kpipi_scf_with_veto.ipynb) |
 | Discriminating variables | [Dalitz plus discriminants](10_b2kpipi_discriminating_variables.ipynb) |

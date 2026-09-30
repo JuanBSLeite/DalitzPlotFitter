@@ -32,6 +32,7 @@ from jaxpwa.goodness_of_fit import (
 from jaxpwa.integration import GridIntegrator
 from jaxpwa.io import model_with_fitted_values, read_phase_space_sample
 from jaxpwa.kinematics import (
+    EventSample,
     PhaseSpaceSample,
     fold_thetaprime,
     invariants_to_square_dalitz,
@@ -42,7 +43,7 @@ from jaxpwa.likelihood.weighted import (
     sweight_covariance_from_hessians,
 )
 from jaxpwa.pdf import SignalPDF
-from jaxpwa.plotting import _draw_pulls_1d, plot_binned_data
+from jaxpwa.plotting import _draw_pulls_1d, _values, plot_binned_data
 from jaxpwa.sampling import weighted_resample
 
 
@@ -178,7 +179,7 @@ class FitSession:
     """
 
     model: object
-    data: PhaseSpaceSample
+    data: EventSample
     efficiency: object | None = None
     veto: object | None = None
     backgrounds: tuple[BackgroundSpec | BackgroundCategory, ...] = ()
@@ -1010,10 +1011,10 @@ class FitSession:
         fold_fn = np.minimum if fold_side == "low" else np.maximum
 
         def _folded_values(sample):
-            values_ = np.asarray(getattr(sample, variable))
+            values_ = _values(sample, variable)
             if not folded:
                 return values_
-            partner_values = np.asarray(getattr(sample, partner_variable))
+            partner_values = _values(sample, partner_variable)
             return fold_fn(values_, partner_values)
 
         values = self.result_values(result)
@@ -1038,7 +1039,9 @@ class FitSession:
                 )
             else:
                 _, ax = plt.subplots()
-        unit = r"GeV$^2$" if variable in ("s12", "s13", "s23") else ""
+        unit = (
+            r"GeV$^2$" if variable.startswith("s") and variable[1:].isdigit() else ""
+        )
         _, observed, _, _ = plot_binned_data(
             data_values,
             bins=edges,
@@ -1176,10 +1179,10 @@ class FitSession:
         fold_fn = np.minimum if fold_side == "low" else np.maximum
 
         def _folded_values(sample):
-            values_ = np.asarray(getattr(sample, variable))
+            values_ = _values(sample, variable)
             if not folded:
                 return values_
-            partner_values = np.asarray(getattr(sample, partner_variable))
+            partner_values = _values(sample, partner_variable)
             return fold_fn(values_, partner_values)
 
         values = self.result_values(result)

@@ -14,6 +14,8 @@ def _values(sample, variable: str):
         return np.asarray(getattr(sample, variable))
     if isinstance(sample, dict) and variable in sample:
         return np.asarray(sample[variable])
+    if hasattr(sample, "observable"):
+        return np.asarray(sample.observable(variable))
     raise KeyError(f"sample does not contain {variable!r}")
 
 

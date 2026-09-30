@@ -15,11 +15,27 @@ The lessons explain the main fitting workflow and link to specialized examples b
 
 ## Model construction
 
+Initial four-body API (scalar external particles): see [four-body support](four_body.md)
+and [closure notebook](../notebooks/tutorials/tutorial_66_four_body_closure.ipynb).
+
 | Name | Kind | What it does |
 |---|---|---|
-| `DecayChannel` | class | Parent particle and ordered three-body final state (`("D+", ("pi-","pi+","pi+"))`). |
-| `DecayModel` | class | Build a coherent amplitude model with deterministic Dalitz-plane normalization; owns `normalization_method`/`normalize_components`. |
-| `Resonance` | class | Declarative one-dimensional resonance component: mass, width, spin, coefficient, interchangeable `lineshape`/`angular` plugins, and `normalize_form_factors` for pole-normalized or raw barriers; see `docs/dynamics_structure.md`. |
+| `NBodyDecayChannel` | class | Declares N-body masses and optional identical-particle labels; `from_particles(...)` resolves named external particles. |
+| `NBodySample` | class | Covariant event storage, subset invariants, orientation and integration weights; JAX pytree. |
+| `NBodyPhaseSpaceMC` | class | Recursive physical weighted N-body phase-space generation. |
+| `FourBodyDecayModel` | class | Four-body coherent model using the existing normalization/cache/fit core; `with_fixed_parameters(...)` returns an updated immutable model. |
+| `Isobar` | class | Spin, mass, width, radius and reusable lineshape; `from_particle(name)` fills nominal properties from `particle`. |
+| `PairChain` | class | One LS wave for `P -> (ab)(cd)`. |
+| `CascadeChain` | class | One LS wave for `P -> R a, R -> S b, S -> c d`. |
+| `pair_coordinates` | function | Five invariant mass/helicity coordinates for `(ab)(cd)`. |
+| `cascade_coordinates` | function | Five invariant mass/helicity coordinates for `a(b(cd))`. |
+| `pair_coordinates_to_momenta` | function | Canonical four-vectors reconstructed from five pair-chain coordinates. |
+
+| Name | Kind | What it does |
+|---|---|---|
+| `DecayChannel` | class | Parent particle and ordered three-body final state; `from_particles(...)` mirrors the N-body named constructor. |
+| `DecayModel` | class | Build a coherent amplitude model with deterministic Dalitz-plane normalization; `with_fixed_parameters(...)` fixes selected parameters in a new model. |
+| `Resonance` | class | Declarative one-dimensional resonance component; `from_particle(...)` uses the same nominal-property resolver as `Isobar`, with interchangeable `lineshape`/`angular` plugins and form-factor conventions. |
 | `NonResonant` | class | Constant (S-wave, isotropic) non-resonant component with a complex coefficient. |
 | `DalitzAmplitude` | class | Attach a genuinely two-dimensional amplitude (e.g. `QMI2D`) that depends on both Dalitz invariants at once, bypassing the isobar construction. |
 | `AmplitudeComponent` | class | Named dynamical component `F_i(x)` with a coefficient; the base type `Resonance`/`NonResonant`/`DalitzAmplitude` all produce. |

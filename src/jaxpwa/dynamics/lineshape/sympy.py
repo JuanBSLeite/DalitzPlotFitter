@@ -210,6 +210,16 @@ class SympyLineshape:
         """A copy of the explicit bindings, understood by model discovery."""
         return dict(self._bindings)
 
+    def _with_parameter_bindings(self, parameters: Mapping) -> SympyLineshape:
+        """Rebuild with replaced bindings for immutable model transformations."""
+        return SympyLineshape(
+            self.expression,
+            mass_symbol=self.mass_symbol,
+            parameters=parameters,
+            context_symbols=self.context_symbols,
+            complex_domain=self.complex_domain,
+        )
+
     @property
     def context_symbols(self) -> dict:
         """A copy of the symbols bound to ResonanceContext fields (e.g. pole_mass)."""

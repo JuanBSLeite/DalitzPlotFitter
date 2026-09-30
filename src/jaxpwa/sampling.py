@@ -2,21 +2,24 @@
 
 from __future__ import annotations
 
+from dataclasses import replace as dataclass_replace
+
 import jax
 import jax.numpy as jnp
 from jax import Array
 
 from jaxpwa.kinematics import PhaseSpaceSample
+from jaxpwa.kinematics.nbody import NBodySample
 
 
 def weighted_resample(
     key: Array,
-    sample: PhaseSpaceSample,
+    sample: PhaseSpaceSample | NBodySample,
     weights: Array,
     size: int,
     *,
     replace: bool = True,
-) -> PhaseSpaceSample:
+) -> PhaseSpaceSample | NBodySample:
     """Draw unweighted events from a weighted phase-space sample.
 
     ``weights`` should contain the complete target importance weight for each
@@ -44,7 +47,9 @@ def weighted_resample(
     if not bool(jnp.isfinite(total)) or float(total) <= 0.0:
         raise ValueError("weights must have a positive finite sum")
     if not replace and size > sample.size:
-        raise ValueError("cannot sample more events than candidates without replacement")
+        raise ValueError(
+            "cannot sample more events than candidates without replacement"
+        )
 
     probabilities = weights / total
     indices = jax.random.choice(
@@ -55,12 +60,9 @@ def weighted_resample(
         p=probabilities,
     )
     selected = sample.take(indices)
-    return PhaseSpaceSample(
-        s12=selected.s12,
-        s13=selected.s13,
-        s23=selected.s23,
-        weights=jnp.ones(size, dtype=selected.s12.dtype),
-        p1=selected.p1,
-        p2=selected.p2,
-        p3=selected.p3,
+    dtype = (
+        selected.s12.dtype
+        if isinstance(selected, PhaseSpaceSample)
+        else selected.momenta.dtype
     )
+    return dataclass_replace(selected, weights=jnp.ones(size, dtype=dtype))

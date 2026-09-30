@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, fields, is_dataclass, replace
 from enum import Enum
-from typing import Mapping
 
 
 class ParameterKind(str, Enum):
@@ -138,3 +138,93 @@ class Parameter:
             bounds=bounds,
             step=step,
         )
+
+
+def _fixed_parameter_updates(
+    parameters: tuple[Parameter, ...],
+    names: tuple[str, ...],
+    values: Mapping[str, float] | None,
+) -> dict[str, float]:
+    """Validate a model-level fixing request and return target values."""
+    by_name = {parameter.name: parameter for parameter in parameters}
+    requested = set(names)
+    if values is not None:
+        if not isinstance(values, Mapping):
+            raise TypeError("values must be a mapping from parameter names to values")
+        requested.update(values)
+    if not requested:
+        raise ValueError("supply at least one parameter name or value")
+    if any(not isinstance(name, str) or not name for name in requested):
+        raise ValueError("parameter names must be nonempty strings")
+    unknown = sorted(requested.difference(by_name))
+    if unknown:
+        raise ValueError(f"unknown parameter name(s): {', '.join(unknown)}")
+
+    updates = {name: float(by_name[name].value) for name in names}
+    if values is not None:
+        updates.update({name: float(value) for name, value in values.items()})
+    return updates
+
+
+def _replace_fixed_parameters(
+    node: object,
+    updates: Mapping[str, float],
+    replacements: dict[str, Parameter] | None = None,
+) -> object:
+    """Recursively replace selected Parameters while preserving shared identity."""
+    replacements = {} if replacements is None else replacements
+    if isinstance(node, Parameter):
+        if node.name not in updates:
+            return node
+        if node.name not in replacements:
+            replacements[node.name] = replace(
+                node, value=float(updates[node.name]), fixed=True
+            )
+        return replacements[node.name]
+    replace_bindings = getattr(node, "_with_parameter_bindings", None)
+    if callable(replace_bindings):
+        bindings = node.parameters
+        updated = _replace_fixed_parameters(bindings, updates, replacements)
+        return node if updated is bindings else replace_bindings(updated)
+    if is_dataclass(node) and not isinstance(node, type):
+        changed = {}
+        for field in fields(node):
+            original = getattr(node, field.name)
+            updated = _replace_fixed_parameters(original, updates, replacements)
+            if updated is not original:
+                if not field.init:
+                    raise TypeError(
+                        f"cannot replace Parameter in non-init field {field.name!r} "
+                        f"of {type(node).__name__}"
+                    )
+                changed[field.name] = updated
+        return node if not changed else replace(node, **changed)
+    if isinstance(node, tuple):
+        updated = tuple(
+            _replace_fixed_parameters(item, updates, replacements) for item in node
+        )
+        return (
+            node
+            if all(a is b for a, b in zip(updated, node, strict=True))
+            else updated
+        )
+    if isinstance(node, list):
+        updated = [
+            _replace_fixed_parameters(item, updates, replacements) for item in node
+        ]
+        return (
+            node
+            if all(a is b for a, b in zip(updated, node, strict=True))
+            else updated
+        )
+    if isinstance(node, dict):
+        updated = {
+            key: _replace_fixed_parameters(item, updates, replacements)
+            for key, item in node.items()
+        }
+        return (
+            node
+            if all(updated[key] is item for key, item in node.items())
+            else updated
+        )
+    return node
