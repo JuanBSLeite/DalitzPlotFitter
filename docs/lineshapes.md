@@ -228,6 +228,38 @@ the polar coordinates from the interpolated complex value. A QMI declaration
 must provide exactly one complete parameter set: either `magnitudes` and
 `phases`, or `real_parts` and `imaginary_parts`.
 
+### Per-knot CP violation
+
+Cartesian knots may be the real/imaginary parts of a `CPRealImag`, so that every
+knot carries its own `(x, y, dx, dy)` and the node value for charge `q = ±1` is
+`(x + q dx) + i (y + q dy)`:
+
+```python
+nodes = [
+    CPRealImag(
+        Parameter.dynamics(f"S.node_{i:02d}.x", x0, owner="S"),
+        Parameter.dynamics(f"S.node_{i:02d}.y", y0, owner="S"),
+        Parameter.dynamics(f"S.node_{i:02d}.dx", 0.0, owner="S"),
+        Parameter.dynamics(f"S.node_{i:02d}.dy", 0.0, owner="S"),
+    )
+    for i, (x0, y0) in enumerate(seed)
+]
+
+def qmi_for(charge):
+    bound = [node.for_charge(charge) for node in nodes]
+    return QMI(knots, real_parts=tuple(n.real_part for n in bound),
+               imaginary_parts=tuple(n.imag_part for n in bound))
+```
+
+Build one `QMI` per charge (`qmi_for(+1)` for the B+ model, `qmi_for(-1)` for B-);
+both share the same parameters, so the S-wave `A_CP` and phase difference are
+free functions of the mass. Give the `Resonance` a fixed unit coefficient
+(`RealImag(1.0, 0.0)`) rather than a free one -- a free global coefficient would
+be degenerate with the nodes. `CPRealImag.real_part`/`imag_part` expose
+`parameters` and `resolve(values)`, so these entries are collected as fit
+parameters and differentiated like ordinary `Parameter` knots. The node
+parameters must be `Parameter.dynamics` with the component owner.
+
 ### Optional QMI knot smoothing
 
 All four interpolation modes support the same **optional NLL penalty**:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Literal, Mapping
 
 import jax.numpy as jnp
 
@@ -62,6 +62,47 @@ class CPRealImag:
         """Return the same shared parameterization for the requested charge."""
 
         return CPRealImag(self.x, self.y, self.dx, self.dy, charge=charge)
+
+    @property
+    def real_part(self) -> "CPRealImagPart":
+        """Real part of `value`, resolvable like a scalar fit parameter.
+
+        Intended for per-knot CP violation in ``QMI(real_parts=...)``: build one
+        ``CPRealImag`` per knot, call ``for_charge(q)`` and pass
+        ``coefficient.real_part`` / ``coefficient.imag_part`` for that charge.
+        """
+
+        return CPRealImagPart(self, "real")
+
+    @property
+    def imag_part(self) -> "CPRealImagPart":
+        """Imaginary part of `value`; see `real_part`."""
+
+        return CPRealImagPart(self, "imag")
+
+
+@dataclass(frozen=True)
+class CPRealImagPart:
+    """Real or imaginary part of a `CPRealImag` for its own `charge`.
+
+    Exposes ``parameters`` and ``resolve(values)`` so it can stand wherever a
+    plugin accepts a scalar fit parameter (e.g. ``QMI`` Cartesian knots).
+    """
+
+    coefficient: CPRealImag
+    part: Literal["real", "imag"]
+
+    def __post_init__(self) -> None:
+        if self.part not in ("real", "imag"):
+            raise ValueError("part must be 'real' or 'imag'")
+
+    @property
+    def parameters(self) -> tuple[object, ...]:
+        return self.coefficient.parameters
+
+    def resolve(self, values: Mapping[str, object] | None = None):
+        value = self.coefficient.value(values)
+        return jnp.real(value) if self.part == "real" else jnp.imag(value)
 
 
 __all__ = ["CPRealImag"]

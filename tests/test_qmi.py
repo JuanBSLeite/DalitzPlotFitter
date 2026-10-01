@@ -930,3 +930,59 @@ def test_component_normalization_is_equivalent_to_absorbing_scale_into_fixed_coe
         rtol=2e-12,
         atol=2e-12,
     )
+
+
+def test_qmi_per_knot_cp_realimag_nodes_give_charge_dependent_knots():
+    from jaxpwa import CPRealImag
+    from jaxpwa.dynamics.context import resolve_value
+
+    knots = (0.30, 0.60, 0.90)
+    nodes = tuple(
+        CPRealImag(
+            Parameter.dynamics(f"S.x_{i}", 1.0 + i, owner="S"),
+            Parameter.dynamics(f"S.y_{i}", 0.5 - i, owner="S"),
+            Parameter.dynamics(f"S.dx_{i}", 0.1 * i, owner="S"),
+            Parameter.dynamics(f"S.dy_{i}", -0.05 * i, owner="S"),
+        )
+        for i in range(3)
+    )
+
+    def lineshape(charge):
+        bound = [node.for_charge(charge) for node in nodes]
+        return QMI(
+            knots=knots,
+            real_parts=tuple(node.real_part for node in bound),
+            imaginary_parts=tuple(node.imag_part for node in bound),
+            interpolation="linear",
+        )
+
+    values = {"S.dx_1": 0.3}
+    for charge in (+1, -1):
+        qmi = resolve_value(lineshape(charge), values)
+        out = qmi(jnp.asarray(knots), _context())
+        dx = (0.0, 0.3, 0.2)
+        dy = (0.0, -0.05, -0.1)
+        expected = jnp.asarray(
+            [
+                complex(1.0 + i + charge * dx[i], 0.5 - i + charge * dy[i])
+                for i in range(3)
+            ]
+        )
+        assert bool(jnp.allclose(out, expected, atol=1e-12))
+
+    # All 4 parameters of every node are collected as fit parameters.
+    from jaxpwa.decay import _collect_parameters
+
+    assert {p.name for p in _collect_parameters(lineshape(+1))} == {
+        f"S.{n}_{i}" for n in ("x", "y", "dx", "dy") for i in range(3)
+    }
+
+    # Gradient reaches x (CP-even) and dx (CP-odd) with opposite dx sign by charge.
+    def amp_at_knot1(charge, x1, dx1):
+        qmi = resolve_value(lineshape(charge), {"S.x_1": x1, "S.dx_1": dx1})
+        return jnp.real(qmi(jnp.asarray([0.60]), _context())[0])
+
+    g_plus = jax.grad(amp_at_knot1, argnums=(1, 2))(+1, 2.0, 0.3)
+    g_minus = jax.grad(amp_at_knot1, argnums=(1, 2))(-1, 2.0, 0.3)
+    assert float(g_plus[0]) == 1.0 and float(g_minus[0]) == 1.0
+    assert float(g_plus[1]) == 1.0 and float(g_minus[1]) == -1.0
