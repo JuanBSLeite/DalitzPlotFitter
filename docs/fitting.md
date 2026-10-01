@@ -561,9 +561,9 @@ The project RBW convention is
 
 With `rho(770)=1+0i` retained as the reference coefficient, the E791 examples account for the propagator-sign convention by shifting the constant non-resonant phase by 180 degrees.
 
-The canonical E791 workflows are
-`notebooks/01_e791_toy_fit.ipynb` and
-`notebooks/02_e791_efficiency_background_fit.ipynb`.
+The step-by-step fitting workflow is
+`notebooks/tutorials/tutorial_02_first_fit.ipynb`, with efficiency and backgrounds added in
+`notebooks/tutorials/tutorial_04_acceptance_and_backgrounds.ipynb`.
 
 ## Fit fractions
 
@@ -622,7 +622,7 @@ autodiff (the same VJP construction as
 to floating-point precision with no step-size tuning and no truncation
 error. Reverse mode is also the efficient *direction* here: a fit fraction
 vector has far fewer entries (one per component) than a QMI-heavy model has
-free parameters -- `13_b2kkk_cpvfit_qmi.ipynb`'s S_QMI alone contributes on
+free parameters -- the S-wave QMI of a `B+ -> K+K-K+` CP fit alone contributes on
 the order of a hundred floating knot magnitudes/phases -- so the cost scales
 with the output count, not with how many parameters float.
 
@@ -633,7 +633,7 @@ resulting backward function per output, in an ordinary Python loop. For a
 handful of outputs this is a minor difference in *speed* -- but it is not a
 minor difference in *memory*. `fit_fractions`'s reverse pass touches the
 normalization-matrix computation for every floating dynamics parameter (a
-QMI knot, in `13_b2kkk_cpvfit_qmi.ipynb`), which is comparatively heavy
+QMI knot, in that `B+ -> K+K-K+` fit), which is comparatively heavy
 because it is built from the full normalization sample; `vmap`-batching
 that backward pass across every output row at once multiplies an already
 sizeable per-row intermediate by the output count *simultaneously*, which
@@ -755,7 +755,7 @@ propagation:
   alternative in that regime.
 - Gaussian-constrained parameters (`GaussianConstraint`, e.g.
   `rho0_1450`/`rho0_1700`/`phi1020`/`chic0` mass and width in
-  `13_b2kkk_cpvfit_qmi.ipynb`) need no special handling: the constraint is
+  the `B+ -> K+K-K+` QMI CP fit) need no special handling: the constraint is
   part of the NLL that HESSE differentiates, so its effect on
   `Cov(theta_hat)` -- and hence on every propagated fit-fraction error -- is
   already included automatically, whether or not that parameter is fixed.

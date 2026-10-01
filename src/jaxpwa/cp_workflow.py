@@ -534,7 +534,12 @@ class CPFitSession:
         )
         return plus if charge == "plus" else minus
 
-    def plot_projection(self, result, variable="s13", *, bins=60, range=None, show_components=True, show_pulls=False, log_scale=False, projection_size=250_000, projection_seed=20260901, folded=False, partner_variable=None, fold_side="low", axes=None):
+    def plot_projection(
+        self, result, variable="s13", *, bins=60, range=None,
+        show_components=True, show_pulls=False, log_scale=False,
+        projection_size=250_000, projection_seed=20260901, folded=False,
+        partner_variable=None, fold_side="low", selection=None, axes=None,
+    ):
         """Plot smooth B+/B- projections without histogramming quadrature nodes.
 
         Two weighted phase-space MC samples are used only for rendering. Their
@@ -547,6 +552,13 @@ class CPFitSession:
         subplot* (B+ and B- are never mixed); see
         ``FitSession.plot_projection`` for the identical-daughter convention
         this exploits.
+
+        ``selection(data)`` may return a boolean vector selecting a Dalitz
+        region from the sample's invariant/momentum dictionary. The same cut
+        is applied to each charge's data and rendering MC. Component weights
+        are normalized on the full MC sample before selection: regional plots
+        retain their predicted yields, rather than being rescaled to the
+        selected data count. ``range`` only limits the projected x axis.
 
         ``show_pulls=True`` adds a ``(observed-expected)/sqrt(expected)`` panel
         below each charge's histogram, sharing that column's x axis. It builds
@@ -564,6 +576,22 @@ class CPFitSession:
                 "show_pulls=True builds its own figure layout; pass axes=None"
             )
         fold_fn = np.minimum if fold_side == "low" else np.maximum
+        selection_masks = {}
+
+        def _selection_mask(sample):
+            key = id(sample)
+            if key not in selection_masks:
+                mask = (
+                    np.ones(sample.size, dtype=bool) if selection is None
+                    else np.asarray(selection(sample.as_dict()))
+                )
+                if mask.shape != (sample.size,) or mask.dtype != np.bool_:
+                    raise ValueError(
+                        "projection selection must return a boolean vector "
+                        f"of shape ({sample.size},)"
+                    )
+                selection_masks[key] = mask
+            return selection_masks[key]
 
         def _folded_values(sample):
             values_ = np.asarray(getattr(sample, variable))
@@ -574,7 +602,8 @@ class CPFitSession:
 
         values = self.result_values(result)
         combined = np.concatenate([
-            _folded_values(d) for d in (self.plus_data, self.minus_data)
+            _folded_values(d)[_selection_mask(d)]
+            for d in (self.plus_data, self.minus_data)
         ])
         if range is None and combined.size == 0:
             raise ValueError("provide range when both charge datasets are empty")
@@ -609,7 +638,7 @@ class CPFitSession:
             axes, pulls_axes, ("plus", "minus"),
             (self.plus_data, self.minus_data), (plus_components, minus_components),
         ):
-            dv = _folded_values(data)
+            dv = _folded_values(data)[_selection_mask(data)]
             unit = r"GeV$^2$" if variable in ("s12","s13","s23") else ""
             _, observed, _, _ = plot_binned_data(
                 dv, bins=edges, ax=ax,
@@ -618,8 +647,11 @@ class CPFitSession:
             )
             total = np.zeros(bins)
             for name, sample, weights in components:
-                cv = _folded_values(sample)
-                counts, _ = np.histogram(cv, bins=edges, weights=np.asarray(weights))
+                mask = _selection_mask(sample)
+                cv = _folded_values(sample)[mask]
+                counts, _ = np.histogram(
+                    cv, bins=edges, weights=np.asarray(weights)[mask]
+                )
                 total += counts
                 if show_components:
                     ax.stairs(counts, edges, label=name)

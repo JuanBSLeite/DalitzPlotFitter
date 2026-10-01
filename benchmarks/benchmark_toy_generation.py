@@ -60,11 +60,13 @@ class CountingModel:
         cell_probabilities,
         grid_shape,
         seed=None,
+        integration_weights=True,
     ):
         self.phase_space_calls += 1
         self.phase_space_points += int(size)
         return self._model.generate_stratified_phase_space(
             size,
+            integration_weights=integration_weights,
             cell_probabilities=cell_probabilities,
             grid_shape=grid_shape,
             seed=seed,

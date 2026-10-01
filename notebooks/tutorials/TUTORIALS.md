@@ -1,6 +1,6 @@
 # Learn Jax-PWA
 
-A progressive course in English, based on the [public API catalog](../docs/catalog.md).
+A progressive course in English, based on the [public API catalog](../../docs/catalog.md).
 Each notebook contains explanations, executable examples, diagnostic checks and exercises.
 Start with lessons 1–2; proceed to normalization before adapting a fit to your own data.
 Every lesson is self-contained and generates its own data. The models are illustrative,
@@ -37,8 +37,8 @@ separate approximations. No remote data, GPU, or ROOT installation is required.
 | 7 | [From ROOT events to a reproducible fit](tutorial_07_root_io.ipynb) | write_phase_space_sample, read_phase_space_sample, FitSession.from_root |
 | 8 | [Como usar o QMI](tutorial_08_qmi.ipynb) | QMI polar/cartesiano, interpolação, uso em um modelo de Dalitz |
 | 9 | [Goodness of fit](tutorial_09_goodness_of_fit.ipynb) | BinnedChi2Result, chi2 1D/2D, point_to_point_dissimilarity, plot_pulls |
-| 10 | [QMI S-wave isobar closure](tutorial_08_qmi_isobar_closure.ipynb) | QMI, magnitude/phase recovery, closure diagnostics |
-| 11 | [QMI Cartesian isobar closure](tutorial_09_qmi_cartesian_isobar_closure.ipynb) | Cartesian QMI nodes, coefficient recovery, fit validation |
+| 10 | [QMI S-wave isobar closure](../validation/b2pipipi_qmi_isobar_closure_no_cp_mag_phase.ipynb) | QMI, magnitude/phase recovery, closure diagnostics |
+| 11 | [QMI Cartesian isobar closure](../validation/b2pipipi_qmi_isobar_closure_no_cp.ipynb) | Cartesian QMI nodes, coefficient recovery, fit validation |
 | 12 | [QMI2D: campo de Dalitz e ajuste de toy](tutorial_10_qmi2d_dalitz_closure.ipynb) | QMI2D, DalitzAmplitude, máscara física, folding, interpolação e ajuste de magnitude/fase |
 
 | 13 | [Line shapes opcionais com SymPy](tutorial_11_sympy_lineshapes.ipynb) | SympyLineshape, parâmetros explícitos, gradientes, ajuste Asimov e JSON; requer o extra `sympy` |
@@ -114,16 +114,16 @@ Use these existing notebooks and documents for extensions:
 | Topic | Next example or reference |
 |---|---|
 | Four-body amplitudes and toy closure | [Four-body closure](tutorial_66_four_body_closure.ipynb), [physics and scope](../../docs/four_body.md) |
-| Multiple backgrounds and extended fits | [Multiple backgrounds](08_b2kpipi_multiple_backgrounds.ipynb), [background conventions](../docs/backgrounds_and_vetoes.md) |
-| Detector migration / self-cross-feed | [SCF migration](07_b2kpipi_scf_migration.ipynb), [SCF with veto](12_b2kpipi_scf_with_veto.ipynb) |
-| Discriminating variables | [Dalitz plus discriminants](10_b2kpipi_discriminating_variables.ipynb) |
-| Square-Dalitz histogram maps | [Efficiency and background maps](15_b2kpipi_square_dalitz_eff_background.ipynb) |
-| Repeated toy generation | [Toy generation](18_user_friendly_toy_generation.ipynb), [prepared generators](../docs/toy_generation.md) |
-| One-dimensional resolution | [PDF convolution](20_pdf_convolution_resolution.ipynb) |
-| Identical-particle folding | [Folded CP example](23_b2pipipi_cp_folded_dalitz_fit.ipynb) |
-| Alternative lineshapes, QMI and QMI2D | [Lineshape documentation](../docs/lineshapes.md), [dynamics structure](../docs/dynamics_structure.md) |
+| Multiple backgrounds and extended fits | [Multiple backgrounds](../tests/b2kpipi_multiple_backgrounds.ipynb), [background conventions](../../docs/backgrounds_and_vetoes.md) |
+| Detector migration / self-cross-feed | [SCF migration](../tests/b2kpipi_scf_migration.ipynb), [SCF with veto](../tests/b2kpipi_scf_with_veto.ipynb) |
+| Discriminating variables | [Discriminant PDFs](tutorial_42_discriminant_pdfs.ipynb) |
+| Square-Dalitz histogram maps | [Efficiency and background maps](../tests/b2kpipi_square_dalitz_eff_background.ipynb) |
+| Repeated toy generation | [Toy generation](../tests/user_friendly_toy_generation.ipynb), [prepared generators](../../docs/toy_generation.md) |
+| One-dimensional resolution | [PDF convolution](../tests/pdf_convolution_resolution.ipynb) |
+| Identical-particle folding | [Folded histogram maps](tutorial_35_histogram_maps_from_arrays.ipynb), [folding conventions](../../docs/backgrounds_and_vetoes.md) |
+| Alternative lineshapes, QMI and QMI2D | [Lineshape documentation](../../docs/lineshapes.md), [dynamics structure](../../docs/dynamics_structure.md) |
 
-The `data_analyses/` and `benchmark/` directories contain analysis work and numerical
-reproductions rather than introductory lessons. Consult the
-[convention review](../docs/reviews/paper_isobar_conventions.md) for the remaining
+The `../examples/` and `../validation/` directories contain worked analyses, closure studies and
+numerical reproductions rather than introductory lessons. Consult the
+[convention review](../../docs/reviews/paper_isobar_conventions.md) for the remaining
 publication-reproduction discrepancies in SigmaPole, RhoOmegaMixing and PipiKKRescattering.

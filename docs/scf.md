@@ -233,7 +233,10 @@ The test suite verifies that:
 6. the sparse operator works under JAX JIT and automatic differentiation;
 7. reconstructed-space vetoes give zero PDF in vetoed bins and trigger a new accepted-signal normalization.
 
-## Tutorial notebooks
+## Notebooks
 
-- `07_b2kpipi_scf_migration.ipynb`: standalone SCF migration and probability conservation.
-- `12_b2kpipi_scf_with_veto.ipynb`: SCF migration combined with a reconstructed-space veto, including before/after density plots.
+See also `notebooks/tutorials/tutorial_33_scf_map_dense.ipynb` and
+`notebooks/tutorials/tutorial_34_sparse_migration.ipynb`.
+
+- `notebooks/tests/b2kpipi_scf_migration.ipynb`: standalone SCF migration and probability conservation.
+- `notebooks/tests/b2kpipi_scf_with_veto.ipynb`: SCF migration combined with a reconstructed-space veto, including before/after density plots.

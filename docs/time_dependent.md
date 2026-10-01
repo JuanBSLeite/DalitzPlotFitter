@@ -599,11 +599,12 @@ supplied as numerical inputs here. This implementation validates the time
 formalism and a controlled example; it does not certify reproduction of Belle's
 experimental result.
 
-The [full-component Belle notebook](../notebooks/benchmark/belle_2014_d0_kspipi_time_dependent.ipynb)
-transcribes all 15 components and runs a fit-fraction audit and Asimov fit.
-Its sizeable remaining FF discrepancies are recorded in the
-[validation report](reviews/20260923_time_dependent_belle.md); do not treat it
-as an already closed reproduction of Belle's amplitude conventions.
+A full-component Belle transcription (all 15 components, fit-fraction audit and Asimov fit)
+was validated earlier; that notebook is no longer in the repository, but its sizeable remaining
+FF discrepancies are recorded in the
+[validation report](reviews/20260923_time_dependent_belle.md). Do not treat the Belle amplitude
+conventions as an already closed reproduction. The time-dependent API is exercised in
+[`babar_2008_d0_kspipi.ipynb`](../notebooks/examples/babar_2008_d0_kspipi.ipynb).
 
 ## Joint time-dependent toy generation
 
@@ -703,9 +704,7 @@ an additional true-time to observed-time response step. Background generation
 is separate and remains the responsibility of `ToyBackground`,
 `TimeDependentBackgroundSpec` or `TimeDependentBackgroundCategory`.
 
-The production-and-tag example
-[`time_dependent_toy_production_tags.ipynb`](../notebooks/benchmark/time_dependent_toy_production_tags.ipynb)
-also provides four diagnostics: the Dalitz population, time distributions by
-observed tag, the true/observed tag migration matrix, and the wrong-tag rate in
+Useful diagnostics of a production-and-tag toy are the Dalitz population, time
+distributions by observed tag, the true/observed tag migration matrix, and the wrong-tag rate in
 time bins. These plots diagnose the generated sample; they are not substitutes
 for the likelihood projections, which evaluate the analytic model curves.

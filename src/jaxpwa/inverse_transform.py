@@ -2,146 +2,166 @@
 
 from __future__ import annotations
 
+import math
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 
-from jaxpwa.kinematics import PhaseSpaceSample, square_dalitz_to_invariants
+from jaxpwa.kinematics import (
+    PhaseSpaceSample,
+    dalitz_s13_limits,
+    square_dalitz_to_invariants,
+)
+from jaxpwa.kinematics.phase_space_mc import _momenta_from_invariants
 
 DensityFunction = Callable[[dict[str, object]], object]
 
 
-def _kallen(x, y, z):
-    return x**2 + y**2 + z**2 - 2.0 * x * y - 2.0 * x * z - 2.0 * y * z
-
-
-def _s13_limits(
-    s12: np.ndarray,
-    *,
-    mother_mass: float,
-    masses: tuple[float, float, float],
-) -> tuple[np.ndarray, np.ndarray]:
-    """NumPy version of the exact physical ``s13`` limits at fixed ``s12``."""
-
-    s12 = np.asarray(s12, dtype=float)
-    m1, m2, m3 = masses
-    root_s12 = np.sqrt(s12)
-    e1 = (s12 + m1**2 - m2**2) / (2.0 * root_s12)
-    e3 = (mother_mass**2 - s12 - m3**2) / (2.0 * root_s12)
-    q = np.sqrt(np.maximum(_kallen(s12, m1**2, m2**2), 0.0)) / (2.0 * root_s12)
-    p = np.sqrt(np.maximum(_kallen(mother_mass**2, s12, m3**2), 0.0)) / (2.0 * root_s12)
-    common = m1**2 + m3**2 + 2.0 * e1 * e3
-    spread = 2.0 * q * p
-    return common - spread, common + spread
-
-
-def _cumulative_trapezoid(
-    values: np.ndarray, coordinates: np.ndarray, *, axis: int
-) -> np.ndarray:
+def _cumulative_trapezoid(values, coordinates, *, axis: int) -> jax.Array:
     """Small dependency-free cumulative trapezoidal integrator."""
 
-    values = np.asarray(values, dtype=float)
-    coordinates = np.asarray(coordinates, dtype=float)
-    moved = np.moveaxis(values, axis, -1)
+    values = jnp.asarray(values)
+    coordinates = jnp.asarray(coordinates)
+    moved = jnp.moveaxis(values, axis, -1)
     if moved.shape[-1] != coordinates.size:
         raise ValueError("integration coordinate length does not match density axis")
-    dx = np.diff(coordinates)
+    dx = jnp.diff(coordinates)
     increments = 0.5 * (moved[..., :-1] + moved[..., 1:]) * dx
-    result = np.zeros_like(moved)
-    result[..., 1:] = np.cumsum(increments, axis=-1)
-    return np.moveaxis(result, -1, axis)
+    result = jnp.concatenate(
+        (jnp.zeros_like(moved[..., :1]), jnp.cumsum(increments, axis=-1)), axis=-1
+    )
+    return jnp.moveaxis(result, -1, axis)
 
 
-def _inverse_row(
-    cdf: np.ndarray, coordinate: np.ndarray, quantiles: np.ndarray
-) -> np.ndarray:
-    cdf = np.maximum.accumulate(np.asarray(cdf, dtype=float))
-    coordinate = np.asarray(coordinate, dtype=float)
-    if not np.isfinite(cdf[-1]) or cdf[-1] <= 0.0:
-        return np.interp(quantiles, (0.0, 1.0), (coordinate[0], coordinate[-1]))
-    cdf = cdf / cdf[-1]
+def _inverse_row(cdf, coordinate, quantiles) -> jax.Array:
+    cdf = jax.lax.cummax(jnp.asarray(cdf), axis=0)
+    coordinate = jnp.asarray(coordinate)
+    quantiles = jnp.asarray(quantiles)
+    total = cdf[-1]
+    valid = jnp.isfinite(total) & (total > 0.0)
+    cdf = cdf / jnp.where(valid, total, 1.0)
     # Search on the full CDF: a plateau represents a jump of the inverse,
     # not a segment to interpolate across a forbidden interval.
-    index = np.searchsorted(cdf, quantiles, side="right") - 1
+    index = jnp.searchsorted(cdf, quantiles, side="right") - 1
     # The upper endpoint ends at the first CDF value of one, before any
     # trailing zero-density interval.
-    index = np.where(
-        quantiles >= 1.0, np.searchsorted(cdf, 1.0, side="left") - 1, index
+    index = jnp.where(
+        quantiles >= 1.0, jnp.searchsorted(cdf, 1.0, side="left") - 1, index
     )
-    index = np.clip(index, 0, cdf.size - 2)
+    index = jnp.clip(index, 0, cdf.size - 2)
     delta = cdf[index + 1] - cdf[index]
-    fraction = np.divide(
-        quantiles - cdf[index], delta, out=np.zeros_like(quantiles), where=delta > 0
+    fraction = jnp.where(
+        delta > 0, (quantiles - cdf[index]) / jnp.where(delta > 0, delta, 1.0), 0.0
     )
-    return coordinate[index] + np.clip(fraction, 0, 1) * (
+    inverse = coordinate[index] + jnp.clip(fraction, 0, 1) * (
         coordinate[index + 1] - coordinate[index]
     )
+    fallback = jnp.interp(
+        quantiles, jnp.asarray((0.0, 1.0)), coordinate[jnp.asarray((0, -1))]
+    )
+    return jnp.where(valid, inverse, fallback)
 
 
-def _momenta_from_invariants(
-    s12: np.ndarray,
-    s13: np.ndarray,
-    s23: np.ndarray,
+@jax.jit
+def _rosenblatt_tables(
+    density: jax.Array,
+    v_grid: jax.Array,
+    m12_grid: jax.Array,
+    row_jacobian: jax.Array,
+    quantile_levels: jax.Array,
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    """Build the marginal CDF and per-row conditional inverse CDFs at once.
+
+    ``row_jacobian`` maps each row's ``v`` integral to the marginal density
+    (``2*m12*(s13_max-s13_min)`` on the Dalitz plane, one on the square).
+    Returns ``(valid density, total integral, marginal CDF, quantile table)``.
+    """
+
+    valid = jnp.all(jnp.isfinite(density) & (density >= 0.0))
+    conditional_cumulative = _cumulative_trapezoid(density, v_grid, axis=1)
+    marginal_density = row_jacobian * conditional_cumulative[:, -1]
+    marginal_cumulative = _cumulative_trapezoid(marginal_density, m12_grid, axis=0)
+    total = marginal_cumulative[-1]
+    marginal_cdf = jax.lax.cummax(marginal_cumulative / total, axis=0)
+    # One conditional inverse CDF per m12 row.
+    conditional_quantiles = jax.vmap(_inverse_row, in_axes=(0, None, None))(
+        conditional_cumulative, v_grid, quantile_levels
+    )
+    return valid, total, marginal_cdf, conditional_quantiles
+
+
+@jax.jit
+def _support_summary(density: jax.Array) -> tuple[jax.Array, jax.Array]:
+    """Return (all finite and non-negative, number of positive values)."""
+
+    return jnp.all(jnp.isfinite(density) & (density >= 0)), jnp.sum(density > 0)
+
+
+@partial(
+    jax.jit,
+    static_argnames=("size", "mother_mass", "masses", "square_dalitz_pair"),
+)
+def _draw_invariants(
+    key: jax.Array,
+    marginal_cdf: jax.Array,
+    marginal_m12: jax.Array,
+    m12_grid: jax.Array,
+    quantile_levels: jax.Array,
+    conditional_quantiles: jax.Array,
     *,
+    size: int,
     mother_mass: float,
     masses: tuple[float, float, float],
-    rng: np.random.Generator,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Reconstruct isotropically oriented parent-rest-frame four-momenta."""
+    square_dalitz_pair: tuple[int, int] | None,
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """Draw invariants through the bilinearly interpolated inverse CDF tables."""
 
-    s12 = np.asarray(s12, dtype=float)
-    s13 = np.asarray(s13, dtype=float)
-    s23 = np.asarray(s23, dtype=float)
-    size = s12.size
-    m1, m2, m3 = masses
-    mother2 = mother_mass**2
+    key_marginal, key_conditional = jax.random.split(key)
+    dtype = m12_grid.dtype
+    u_marginal = jax.random.uniform(key_marginal, (size,), dtype=dtype)
+    u_conditional = jax.random.uniform(key_conditional, (size,), dtype=dtype)
+    m12 = _inverse_row(marginal_cdf, marginal_m12, u_marginal)
 
-    e1 = (mother2 + m1**2 - s23) / (2.0 * mother_mass)
-    e2 = (mother2 + m2**2 - s13) / (2.0 * mother_mass)
-    e3 = (mother2 + m3**2 - s12) / (2.0 * mother_mass)
-    p1_mag = np.sqrt(np.maximum(e1**2 - m1**2, 0.0))
-    p2_mag = np.sqrt(np.maximum(e2**2 - m2**2, 0.0))
-
-    pair_dot = 0.5 * (s12 - m1**2 - m2**2)
-    spatial_dot = e1 * e2 - pair_dot
-    denominator = p1_mag * p2_mag
-    cos12 = np.divide(
-        spatial_dot,
-        denominator,
-        out=np.ones_like(spatial_dot),
-        where=denominator > 0.0,
+    row = jnp.searchsorted(m12_grid, m12, side="right") - 1
+    row = jnp.clip(row, 0, m12_grid.size - 2)
+    m0 = m12_grid[row]
+    m1_grid = m12_grid[row + 1]
+    row_fraction = jnp.where(
+        m1_grid > m0, (m12 - m0) / jnp.where(m1_grid > m0, m1_grid - m0, 1.0), 0.0
     )
-    cos12 = np.clip(cos12, -1.0, 1.0)
-    sin12 = np.sqrt(np.maximum(1.0 - cos12**2, 0.0))
 
-    cos_theta = 2.0 * rng.random(size) - 1.0
-    phi = 2.0 * np.pi * rng.random(size)
-    sin_theta = np.sqrt(np.maximum(1.0 - cos_theta**2, 0.0))
-    n1 = np.stack((sin_theta * np.cos(phi), sin_theta * np.sin(phi), cos_theta), axis=1)
+    q_position = u_conditional * (quantile_levels.size - 1)
+    q_index = jnp.floor(q_position).astype(jnp.int32)
+    q_index = jnp.clip(q_index, 0, quantile_levels.size - 2)
+    q_fraction = q_position - q_index
 
-    reference = np.zeros_like(n1)
-    use_x = np.abs(n1[:, 2]) > 0.9
-    reference[:, 2] = 1.0
-    reference[use_x] = np.asarray([1.0, 0.0, 0.0])
-    e_perp1 = np.cross(reference, n1)
-    norm = np.linalg.norm(e_perp1, axis=1)
-    e_perp1 = e_perp1 / norm[:, None]
-    e_perp2 = np.cross(n1, e_perp1)
+    table = conditional_quantiles
+    v00 = table[row, q_index]
+    v01 = table[row, q_index + 1]
+    v10 = table[row + 1, q_index]
+    v11 = table[row + 1, q_index + 1]
+    v0 = v00 + q_fraction * (v01 - v00)
+    v1 = v10 + q_fraction * (v11 - v10)
+    v = jnp.clip(v0 + row_fraction * (v1 - v0), 0.0, 1.0)
 
-    alpha = 2.0 * np.pi * rng.random(size)
-    transverse = np.cos(alpha)[:, None] * e_perp1 + np.sin(alpha)[:, None] * e_perp2
-    n2 = cos12[:, None] * n1 + sin12[:, None] * transverse
-
-    spatial1 = p1_mag[:, None] * n1
-    spatial2 = p2_mag[:, None] * n2
-    spatial3 = -(spatial1 + spatial2)
-    p1 = np.concatenate((e1[:, None], spatial1), axis=1)
-    p2 = np.concatenate((e2[:, None], spatial2), axis=1)
-    p3 = np.concatenate((e3[:, None], spatial3), axis=1)
-    return p1, p2, p3
+    if square_dalitz_pair is not None:
+        return square_dalitz_to_invariants(
+            m12,
+            v,
+            mother_mass=mother_mass,
+            masses=masses,
+            pair=square_dalitz_pair,
+        )
+    s12 = m12**2
+    low, high = dalitz_s13_limits(s12, mother_mass=mother_mass, masses=masses)
+    s13 = low + v * (high - low)
+    m1, m2, m3 = masses
+    s23 = mother_mass**2 + m1**2 + m2**2 + m3**2 - s12 - s13
+    return s12, s13, s23
 
 
 @dataclass(frozen=True)
@@ -168,11 +188,11 @@ class DalitzInverseTransformSampler:
 
     mother_mass: float
     masses: tuple[float, float, float]
-    m12_grid: np.ndarray
-    marginal_cdf: np.ndarray
-    marginal_m12: np.ndarray
-    quantile_levels: np.ndarray
-    conditional_quantiles: np.ndarray
+    m12_grid: jax.Array
+    marginal_cdf: jax.Array
+    marginal_m12: jax.Array
+    quantile_levels: jax.Array
+    conditional_quantiles: jax.Array
     density_function: DensityFunction = field(repr=False, compare=False)
     square_dalitz_pair: tuple[int, int] | None = None
 
@@ -201,19 +221,22 @@ class DalitzInverseTransformSampler:
             )
         if mother_mass <= sum(masses):
             raise ValueError("mother mass must exceed the three-body threshold")
+        mother_mass = float(mother_mass)
+        masses = tuple(float(value) for value in masses)
+        resolution = int(resolution)
 
-        v_grid = np.linspace(0.0, 1.0, int(resolution), dtype=float)
+        v_grid = jnp.linspace(0.0, 1.0, resolution)
         if square_dalitz_pair is not None:
             # The same Rosenblatt tables can use (m', theta') directly. The
             # density callback then supplies density per square area, avoiding
             # h/J singularities at the physical Dalitz boundary.
-            m12_grid = np.linspace(0.0, 1.0, int(resolution))
-            mp, tp = np.meshgrid(m12_grid, v_grid, indexing="ij")
+            m12_grid = jnp.linspace(0.0, 1.0, resolution)
+            mp, tp = jnp.meshgrid(m12_grid, v_grid, indexing="ij")
             # At exactly m'=0 or 1 the helicity angle is undefined. Evaluate
             # one-sided limits inside the domain while keeping CDF endpoints.
             inv = square_dalitz_to_invariants(
-                np.clip(mp.ravel(), 1e-6, 1.0 - 1e-6),
-                np.clip(tp.ravel(), 1e-6, 1.0 - 1e-6),
+                jnp.clip(mp.ravel(), 1e-6, 1.0 - 1e-6),
+                jnp.clip(tp.ravel(), 1e-6, 1.0 - 1e-6),
                 mother_mass=mother_mass,
                 masses=masses,
                 pair=square_dalitz_pair,
@@ -221,70 +244,65 @@ class DalitzInverseTransformSampler:
             data = dict(zip(("s12", "s13", "s23"), inv, strict=True))
         else:
             m1, m2, m3 = masses
-            m_min = m1 + m2
-            m_max = mother_mass - m3
-            m12_grid = np.linspace(m_min, m_max, int(resolution), dtype=float)
-            m12_eval = m12_grid.copy()
-            m12_eval[0] = np.nextafter(m_min, m_max)
-            m12_eval[-1] = np.nextafter(m_max, m_min)
+            m_min = jnp.asarray(m1 + m2, dtype=v_grid.dtype)
+            m_max = jnp.asarray(mother_mass - m3, dtype=v_grid.dtype)
+            m12_grid = jnp.linspace(m_min, m_max, resolution)
+            m12_eval = (
+                m12_grid.at[0]
+                .set(jnp.nextafter(m_min, m_max))
+                .at[-1]
+                .set(jnp.nextafter(m_max, m_min))
+            )
             s12_rows = m12_eval**2
-            low, high = _s13_limits(s12_rows, mother_mass=mother_mass, masses=masses)
-            width = np.maximum(high - low, 0.0)
+            low, high = dalitz_s13_limits(
+                s12_rows, mother_mass=mother_mass, masses=masses
+            )
+            width = jnp.maximum(high - low, 0.0)
 
             s13 = low[:, None] + width[:, None] * v_grid[None, :]
             constant = mother_mass**2 + m1**2 + m2**2 + m3**2
-            s12 = np.broadcast_to(s12_rows[:, None], s13.shape)
+            s12 = jnp.broadcast_to(s12_rows[:, None], s13.shape)
             s23 = constant - s12 - s13
             data = {
-                "s12": jnp.asarray(s12.reshape(-1)),
-                "s13": jnp.asarray(s13.reshape(-1)),
-                "s23": jnp.asarray(s23.reshape(-1)),
+                "s12": s12.reshape(-1),
+                "s13": s13.reshape(-1),
+                "s23": s23.reshape(-1),
             }
         try:
-            density = np.asarray(
-                jax.device_get(jnp.asarray(density_function(data))), dtype=float
-            ).reshape((int(resolution), int(resolution)))
+            density = jnp.asarray(density_function(data), dtype=v_grid.dtype)
         except KeyError as exc:
             raise ValueError(
                 "inverse-transform toy generation supports densities expressed in "
                 "Dalitz invariants s12/s13/s23; the supplied efficiency or veto "
                 "requested another event field"
             ) from exc
-        if density.shape != (int(resolution), int(resolution)):
+        if density.size != resolution * resolution:
             raise ValueError(
                 "inverse-transform density must return one value per grid point"
             )
-        if np.any(~np.isfinite(density)) or np.any(density < 0.0):
+        density = density.reshape((resolution, resolution))
+        row_jacobian = (
+            jnp.ones_like(m12_grid)
+            if square_dalitz_pair is not None
+            else 2.0 * m12_eval * width
+        )
+        quantile_levels = jnp.linspace(0.0, 1.0, int(quantile_resolution))
+        valid, total, marginal_cdf_full, conditional_quantiles = _rosenblatt_tables(
+            density, v_grid, m12_grid, row_jacobian, quantile_levels
+        )
+        valid, total = jax.device_get((valid, total))
+        if not bool(valid):
             raise ValueError(
                 "inverse-transform density must be finite and non-negative"
             )
-
-        conditional_cumulative = _cumulative_trapezoid(density, v_grid, axis=1)
-        row_integral_v = conditional_cumulative[:, -1]
-        marginal_density = (
-            row_integral_v
-            if square_dalitz_pair is not None
-            else 2.0 * m12_eval * width * row_integral_v
-        )
-        marginal_cumulative = _cumulative_trapezoid(marginal_density, m12_grid, axis=0)
-        total = float(marginal_cumulative[-1])
-        if not np.isfinite(total) or total <= 0.0:
+        if not math.isfinite(float(total)) or float(total) <= 0.0:
             raise ValueError(
                 "inverse-transform target density has zero or invalid integral"
             )
-        marginal_cdf_full = np.maximum.accumulate(marginal_cumulative / total)
-        quantile_levels = np.linspace(0.0, 1.0, int(quantile_resolution), dtype=float)
-        conditional_quantiles = np.empty(
-            (m12_grid.size, quantile_levels.size), dtype=float
-        )
-        for row in range(m12_grid.size):
-            conditional_quantiles[row] = _inverse_row(
-                conditional_cumulative[row], v_grid, quantile_levels
-            )
 
         return cls(
-            mother_mass=float(mother_mass),
-            masses=tuple(float(value) for value in masses),
+            mother_mass=mother_mass,
+            masses=masses,
             m12_grid=m12_grid,
             marginal_cdf=marginal_cdf_full,
             marginal_m12=m12_grid,
@@ -303,26 +321,32 @@ class DalitzInverseTransformSampler:
     ) -> PhaseSpaceSample:
         if size <= 0:
             raise ValueError("size must be positive")
-        rng = np.random.default_rng(seed)
+        if seed is None:
+            seed = secrets.randbits(32)
+        key = jax.random.key(int(seed) % (2**32))
+        draw_key, momenta_key = jax.random.split(key)
         accepted = []
         remaining = size
-        for _ in range(100):
-            candidate = self._draw(remaining, rng=rng)
-            density = np.asarray(
-                jax.device_get(self.density_function(candidate.as_dict()))
-            )
+        for batch_key in jax.random.split(draw_key, 100):
+            candidate = self._draw(remaining, key=batch_key)
+            density = jnp.asarray(self.density_function(candidate.as_dict()))
             if density.shape != (remaining,):
                 raise ValueError(
                     "inverse-transform density must return one value per event"
                 )
-            if np.any(~np.isfinite(density)) or np.any(density < 0):
+            # Only two scalars reach the host; the event arrays stay on device.
+            valid, n_positive = jax.device_get(_support_summary(density))
+            if not bool(valid):
                 raise ValueError(
                     "inverse-transform density must be finite and non-negative"
                 )
-            indices = np.flatnonzero(density > 0)
-            if indices.size:
-                accepted.append(candidate.take(jnp.asarray(indices)))
-                remaining -= indices.size
+            n_positive = int(n_positive)
+            if n_positive == remaining:
+                accepted.append(candidate)
+            elif n_positive:
+                indices = jnp.flatnonzero(density > 0, size=n_positive)
+                accepted.append(candidate.take(indices))
+            remaining -= n_positive
             if remaining == 0:
                 break
         else:
@@ -331,80 +355,51 @@ class DalitzInverseTransformSampler:
                 "increase resolution or use accept-reject"
             )
         s12, s13, s23 = (
-            np.concatenate([np.asarray(getattr(sample, name)) for sample in accepted])
+            getattr(accepted[0], name)
+            if len(accepted) == 1
+            else jnp.concatenate([getattr(sample, name) for sample in accepted])
             for name in ("s12", "s13", "s23")
         )
         p1 = p2 = p3 = None
         if include_momenta:
+            mother_mass = jnp.asarray(self.mother_mass, dtype=s12.dtype)
             p1, p2, p3 = _momenta_from_invariants(
+                momenta_key,
+                mother_mass,
+                jnp.asarray(self.masses, dtype=s12.dtype),
                 s12,
                 s13,
                 s23,
-                mother_mass=self.mother_mass,
-                masses=self.masses,
-                rng=rng,
+                size=size,
             )
         return PhaseSpaceSample(
-            s12=jnp.asarray(s12),
-            s13=jnp.asarray(s13),
-            s23=jnp.asarray(s23),
-            weights=jnp.ones((size,), dtype=jnp.asarray(s12).dtype),
-            p1=None if p1 is None else jnp.asarray(p1),
-            p2=None if p2 is None else jnp.asarray(p2),
-            p3=None if p3 is None else jnp.asarray(p3),
+            s12=s12,
+            s13=s13,
+            s23=s23,
+            weights=jnp.ones((size,), dtype=s12.dtype),
+            p1=p1,
+            p2=p2,
+            p3=p3,
         )
 
-    def _draw(self, size: int, *, rng: np.random.Generator) -> PhaseSpaceSample:
-        u_marginal = rng.random(size)
-        u_conditional = rng.random(size)
-        m12 = _inverse_row(self.marginal_cdf, self.marginal_m12, u_marginal)
-
-        row = np.searchsorted(self.m12_grid, m12, side="right") - 1
-        row = np.clip(row, 0, self.m12_grid.size - 2)
-        m0 = self.m12_grid[row]
-        m1_grid = self.m12_grid[row + 1]
-        row_fraction = np.divide(
-            m12 - m0,
-            m1_grid - m0,
-            out=np.zeros_like(m12),
-            where=m1_grid > m0,
+    def _draw(self, size: int, *, key: jax.Array) -> PhaseSpaceSample:
+        s12, s13, s23 = _draw_invariants(
+            key,
+            self.marginal_cdf,
+            self.marginal_m12,
+            self.m12_grid,
+            self.quantile_levels,
+            self.conditional_quantiles,
+            size=size,
+            mother_mass=self.mother_mass,
+            masses=self.masses,
+            square_dalitz_pair=self.square_dalitz_pair,
         )
-
-        q_position = u_conditional * (self.quantile_levels.size - 1)
-        q_index = np.floor(q_position).astype(np.int64)
-        q_index = np.clip(q_index, 0, self.quantile_levels.size - 2)
-        q_fraction = q_position - q_index
-
-        table = self.conditional_quantiles
-        v00 = table[row, q_index]
-        v01 = table[row, q_index + 1]
-        v10 = table[row + 1, q_index]
-        v11 = table[row + 1, q_index + 1]
-        v0 = v00 + q_fraction * (v01 - v00)
-        v1 = v10 + q_fraction * (v11 - v10)
-        v = np.clip(v0 + row_fraction * (v1 - v0), 0.0, 1.0)
-
-        if self.square_dalitz_pair is not None:
-            s12, s13, s23 = square_dalitz_to_invariants(
-                m12,
-                v,
-                mother_mass=self.mother_mass,
-                masses=self.masses,
-                pair=self.square_dalitz_pair,
-            )
-        else:
-            s12 = m12**2
-            low, high = _s13_limits(
-                s12, mother_mass=self.mother_mass, masses=self.masses
-            )
-            s13 = low + v * (high - low)
-            m1, m2, m3 = self.masses
-            s23 = self.mother_mass**2 + m1**2 + m2**2 + m3**2 - s12 - s13
         return PhaseSpaceSample(
-            s12=jnp.asarray(s12),
-            s13=jnp.asarray(s13),
-            s23=jnp.asarray(s23),
-            weights=jnp.ones((size,), dtype=jnp.asarray(s12).dtype),
+            s12=s12,
+            s13=s13,
+            s23=s23,
+            weights=jnp.ones((size,), dtype=s12.dtype),
         )
 
 

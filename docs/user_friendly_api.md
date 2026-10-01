@@ -220,6 +220,28 @@ session.plot_projection(result, "s23", log_scale=True)
 
 The CP projections use two weighted phase-space MC rendering samples, but their signal and background weights are normalized **jointly across B+ and B-**. The plots therefore retain the same common global normalization as `CPJointNLL`; B+ and B- are not normalized independently and an integrated charge asymmetry remains visible.
 
+For a projection restricted to a Dalitz region, pass `selection` to
+`CPFitSession.plot_projection`. The callback receives the sample's dictionary
+of invariants (and momenta, when stored) and returns one boolean per event:
+
+```python
+def low_mass_region(data):
+    s_low = np.minimum(data["s13"], data["s23"])
+    return (s_low > 1.3) & (s_low < 1.8)  # GeV^2
+
+session.plot_projection(
+    result, "s13", partner_variable="s23", folded=True, fold_side="high",
+    selection=low_mass_region, show_pulls=True,
+)
+```
+
+Import NumPy as `np` for this example. The selection is applied to both data
+and rendering MC **after** normalizing the full signal/background weights.
+The plot therefore shows the model's expected count in that region; it does
+not renormalize to the selected data count. This also preserves literal
+per-charge counts when using `YieldAsymmetry`. `range` controls the plotted
+variable's window and does not impose a cut on the other Dalitz coordinate.
+
 ## Plot helpers
 
 ```python

@@ -23,7 +23,7 @@ assume the literal upstream formula is followed if the docstring says otherwise.
 ```bash
 python -m pip install -e ".[dev]"     # install with test + ruff extras
 
-pytest                                 # full suite (testpaths = tests/, ~410 tests, few minutes)
+pytest                                 # full suite (testpaths = tests/, ~770 tests, several minutes)
 pytest tests/test_rescattering2.py -v  # single file
 pytest tests/test_rescattering2.py::test_rescattering2_matches_laura_reference_points  # single test
 
@@ -39,9 +39,12 @@ python benchmarks/benchmark_time_dependent.py --resolution 20
 ```
 
 CI (`.github/workflows/tests.yml`) runs `pytest tests` on Python 3.12, 3.13, and 3.14, plus a notebook
-sanity check that parses every notebook under `notebooks/tutorials/`, `notebooks/_data_analyses/`
-and `notebooks/benchmark/` with `nbformat` and compiles (not executes) each code cell —
-`notebooks/Tests/` and `notebooks/genfit/` are scratch/informal work and not covered.
+sanity check that parses every notebook under `notebooks/tutorials/`, `notebooks/examples/`,
+`notebooks/validation/` and `notebooks/tests/` with `nbformat` and compiles (not executes) each
+code cell. The check fails if any of those directories is missing or empty, so a notebook
+reorganization must update the directory list in both `tests.yml` and `full-validation.yml`.
+Because cells are only compiled, a notebook that imports an undeclared package (e.g. `pandas`)
+or calls a renamed API still passes CI.
 `full-validation.yml` and `toy-benchmark.yml` are `workflow_dispatch`-only and
 not run on every push. There is no GPU CI; `docs/gpu_ubuntu_24_04.md` documents the manual
 WSL2/CUDA reference environment used for GPU validation.
@@ -67,7 +70,7 @@ PhaseSpaceSample (data or generated)
   -> optional efficiency/veto/SCF/backgrounds/discriminating-variable PDFs/1D convolution
   -> optional Gaussian constraints
   -> FitSession / CPFitSession (optional convenience layer)
-  -> JAX NLL + automatic gradient -> Minimizer (iminuit)
+  -> JAX NLL + automatic gradient -> Minimizer (Nesterov prefit and/or iminuit)
 ```
 
 ### Two API layers, by design
@@ -77,13 +80,21 @@ low-level public classes (`SignalPDF`, `PreparedAmplitudeCache`, `MultiBackgroun
 `CPJointNLL`, `Minimizer`) — they do not replace them. Advanced/validation work should still go
 through the low-level classes directly; see `docs/user_friendly_api.md` "Design principle".
 
+`Minimizer.fit(method="nesterov")` provides a projected, parameter-scaled
+Nesterov first-order fit. `method="nesterov-minuit"` runs that prefit before
+the existing Minuit strategy 1/2 stages. Invalid or worsened MIGRAD results
+are rejected, and a later stage cannot replace an earlier stage with a higher
+NLL. Nesterov-only results have no covariance and must not be used for
+uncertainty reporting without a separate Hessian calculation.
+
 ### One-dimensional lineshapes vs. full 2D Dalitz amplitudes
 
 `Resonance` composes a lineshape through the ordinary `lineshape(mass, context)` interface
 (`dynamics/lineshape/*.py`, one physics model per file: `relativistic_breit_wigner.py`,
-`gounaris_sakurai.py`, `flatte.py`, `pole.py` (`Pole`, `SigmaPole`), `lass.py`, `kmatrix.py`,
-`qmi.py`, `rescattering2.py`, `pipi_kk_rescattering.py`, `rho_omega.py`) combined with an
-angular factor (`dynamics/angular.py`) and Blatt-Weisskopf
+`gounaris_sakurai.py`, `flatte.py`, `babar_flatte.py`, `pole.py` (`Pole`, `SigmaPole`),
+`lass.py`, `kmatrix.py`, `qmi.py`, `rescattering2.py`, `pipi_kk_rescattering.py`, `rho_omega.py`,
+plus `sympy.py`'s `SympyLineshape` for user-written symbolic lineshapes via the optional `sympy`
+extra) combined with an angular factor (`dynamics/angular.py`) and Blatt-Weisskopf
 barriers. `DalitzAmplitude` bypasses that isobar construction entirely for amplitudes that are
 intrinsically two-dimensional (`QMI2D`, `dynamics/qmi2d.py`), evaluated directly over
 `(s12, s13)`.
@@ -205,7 +216,20 @@ itself exactly symmetric, which nothing here can verify automatically.
 `inverse-transform` (default; numerical Rosenblatt transform, tabulated CDFs, `docs/toy_generation.md`)
 and `accept-reject` (Laura++-style envelope/restart algorithm, explicit `method="accept-reject"`).
 They are validated against each other, not derived from one another — don't assume one is a
-special case of the other.
+special case of the other. Both keep event arrays on the JAX device: inverse-transform builds its
+CDF tables and draws candidates with `jax.random`, so its first call in a process pays a one-time
+JIT compilation cost that repeated `prepared.generate(...)` calls of the same size reuse.
+
+### Four-body amplitudes are an additive, narrower API
+
+`FourBodyDecayModel`/`NBodyDecayChannel` (`four_body.py`, `kinematics/four_body.py`,
+`kinematics/nbody.py`) cover a spin-zero parent decaying to four spin-zero daughters, built from
+`Isobar`, `PairChain` and `CascadeChain` over the same `lineshape(mass, context)` contract,
+amplitude cache, `mean(weights*f)` normalization (weighted `NBodyPhaseSpaceMC`, never a 2D grid)
+and `Minimizer`. It does not extend `DecayModel`/`PhaseSpaceSample`, and most three-body
+conveniences (Dalitz/Square-Dalitz maps, SCF, ROOT/model serialization, CP and time-dependent
+sessions, `FitSession.report`) are deliberately not four-body APIs yet. Check
+`docs/four_body.md`'s boundary table before assuming a three-body feature carries over.
 
 ## Where to look before changing behavior
 
@@ -218,7 +242,8 @@ Each subsystem also has one focused doc under `docs/` (`fitting.md`, `lineshapes
 `mc_integration.md`, `backgrounds_and_vetoes.md`, `cp_coefficients.md`, `scf.md`,
 `square_dalitz.md`, `toy_generation.md`, `discriminants_and_constraints.md`,
 `convolution_resolution.md`, `dynamics_structure.md`, `performance.md`, `root_io.md`,
-`model_io.md`, `user_friendly_api.md`, `goodness_of_fit.md`, `time_dependent.md`). `docs/reviews/` contains dated, adversarial numeric-reproduction review
+`model_io.md`, `user_friendly_api.md`, `goodness_of_fit.md`, `time_dependent.md`,
+`four_body.md`). `docs/reviews/` contains dated, adversarial numeric-reproduction review
 write-ups (concrete inputs, reproduced numbers, "Applied fixes" sections, or — as in
 `paper_isobar_conventions.md` — an explicit "Remaining discrepancy" section when a reproduction
 is not yet closed) — this repo's working style is to reproduce a suspected discrepancy
@@ -227,10 +252,22 @@ change that fixes the code; an open "Remaining discrepancy" means the correspond
 (`SigmaPole`, `RhoOmegaMixing`, `PipiKKRescattering`) is not yet validated to publication
 precision and should not be treated as certified. `notebooks/tutorials/` are the tutorial/example
 set referenced by the docs and README (`notebooks/tutorials/TUTORIALS.md`);
-`notebooks/_data_analyses/` holds in-progress physics
-analyses (not tutorials) that consume the same public API and can break silently when a
-lineshape or normalization convention changes underneath them; `notebooks/benchmark/` holds
-numeric-reproduction benchmarks against a specific published paper/Laura++ configuration (e.g.
-`paper_isobar_benchmark.ipynb` for the LHCb `B -> 3pi` isobar model, or
-`belle_2014_d0_kspipi_time_dependent.ipynb` for the time-dependent D0 mixing formalism above)
-rather than tutorials.
+`notebooks/examples/` holds complete worked analyses on published or realistic configurations
+(e.g. `B+ -> K+ pi+ pi-` fits, the BaBar 2008 `D0 -> KS pi pi` model, the LHCb 2023
+`Ds -> 3pi` fit, BESIII `D0 -> 4pi`, and Laura++-generated Square-Dalitz toys for the LHCb
+`B -> 3pi` isobar model); `notebooks/validation/` holds closure and pull studies;
+`notebooks/tests/` holds informal per-feature check notebooks (constraints, SCF, vetoes, ROOT
+input). All of these consume the same public API and can break silently when a lineshape or
+normalization convention changes underneath them, since CI only compiles their cells. In-progress
+physics analyses are kept outside the package notebooks (e.g. the untracked
+`AmAn_B2KKK_Run2/`), not under `notebooks/`.
+
+### Histogram interpolation and Square-Dalitz acceptance
+
+Histogram efficiency and background models accept `interpolation="none"`,
+`"linear"`, or `"spline"`. The spline mode is JAX-differentiable cubic
+interpolation over bin-centre values. Efficiency maps do not get normalized to
+unit integral; use `clip=True` only when reproducing the reference convention
+that bounds interpolated efficiencies to `[0, 1]`. Square-Dalitz backgrounds use
+`divide_jacobian=True` for PDF evaluation and their raw `generation_value()` for
+toy generation. Apply vetoes before acceptance/background normalization.

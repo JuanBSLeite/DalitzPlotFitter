@@ -604,5 +604,5 @@ no likelihood sensitivity. Discontinuous bins require checking normalization
 quadrature convergence near their boundaries. No component normalization is
 implicitly enabled by selecting this mode.
 
-`notebooks/_data_analyses/26_b2pipipi_cpvfit_qmi_step_global_cpv.ipynb` applies
-this parameterization to the 25 reference mass bins with global CPV coefficients.
+A typical application uses the 25 reference mass bins of the `B -> 3pi` S-wave with global
+CPV coefficients.

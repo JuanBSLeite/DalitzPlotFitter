@@ -26,14 +26,16 @@ jobs:
           from pathlib import Path
           import nbformat
 
-          # The curated notebook set lives in these three subdirectories (see
-          # CLAUDE.md); notebooks/Tests/ and notebooks/genfit/ are scratch/
-          # informal work not covered by this check.
-          paths = [
-              path
-              for directory in ("tutorials", "data_analyses", "benchmark")
-              for path in sorted((Path("notebooks") / directory).glob("*.ipynb"))
-          ]
+          # Every notebook directory is covered (see AGENTS.md). A listed
+          # directory that disappears or is empty fails the check, so a future
+          # reorganization cannot silently drop notebooks from validation.
+          directories = ("tutorials", "examples", "validation", "tests")
+          paths = []
+          for directory in directories:
+              found = sorted((Path("notebooks") / directory).glob("*.ipynb"))
+              if not found:
+                  raise SystemExit(f"no notebooks found under notebooks/{directory}/")
+              paths.extend(found)
           for path in paths:
               with path.open(encoding="utf-8") as handle:
                   notebook = nbformat.read(handle, as_version=4)

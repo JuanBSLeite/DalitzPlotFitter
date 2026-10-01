@@ -98,4 +98,5 @@ This distinction is important for future extensions that apply detector resoluti
 
 A genuine multidimensional Dalitz-resolution treatment should therefore use a migration kernel/operator rather than independent one-dimensional convolutions of the Dalitz invariants.
 
-See `notebooks/20_pdf_convolution_resolution.ipynb` for the relativistic `K*(892)0 -> K pi` example.
+See `notebooks/tests/pdf_convolution_resolution.ipynb` (and
+`notebooks/tutorials/tutorial_44_convolution.ipynb`) for the relativistic `K*(892)0 -> K pi` example.

@@ -48,7 +48,7 @@ def test_inverse_cdf_does_not_bridge_plateau():
 def test_inverse_support_and_relative_population(resolution):
     # Two disconnected strips; compare their populations with an independent
     # high-resolution integration of the physical Dalitz width.
-    from jaxpwa.inverse_transform import _s13_limits
+    from jaxpwa.kinematics import dalitz_s13_limits
 
     def support(d):
         return ((d["s12"] < 0.8) | (d["s12"] > 1.2)) & (d["s13"] > 0.6)
@@ -67,7 +67,7 @@ def test_inverse_support_and_relative_population(resolution):
         (m.channel.parent_mass - m.channel.daughter_masses[2]) ** 2,
         100_000,
     )
-    low, high = _s13_limits(
+    low, high = dalitz_s13_limits(
         grid, mother_mass=m.channel.parent_mass, masses=m.channel.daughter_masses
     )
     weight = np.maximum(high - np.maximum(low, 0.6), 0) * ((grid < 0.8) | (grid > 1.2))

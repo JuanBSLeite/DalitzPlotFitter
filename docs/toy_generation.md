@@ -57,6 +57,8 @@ The sampler first inverts the marginal CDF in \(m_{12}\), then the conditional C
 
 Four-momenta are reconstructed in the parent rest frame from the sampled invariants and then given a random global orientation, so ROOT toy output retains the same momentum branches as accept-reject generation.
 
+Preparation and generation run entirely in JAX: the CDF tables are built in one JIT-compiled program (all conditional rows at once via `vmap`), candidates are drawn with `jax.random` from the integer `seed`, and the momentum reconstruction is the same JAX routine used by `PhaseSpaceMC.attach_momenta`. Only two scalars per batch (density validity and the count of in-support candidates) reach the host. The first call in a process pays a one-time JIT compilation cost; repeated `prepared.generate(...)` calls with the same size reuse it, which is where a toy campaign spends its time. The same `seed` reproduces the same toy, but samples are not event-by-event identical to those produced before the sampler moved from `numpy.random` to `jax.random`.
+
 `inverse_resolution` controls the number of grid points in both Dalitz directions. `inverse_quantile_resolution` can be supplied separately for the tabulated conditional inverse CDF; by default it equals `inverse_resolution`.
 
 ## Reuse the prepared inverse CDFs

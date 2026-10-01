@@ -163,5 +163,5 @@ has the expected cancellation in the product `weights * background(...)`.
 
 ## Examples
 
-- `notebooks/13_b2kpipi_root_tree_input.ipynb`: TTree -> `PhaseSpaceSample` -> amplitude fit;
-- `notebooks/15_b2kpipi_square_dalitz_eff_background.ipynb`: ROOT TH2 efficiency/background maps in `(m', theta')`, with SDP and ordinary-Dalitz plots and a signal/background fit.
+- `notebooks/tests/b2kpipi_root_tree_input.ipynb`: TTree -> `PhaseSpaceSample` -> amplitude fit;
+- `notebooks/tests/b2kpipi_square_dalitz_eff_background.ipynb`: ROOT TH2 efficiency/background maps in `(m', theta')`, with SDP and ordinary-Dalitz plots and a signal/background fit.

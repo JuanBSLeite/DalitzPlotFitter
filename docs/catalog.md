@@ -43,7 +43,7 @@ and [closure notebook](../notebooks/tutorials/tutorial_66_four_body_closure.ipyn
 | `ConstantAmplitude` | class | Non-resonant constant dynamical amplitude (the piece `NonResonant` wraps). |
 | `PreparedAmplitudeCache` | class | Pre-evaluated component values and Hermitian normalization matrix for a data/normalization sample; the object that makes repeated NLL evaluation cheap. |
 
-Docs: `docs/fitting.md`, `docs/dynamics_structure.md`, `docs/performance.md` (caching). Notebooks: `01_e791_toy_fit.ipynb`, `03_b2kpipi_toy_fit.ipynb`.
+Docs: `docs/fitting.md`, `docs/dynamics_structure.md`, `docs/performance.md` (caching). Notebooks: `notebooks/tutorials/tutorial_02_first_fit.ipynb`, `notebooks/examples/b2kpipi_toy_fit.ipynb`.
 
 ## Complex coefficients
 
@@ -74,9 +74,9 @@ Each is passed as `Resonance(..., lineshape=...)`; all implement `lineshape(mass
 | `QMI` | class | Quasi-model-independent S-wave specified at fixed mass knots; `interpolation=` selects constant bins (`none`) or `linear`/`cubic`/`hermite`/`natural`, polar or Cartesian knot parameters. |
 | `Rescattering2` | class | Port of Laura++ `LauRescattering2Res`: two-region Chebyshev pi-pi/KK rescattering S-wave, zero below the `2*m_K` threshold. |
 
-Docs: `docs/lineshapes.md` (formulas + references). Notebooks: `notebooks/_data_analyses/22_rescattering2_toy.ipynb`
-(Rescattering2 diagnostics), `notebooks/benchmark/paper_isobar_benchmark.ipynb` and
-`notebooks/benchmark/paper_isobar_benchmark_squaredp_01.ipynb` (`SigmaPole`/`RhoOmegaMixing`/
+Docs: `docs/lineshapes.md` (formulas + references). Notebooks: `notebooks/tutorials/tutorial_25_rescattering2.ipynb`
+(Rescattering2 diagnostics) and
+`notebooks/validation/paper_isobar_benchmark_squaredp_01_laura_toys.ipynb` (`SigmaPole`/`RhoOmegaMixing`/
 `PipiKKRescattering` reproduction of the LHCb `B -> 3pi` isobar model, Phys. Rev. D 101, 012006).
 `docs/reviews/paper_isobar_conventions.md` documents the numeric reproduction, the confirmed
 angular-orientation/ACP fixes, and the remaining unresolved discrepancies in that benchmark.
@@ -218,7 +218,7 @@ Docs: `docs/scf.md`.
 | `histogram_background_from_root` | function | Build a background map from a ROOT TH2 in ordinary Dalitz coordinates. |
 | `read_root_histogram2d` | function | Low-level: read a ROOT TH2 into `(values, x_edges, y_edges)` JAX arrays via uproot. |
 
-Docs: `docs/root_io.md`. Notebooks: `15_b2kpipi_square_dalitz_eff_background.ipynb`.
+Docs: `docs/root_io.md`. Notebooks: `notebooks/tests/b2kpipi_square_dalitz_eff_background.ipynb`, `notebooks/tutorials/tutorial_36_histogram_maps_from_root.ipynb`.
 
 ## ROOT tree I/O
 
@@ -230,7 +230,7 @@ Docs: `docs/root_io.md`. Notebooks: `15_b2kpipi_square_dalitz_eff_background.ipy
 | `write_phase_space_samples` | function | Write several `PhaseSpaceSample` objects to ROOT TTrees in one call. |
 | `write_cp_phase_space_sample` | function | Write B+ and B- samples to one TTree with a signed `charge` branch. |
 
-Docs: `docs/root_io.md`. Notebooks: `13_b2kpipi_root_tree_input.ipynb`, `19_toy_root_output.ipynb`.
+Docs: `docs/root_io.md`. Notebooks: `notebooks/tests/b2kpipi_root_tree_input.ipynb`, `notebooks/tutorials/tutorial_07_root_io.ipynb`, `notebooks/tutorials/tutorial_37_root_low_level_io.ipynb`.
 
 ## Model import/export
 
@@ -271,7 +271,7 @@ part of the specification. None of these capture a session's `data`/`efficiency`
 | `PreparedInverseToyGenerator` | class | The reusable object `prepare_inverse_toy_generator` returns; `.generate(n, seed=...)`. |
 | `weighted_resample` | function | Draw unweighted events from a weighted phase-space sample (the resampling building block behind `method="resample"`). |
 
-Docs: `docs/toy_generation.md`. Notebooks: `18_user_friendly_toy_generation.ipynb`, `19_toy_root_output.ipynb`.
+Docs: `docs/toy_generation.md`. Notebooks: `notebooks/tests/user_friendly_toy_generation.ipynb`, `notebooks/tutorials/tutorial_38_toy_methods_comparison.ipynb`, `notebooks/tutorials/tutorial_39_prepared_inverse_toy_generator.ipynb`.
 
 ## Discriminating-variable PDFs and external constraints
 
@@ -279,6 +279,7 @@ Docs: `docs/toy_generation.md`. Notebooks: `18_user_friendly_toy_generation.ipyn
 |---|---|---|
 | `Gaussian1D` | class | Gaussian PDF normalized on a finite interval. |
 | `Exponential1D` | class | Exponential PDF `exp(slope*x)` normalized on a finite interval. |
+| `CrystalBall1D` | class | Crystal Ball PDF (Gaussian core, left power-law tail; `scipy.stats.crystalball` convention) with closed-form normalization on a finite interval. |
 | `Histogram1D` | class | Piecewise-constant normalized histogram PDF from edges + values. |
 | `BreitWigner1D` | class | Constant-width Breit-Wigner PDF normalized on a finite mass interval. |
 | `LineshapeIntensity1D` | class | Turn an existing complex dynamics lineshape (e.g. `RelativisticBreitWigner`) into a normalized 1D intensity PDF. |
@@ -287,7 +288,7 @@ Docs: `docs/toy_generation.md`. Notebooks: `18_user_friendly_toy_generation.ipyn
 | `QMISmoothnessConstraint` | class | Optional complex-node curvature penalty in mass squared for any 1D QMI interpolation; also built by `qmi.smoothness_constraint(...)`. |
 | `ConstrainedNLL` | class | Add callable penalties, including Gaussian or QMI smoothness constraints, to an existing NLL. |
 
-Docs: `docs/discriminants_and_constraints.md`. Notebooks: `10_b2kpipi_discriminating_variables.ipynb`, `11_b2kpipi_gaussian_constraints.ipynb`.
+Docs: `docs/discriminants_and_constraints.md`. Notebooks: `notebooks/tutorials/tutorial_42_discriminant_pdfs.ipynb`, `notebooks/tutorials/tutorial_43_factorized_density_and_constraints.ipynb`, `notebooks/tests/b2kpipi_gaussian_constraints.ipynb`.
 
 ## Detector-resolution convolution (1D)
 
@@ -296,7 +297,7 @@ Docs: `docs/discriminants_and_constraints.md`. Notebooks: `10_b2kpipi_discrimina
 | `ConvolvedPDF1D` | class | Numerically convolve a normalized 1D PDF with a resolution kernel, with finite-observed-window normalization. |
 | `GaussianResolution1D` | class | Gaussian conditional resolution kernel `R(x_obs \| x_true)`. |
 
-Docs: `docs/convolution_resolution.md`. Notebooks: `20_pdf_convolution_resolution.ipynb`.
+Docs: `docs/convolution_resolution.md`. Notebooks: `notebooks/tutorials/tutorial_44_convolution.ipynb`, `notebooks/tests/pdf_convolution_resolution.ipynb`.
 
 ## Delta-method error propagation
 
@@ -332,7 +333,8 @@ array already ordered like the requested parameter names. Docs:
 `point_to_point_dissimilarity` methods, reusing the same reweighted-MC-projection machinery as
 `plot_projection`. Docs: `docs/goodness_of_fit.md`. Notebooks:
 `notebooks/tutorials/tutorial_09_goodness_of_fit.ipynb`,
-`notebooks/_data_analyses/12_b2kkk_cpvfit.ipynb` (real per-charge GOF section).
+`notebooks/tutorials/tutorial_46_kdtree_local_residuals.ipynb`,
+`notebooks/tutorials/tutorial_47_point_to_point.ipynb`.
 
 ## Plotting
 
@@ -357,7 +359,7 @@ Composition layers over everything above; see `docs/user_friendly_api.md` "Desig
 | `CPFitSession` | class | Same composition for simultaneous B+/B- fits over `CPJointNLL`; shared `Parameter`s collected once; same goodness-of-fit methods, per charge. |
 | `TimeDependentFitSession` | class | Composes `TimeDependentDalitzNLL`: builds the shared A+Abar `PreparedAmplitudeCache` (Abar derived by reflection unless an explicit `abar_model` is given, for direct CPV) and collects `Parameter`s from the model(s) and `mixing`. `fit()`/`fit_multistart()`/`report()`/`print_result()`/`print_fit_fractions()`/`fit_fraction_errors()`, Supports `.with_background(...)`, conditional fractions or extended yields with component tag fractions; `signal_objective` retains the signal kernel. Projections include all backgrounds when marginal callbacks are available. `plot_time_projection()` overlays each tag's decay-time histogram against the exact Dalitz-integrated curve (unit acceptance/perfect resolution only). `plot_projection()` overlays each tag's Dalitz-variable histogram (one subplot per tag) against the time-integrated, tag-conditional density, mirroring `CPFitSession.plot_projection`'s two-population layout. |
 
-Docs: `docs/user_friendly_api.md`, `docs/time_dependent.md`. Notebooks: `16_user_friendly_quickstart.ipynb`, `17_b2kpipi_cp_user_friendly.ipynb`, `notebooks/benchmark/belle_2014_d0_kspipi_time_dependent.ipynb`.
+Docs: `docs/user_friendly_api.md`, `docs/time_dependent.md`. Notebooks: `notebooks/tutorials/tutorial_02_first_fit.ipynb`, `notebooks/tutorials/tutorial_06_joint_cp_fit.ipynb`, `notebooks/examples/babar_2008_d0_kspipi.ipynb` (time-dependent).
 
 ## Configuration
 

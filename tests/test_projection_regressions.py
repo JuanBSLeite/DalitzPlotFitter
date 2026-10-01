@@ -17,6 +17,7 @@ from jaxpwa import (
     FitSession,
     NonResonant,
     RealImag,
+    YieldAsymmetry,
 )
 from jaxpwa.cp_workflow import _joint_scaled_weights
 from jaxpwa.workflow import _scaled_projection_weights
@@ -102,3 +103,74 @@ def test_cp_background_totals_match_fitted_probabilities(setup):
     pp, pm = cp.base_objective.charge_probabilities({})
     assert np.isclose(sum(np.sum(c[2]) for c in p), 40 * float(pp))
     assert np.isclose(sum(np.sum(c[2]) for c in n), 40 * float(pm))
+
+
+@pytest.mark.parametrize("standalone_yields", [False, True])
+def test_cp_regional_projection_preserves_full_signal_and_background_yields(
+    setup, standalone_yields,
+):
+    m, d, _ = setup
+    signal_yield = YieldAsymmetry(80.0, 0.3) if standalone_yields else 80.0
+    cp = CPFitSession(m, m, d, d, extended=True, signal_yield=signal_yield)
+    cp = cp.with_background(
+        "bg", lambda data: data["s23"],
+        minus_shape=lambda data: jnp.ones_like(data["s23"]), yield_=20.0,
+    )
+    # Cut the OTHER coordinate, so an x-axis range cannot reproduce this plot.
+    cutoff = float(np.median(d.s23))
+
+    def selection(data):
+        return np.asarray(data["s23"]) < cutoff
+
+    size, seed = 500, 734
+    samples = [m.generate_phase_space(size, seed=seed + q) for q in (0, 1)]
+    full_components = cp._projection_components_pair({}, *samples)
+    limits = (0.0, m.channel.parent_mass**2)
+    grid = cp.plot_projection(
+        SimpleNamespace(values={}), "s12", partner_variable="s13",
+        folded=True, fold_side="high", selection=selection,
+        range=limits, bins=8, projection_size=size, projection_seed=seed,
+        show_pulls=True,
+    )
+    for column, components in enumerate(full_components):
+        total = np.zeros(8)
+        for patch, (_, sample, weights) in zip(
+            grid[0, column].patches[:-1], components, strict=True,
+        ):
+            mask = selection(sample.as_dict())
+            expected, edges = np.histogram(
+                np.maximum(sample.s12, sample.s13)[mask], bins=8,
+                range=limits, weights=np.asarray(weights)[mask],
+            )
+            np.testing.assert_allclose(patch.get_data().values, expected)
+            total += expected
+        np.testing.assert_allclose(grid[0, column].patches[-1].get_data().values, total)
+        observed, _ = np.histogram(
+            np.maximum(d.s12, d.s13)[selection(d.as_dict())], bins=edges,
+        )
+        np.testing.assert_array_equal(grid[0, column].lines[0].get_ydata(), observed)
+        assert 0 < total.sum() < sum(np.sum(c[2]) for c in components)
+    assert cp.plus_data is d and cp.minus_data is d
+
+
+@pytest.mark.parametrize("mask", [True, [True], [1] * 20])
+def test_cp_projection_rejects_invalid_region_masks(setup, mask):
+    m, d, _ = setup
+    cp = CPFitSession(m, m, d, d)
+    with pytest.raises(ValueError, match="projection selection.*boolean vector"):
+        cp.plot_projection(SimpleNamespace(values={}), selection=lambda data: mask)
+
+
+def test_cp_projection_empty_region_with_explicit_range(setup):
+    m, d, _ = setup
+    cp = CPFitSession(m, m, d, d)
+    def selection(data):
+        return np.zeros(len(data["s13"]), dtype=bool)
+    with pytest.raises(ValueError, match="provide range"):
+        cp.plot_projection(SimpleNamespace(values={}), selection=selection)
+    grid = cp.plot_projection(
+        SimpleNamespace(values={}), selection=selection, range=(0.0, 4.0),
+        projection_size=100, bins=8, show_pulls=True,
+    )
+    for ax in grid[0]:
+        np.testing.assert_array_equal(ax.patches[-1].get_data().values, np.zeros(8))

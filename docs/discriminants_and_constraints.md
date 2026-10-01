@@ -77,7 +77,9 @@ Strength zero disables it exactly. See [the QMI smoothing convention](lineshapes
 for the nonuniform-grid weights, fixed-scale requirement, CP usage and
 validation of the bias/uncertainty tradeoff.
 
-## Tutorial notebooks
+## Notebooks
 
-- `10_b2kpipi_discriminating_variables.ipynb` demonstrates a joint Dalitz + reconstructed-mass + BDT fit with mass and BDT projections.
-- `11_b2kpipi_gaussian_constraints.ipynb` compares constrained and unconstrained fits and plots the corresponding NLL scans.
+- `notebooks/tutorials/tutorial_42_discriminant_pdfs.ipynb` and
+  `notebooks/tutorials/tutorial_43_factorized_density_and_constraints.ipynb` cover the
+  discriminating-variable PDFs and their factorized combination with the Dalitz density.
+- `notebooks/tests/b2kpipi_gaussian_constraints.ipynb` compares constrained and unconstrained fits and plots the corresponding NLL scans.

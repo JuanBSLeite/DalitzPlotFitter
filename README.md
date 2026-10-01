@@ -111,9 +111,10 @@ basic flow.
 - [`notebooks/`](notebooks) contains a progressive set of worked examples beyond the tutorial
   course — efficiency/background fits, multiple backgrounds, veto maps, SCF migration, Gaussian
   constraints, ROOT I/O, folded Dalitz plots for identical particles, resolution convolution, and
-  more — plus `notebooks/benchmark/` (numeric reproductions of published analyses) and
-  [`notebooks/examples/`](notebooks/examples) for focused examples such as the four-body closure
-  and BESIII-inspired model.
+  more — plus [`notebooks/examples/`](notebooks/examples) (worked analyses such as the BaBar
+  2008 `D0 -> KS pi pi` model, the LHCb 2023 `Ds -> 3pi` fit and the BESIII-inspired four-body
+  model) and [`notebooks/validation/`](notebooks/validation) (closure and pull studies, and the
+  Square-Dalitz reproduction of the LHCb `B -> 3pi` isobar model).
 
 ## Installation
 

@@ -272,8 +272,8 @@ full-Hessian extraction at identical points. G2 timings distinguish the first
 call from warm calls; the full-Hessian executable has already been compiled
 by the preceding HESSE measurements.
 
-A 2026-10-01 CPU check used the local `13_b2kkk_cpvfit_qmi.ipynb`
-configuration: 137 free parameters, 335,313 data events, one million shared
+A 2026-10-01 CPU check used the local `B+ -> K+K-K+` QMI CP-fit analysis
+configuration (`13_b2kkk_cpvfit_qmi.ipynb`, kept outside `notebooks/`): 137 free parameters, 335,313 data events, one million shared
 toy-MC normalization points per charge, efficiency/background maps, and
 `hessian_batch_size=1`. Two seed points differed only by `1e-4` and `2e-4`
 in the first free parameter. G2 was evaluated before the full Hessians to
