@@ -18,7 +18,114 @@ from jaxpwa import (
     ZemachP,
 )
 from jaxpwa.amplitude import PreparedAmplitudeCache
+from jaxpwa.amplitude.cache import _hermitian_matrix_sum
 from jaxpwa.likelihood import CPJointNLL
+
+
+def test_hermitian_matrix_sum_integrates_only_unique_component_pairs(monkeypatch):
+    reductions = []
+    einsum = jnp.einsum
+
+    def record_reduction(expression, *arrays, **kwargs):
+        assert expression in ("n,nj->j", "n,nd->d")
+        reductions.append(arrays[1].shape[1])
+        return einsum(expression, *arrays, **kwargs)
+
+    monkeypatch.setattr(jnp, "einsum", record_reduction)
+    values = jnp.arange(28).reshape((7, 4)) * (1.0 + 0.3j)
+    matrix = _hermitian_matrix_sum(values, jnp.ones(7))
+    assert sum(reductions) == 4 * (4 + 1) // 2
+    np.testing.assert_allclose(matrix, np.asarray(values).conj().T @ values)
+
+
+@pytest.mark.parametrize("scale", [0.0, 0.4, 1.0, -0.7])
+def test_triangular_normalization_preserves_interference_factor_two(scale):
+    # F=(1, t*(1+2i)), c=(1, 2-i): A=1+t*(4+3i), so
+    # |A|^2=1+8t+25t^2. A missing/doubled interference factor changes 8t;
+    # incorrectly mirroring the diagonal also changes the constant/quadratic.
+    weights = jnp.asarray([1.0, 3.0, 0.0, 2.0])
+    efficiency = jnp.asarray([0.5, 0.5, 1.0, 0.5])
+    coefficients = jnp.asarray([1.0, 2.0 - 1.0j])
+    measure = 0.75  # mean(weights * efficiency), not a weight-normalized mean.
+
+    def matrix(t):
+        values = jnp.broadcast_to(jnp.asarray([1.0 + 0j, t * (1 + 2j)]), (4, 2))
+        return _hermitian_matrix_sum(values, weights * efficiency) / weights.size
+
+    def normalization(t):
+        return jnp.real(coefficients.conj() @ matrix(t) @ coefficients)
+
+    actual_matrix = jax.jit(matrix)(scale)
+    np.testing.assert_allclose(
+        actual_matrix,
+        measure * np.asarray([[1, scale*(1+2j)], [scale*(1-2j), 5*scale**2]]),
+        rtol=1e-14, atol=1e-14,
+    )
+    diagonal = jnp.sum(jnp.abs(coefficients)**2 * jnp.real(jnp.diag(actual_matrix)))
+    interference = 2 * jnp.real(
+        coefficients[0].conj() * actual_matrix[0, 1] * coefficients[1]
+    )
+    value, gradient = jax.jit(jax.value_and_grad(normalization))(scale)
+    curvature = jax.jit(jax.jacfwd(jax.grad(normalization)))(scale)
+    np.testing.assert_allclose(diagonal, measure*(1+25*scale**2), rtol=1e-14)
+    np.testing.assert_allclose(interference, measure*8*scale, rtol=1e-14)
+    np.testing.assert_allclose(value, diagonal + interference, rtol=1e-14)
+    np.testing.assert_allclose(gradient, measure*(8+50*scale), rtol=1e-14)
+    np.testing.assert_allclose(curvature, measure*50, rtol=1e-14)
+
+
+@pytest.mark.parametrize("size", [0, 1, 2, 5])
+@pytest.mark.parametrize("signed_weights", [False, True])
+def test_hermitian_matrix_sum_matches_independent_dense_product(size, signed_weights):
+    rng = np.random.default_rng(507)
+    values = rng.normal(size=(31, size)) + 1j * rng.normal(size=(31, size))
+    weights = rng.uniform(0.3, 1.0, 31)
+    weights[::7] = 0.0  # Veto/padded entries must not contribute.
+    if signed_weights:
+        weights[1::3] *= -1
+    actual = np.asarray(jax.jit(_hermitian_matrix_sum)(values, weights))
+    expected = values.conj().T @ (weights[:, None] * values)
+    np.testing.assert_allclose(actual, expected, rtol=2e-14, atol=2e-14)
+    np.testing.assert_array_equal(actual, actual.conj().T)
+
+
+@pytest.mark.parametrize("size", [1, 3, 5])
+@pytest.mark.parametrize("floating_weights", [False, True])
+def test_hermitian_matrix_derivatives_match_direct_coherent_intensity(
+    size, floating_weights,
+):
+    rng = np.random.default_rng(508)
+    base = jnp.asarray(rng.normal(size=(31, size)) + 1j * rng.normal(size=(31, size)))
+    coefficients = jnp.asarray(rng.normal(size=size) + 1j * rng.normal(size=size))
+    coordinate = jnp.linspace(0.1, 1.0, 31)
+
+    def inputs(point):
+        scale = 1 + point[0] * coordinate[:, None]
+        phase = point[1] * coordinate[:, None] * (1 + jnp.arange(size))
+        values = base * scale * jnp.exp(1j * phase)
+        weights = jnp.arange(1, 32)  # Also cover constant integer integration weights.
+        if floating_weights:
+            weights = weights * jnp.exp(point[2] * coordinate)
+        return values, weights
+
+    def matrix_objective(point):
+        values, weights = inputs(point)
+        matrix = _hermitian_matrix_sum(values, weights) / weights.size
+        return jnp.real(coefficients.conj() @ matrix @ coefficients)
+
+    def direct_objective(point):
+        values, weights = inputs(point)
+        return jnp.mean(weights * jnp.abs(values @ coefficients)**2)
+
+    point = jnp.asarray([0.3, -0.5, 0.7])
+    for transform in (jax.value_and_grad, lambda f: jax.jacfwd(jax.grad(f))):
+        actual = jax.jit(transform(matrix_objective))(point)
+        expected = jax.jit(transform(direct_objective))(point)
+        for left, right in zip(
+            jax.tree_util.tree_leaves(actual), jax.tree_util.tree_leaves(expected),
+            strict=True,
+        ):
+            np.testing.assert_allclose(left, right, rtol=2e-12, atol=2e-12)
 
 
 def make_model(

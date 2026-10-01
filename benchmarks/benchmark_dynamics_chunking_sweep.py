@@ -28,8 +28,10 @@ import json
 import time
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 
+import jaxpwa.amplitude.cache as amplitude_cache
 from jaxpwa import (
     DecayChannel,
     DecayModel,
@@ -40,7 +42,6 @@ from jaxpwa import (
     Resonance,
     enable_x64,
 )
-
 
 enable_x64()
 
@@ -232,6 +233,11 @@ def main() -> None:
     parser.add_argument("--repeats", type=int, default=10)
     parser.add_argument("--seed", type=int, default=260905)
     parser.add_argument(
+        "--normalization-kernel", choices=("hermitian", "dense-reference"),
+        default="hermitian",
+        help="Compare triangular dynamic integration with the previous dense reduction",
+    )
+    parser.add_argument(
         "--chunk-sizes",
         type=str,
         default="50000,100000,200000",
@@ -262,6 +268,14 @@ def main() -> None:
     if args.microbatch_parallelism < 1:
         parser.error("--microbatch-parallelism must be positive")
 
+    if args.normalization_kernel == "dense-reference":
+        # Diagnostic override for this benchmark process only, applied before
+        # any objective is traced. Real fits use the library's Hermitian kernel.
+        def dense_reference(values, weights):
+            return jnp.einsum("n,ni,nj->ij", weights, values.conj(), values)
+
+        amplitude_cache._hermitian_matrix_sum = dense_reference
+
     results = []
     for chunk_size in chunk_sizes:
         for microbatch_size in microbatch_sizes:
@@ -274,6 +288,7 @@ def main() -> None:
                 repeats=args.repeats,
                 seed=args.seed,
             )
+            result["normalization_kernel"] = args.normalization_kernel
             print(f"SWEEP_RESULT_JSON={json.dumps(result)}")
             results.append(result)
             # Each point should pay its own cold-compilation cost and release

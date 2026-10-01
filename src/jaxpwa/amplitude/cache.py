@@ -9,9 +9,10 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 from jax import Array
+from jax.custom_derivatives import SymbolicZero
 
 from jaxpwa.fit import Parameter, ParameterKind
-from jaxpwa.integration import matrix_normalization, normalization_matrix
+from jaxpwa.integration import matrix_normalization
 from jaxpwa.observables import fit_fractions as matrix_fit_fractions
 from jaxpwa.observables import (
     interference_fractions as matrix_interference_fractions,
@@ -31,6 +32,55 @@ _MISSING_COMPACTION_WARNED: set[str] = set()
 # combinations already reported, so a multi-toy loop preparing the same model
 # configuration repeatedly does not reprint the same diagnostic per toy.
 _CHUNK_CAP_WARNED: set[tuple[tuple[str, ...], int, int]] = set()
+
+
+@jax.custom_jvp
+def _hermitian_matrix_sum(values: Array, weights: Array) -> Array:
+    """Sum ``weights * conj(F_i) * F_j`` once for each ``i <= j``.
+
+    Integration/acceptance weights are real, so the opposite triangle is the
+    complex conjugate. Entries themselves are not multiplied by two: the
+    full ``c^H M c`` includes each off-diagonal pair twice, while each diagonal
+    enters once. Row reductions avoid an event-by-component-pair array.
+    The analytic JVP below keeps derivatives as accelerator matrix products,
+    rather than differentiating many separate triangular gathers/scatters.
+    """
+    size = values.shape[1]
+    dtype = jnp.result_type(values, weights)
+    if size == 0:
+        return jnp.zeros((0, 0), dtype=dtype)
+    diagonal = jnp.einsum("n,nd->d", weights, jnp.abs(values)**2)
+    matrix = jnp.diag(diagonal).astype(dtype)
+    if size == 1:
+        return matrix
+    entries = jnp.concatenate(
+        [
+            jnp.einsum(
+                "n,nj->j", weights * values[:, row].conj(), values[:, row + 1:],
+            )
+            for row in range(size - 1)
+        ]
+    )
+    rows, columns = jnp.triu_indices(size, k=1)
+    matrix = matrix.at[rows, columns].set(entries, unique_indices=True)
+    return matrix.at[columns, rows].set(entries.conj(), unique_indices=True)
+
+
+@partial(_hermitian_matrix_sum.defjvp, symbolic_zeros=True)
+def _hermitian_matrix_sum_jvp(primals, tangents):
+    values, weights = primals
+    values_dot, weights_dot = tangents
+    # d(F^H W F) = F^H W dF + (F^H W dF)^H + F^H dW F.
+    # The cross product is generally not Hermitian, so its full matrix is
+    # needed even though both the integral and its differential are Hermitian.
+    matrix = _hermitian_matrix_sum(values, weights)
+    tangent = jnp.zeros_like(matrix)
+    if not isinstance(values_dot, SymbolicZero):
+        cross = jnp.einsum("n,ni,nj->ij", weights, values.conj(), values_dot)
+        tangent = tangent + cross + cross.conj().T
+    if not isinstance(weights_dot, SymbolicZero):
+        tangent = tangent + _hermitian_matrix_sum(values, weights_dot)
+    return matrix, tangent
 
 
 @partial(jax.jit, donate_argnums=(0,))
@@ -760,7 +810,8 @@ class PreparedAmplitudeCache:
                         "normalization chunk size is capped at "
                         f"dynamics_microbatch_size={int(dynamics_microbatch_size)} "
                         "instead of the requested normalization_chunk_size="
-                        f"{int(normalization_chunk_size)}; see 'normalization_chunk_size "
+                        f"{int(normalization_chunk_size)}; see "
+                        "'normalization_chunk_size "
                         "is silently capped by dynamics_microbatch_size...' in "
                         "docs/performance.md."
                     )
@@ -1102,12 +1153,7 @@ class PreparedAmplitudeCache:
             )
             pdf_weights = weights * efficiency
             diagonal = jnp.einsum("n,nd->d", weights, jnp.abs(values) ** 2)
-            block = jnp.einsum(
-                "n,nd,ne->de",
-                pdf_weights,
-                values.conj(),
-                values,
-            )
+            block = _hermitian_matrix_sum(values, pdf_weights)
             if fixed:
                 fixed_values = jnp.stack(fixed_columns, axis=1)
                 fixed_values = fixed_values * self.component_scales[jnp.asarray(fixed)]
@@ -1500,15 +1546,7 @@ class PreparedAmplitudeCache:
                 jnp.conj(dynamic_fixed).T
             )
 
-        dynamic_dynamic = (
-            jnp.einsum(
-                "n,nd,ne->de",
-                weights,
-                jnp.conj(dynamic_norm),
-                dynamic_norm,
-            )
-            / n_points
-        )
+        dynamic_dynamic = _hermitian_matrix_sum(dynamic_norm, weights) / n_points
         matrix = matrix.at[dynamic_index[:, None], dynamic_index[None, :]].set(
             dynamic_dynamic
         )
@@ -1572,10 +1610,8 @@ class PreparedAmplitudeCache:
         if norm_components is None:
             raise RuntimeError("Dynamic normalization components are required")
 
-        return normalization_matrix(
-            norm_components,
-            self.normalization_weights,
-            self.efficiency_normalization,
+        return _hermitian_matrix_sum(norm_components, self._pdf_weights()) / (
+            self.normalization_weights.size
         )
 
     def evaluate(self, fit_values: Mapping[str, object]) -> tuple[Array, Array]:

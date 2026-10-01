@@ -58,6 +58,65 @@ If a mass, width, radius, lineshape parameter, or other `ParameterKind.DYNAMICS`
 
 For multiple floating dynamical components, all affected normalization-matrix rows are updated in one batched accelerator reduction rather than one full normalization-grid reduction per component.
 
+### Hermitian dynamic normalization blocks
+
+For every amplitude type, real integration/acceptance weights imply
+`M_ji = conj(M_ij)`. Both the chunked and unchunked dynamic-cache paths
+integrate only the diagonal and upper triangle of the dynamic-dynamic block,
+then fill the lower triangle by conjugation. With `d` floating components,
+this evaluates `d * (d + 1) / 2` unique component-pair integrals instead of
+`d**2`. The dynamic-fixed rectangular block is also integrated once and
+mirrored; the fixed-fixed block remains cached. This applies equally to
+floating resonance masses/widths, QMI nodes, and direct Dalitz amplitudes.
+
+Each matrix entry retains its original integral, with no factor of two.
+Restoring the opposite triangle means the full quadratic form already gives
+
+\[
+c^\dagger M c = \sum_i |c_i|^2 M_{ii}
++ 2\operatorname{Re}\sum_{i<j} c_i^* M_{ij} c_j.
+\]
+
+The factor of two belongs only to an explicit upper-triangle sum of
+interference terms. Diagonal integrals are counted once. Multiplying stored
+off-diagonal entries by two would double the interference again when
+evaluating the full quadratic form.
+
+The triangular reduction uses a real diagonal reduction and one contraction
+per upper row, without building an event-by-component-pair tensor. Its custom
+JVP implements the exact identity
+`dM = F^H W dF + (F^H W dF)^H + F^H dW F`.
+The cross product `F^H W dF` is generally not Hermitian, so that derivative
+uses a full matrix product. This preserves efficient JAX gradients and
+forward-over-reverse Hessians while avoiding duplicated primal integrals.
+Global component scales are applied after summing all chunks, with the
+original `mean(weights * f)` convention and sample-size denominator.
+
+Fewer pair integrals do not guarantee a shorter fit: dense matrix products
+can be very efficient on the target device. Compare the dynamic mass/width
+benchmark with `--normalization-kernel hermitian` and
+`--normalization-kernel dense-reference`:
+
+```bash
+python benchmarks/benchmark_dynamics_chunking_sweep.py --events 100000 \
+  --normalization-resolution 500 --repeats 20 --chunk-sizes 100000 \
+  --microbatch-sizes 20000 --normalization-kernel hermitian
+```
+
+The reference option replaces only the dynamic matrix reduction in the
+benchmark process, before JAX compilation. It does not change sample points,
+weights, free parameters, or component-normalization conventions.
+
+On the local CPU on 2026-10-01, the above configuration with 40 repetitions
+used 412,000 adaptive Square-Dalitz points and two floating resonance
+components. The dense reference averaged 36.35 ms per NLL/gradient evaluation;
+the Hermitian reduction averaged 38.54 ms (about 6% slower). First-use
+NLL/gradient compilation plus execution took 1.98 s and 2.01 s respectively.
+Both returned NLL `791730.5476162778` and gradient norm `281289.1308668142`
+within floating-point rounding, and retained 67,232,256 cache bytes.
+This checks evaluation cost and equivalence at phase-space starting points,
+not fit convergence or a GPU speedup.
+
 For floating dynamics, `normalization_chunk_size` also bounds the prepared
 normalization blocks. The requested size is a maximum: the cache balances the
 effective static width below it to minimize tail padding. Each block is
@@ -188,14 +247,49 @@ automatic Hessian for both MIGRAD and HESSE. It uses forward-over-reverse AD,
 including through QMI's custom VJPs. For floating dynamics,
 `hessian_batch_size` controls how many Hessian-vector products one compiled
 program evaluates together. Its default of 1 runs each column separately to
-minimize peak memory. For coefficient-only fits, one linearization is reused
-inside a single executable and this option has no effect.
+minimize peak memory. For coefficient-only full Hessians, one linearization is
+reused inside a single executable and this option has no effect on the
+full-matrix evaluation.
 The last Hessian is cached independently of the value/gradient point. Compiled
 programs are shared across minimizers of the same live objective and fixed-
 parameter layout. No Hessian program runs or compiles on the default
 `hessian="numerical"` path. The JAX path supplies a diagonal callback too:
 iminuit 2.32's negative-curvature recovery can call it even when a full Hessian
-is supplied.
+is supplied. This G2 callback now has a separate JAX program: it computes
+`H_ii` with forward-over-reverse directional derivatives inside one bounded
+`lax.map`, retaining and transferring only the diagonal. It respects
+`hessian_batch_size` and reuses an already-cached full Hessian at the same
+point. At a new point it does not construct or cache the full matrix.
+The full-Hessian callback remains available for MIGRAD and HESSE.
+
+This removes full matrix assembly and per-column host synchronization from
+G2-only requests, but still requires one directional derivative per free
+parameter. It does not eliminate the cost of repeated curvature evaluations
+during `NegativeG2LineSearch`, or the first full Hessian used to seed MIGRAD.
+Use `python benchmarks/benchmark_hesse.py --model qmi --events 5000
+--repeats 3 --g2` to compare diagonal-only evaluation with the previous
+full-Hessian extraction at identical points. G2 timings distinguish the first
+call from warm calls; the full-Hessian executable has already been compiled
+by the preceding HESSE measurements.
+
+A 2026-10-01 CPU check used the local `13_b2kkk_cpvfit_qmi.ipynb`
+configuration: 137 free parameters, 335,313 data events, one million shared
+toy-MC normalization points per charge, efficiency/background maps, and
+`hessian_batch_size=1`. Two seed points differed only by `1e-4` and `2e-4`
+in the first free parameter. G2 was evaluated before the full Hessians to
+avoid full-Hessian cache hits; diagonals agreed within `rtol=1e-9,
+atol=1e-7`.
+
+| Callback | First call, including its JIT | Second point, compiled |
+|---|---:|---:|
+| Full Hessian followed by diagonal extraction | 32.82 s | 23.73 s |
+| Diagonal-only G2 | 34.04 s | 22.99 s |
+
+These single-run timings show only a roughly 3% warm-evaluation improvement
+for this large normalization sample, and an additional separate first-use
+compilation. They do not establish a shorter complete fit. Removing full
+matrix assembly therefore does not by itself resolve the notebook's
+multi-minute negative-curvature search.
 
 The differentiation direction matters on GPU. Applying reverse mode again to
 the QMI gradient reintroduces scatter-adds through the saved knot gathers,

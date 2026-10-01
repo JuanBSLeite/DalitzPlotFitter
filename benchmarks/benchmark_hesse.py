@@ -29,6 +29,10 @@ def main():
     parser.add_argument("--events", type=int, default=5000)
     parser.add_argument("--normalization-resolution", type=int, default=40)
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument(
+        "--g2", action="store_true",
+        help="Also compare diagonal-only G2 with extracting the full Hessian diagonal",
+    )
     args = parser.parse_args()
     if args.repeats < 1:
         parser.error("--repeats must be positive")
@@ -60,7 +64,7 @@ def main():
             result = Minuit(
                 fcn, *shifted, name=names, grad=grad,
                 hessian=hessian if mode == "jax" else None,
-                g2=(lambda *v: np.diag(hessian(*v))) if mode == "jax" else None,
+                g2=hessian.diagonal if mode == "jax" else None,
             )
             result.errordef = 0.5
             result.strategy = 2
@@ -84,6 +88,33 @@ def main():
             "warm_median_seconds": float(np.median([r["seconds"] for r in runs[1:]])),
             "warm_runs": runs[1:],
         }
+    if args.g2:
+        payload["g2"] = {}
+        reference = []
+        # Measure G2 first: otherwise the final full-Hessian point would
+        # make the last diagonal-only repetition a host-cache hit.
+        for mode, callback in (
+            ("diagonal_only", hessian.diagonal),
+            ("full_hessian_diagonal", lambda *v: np.diag(hessian(*v))),
+        ):
+            times = []
+            for repeat in range(args.repeats + 1):
+                shifted = point.copy()
+                shifted[0] += 1e-3 * (repeat + 1)
+                started = perf_counter()
+                diagonal = callback(*shifted)
+                times.append(perf_counter() - started)
+                if mode == "diagonal_only":
+                    reference.append(diagonal)
+                else:
+                    np.testing.assert_allclose(
+                        diagonal, reference[repeat], rtol=1e-9, atol=1e-8,
+                    )
+            payload["g2"][mode] = {
+                "first_seconds": times[0],
+                "warm_median_seconds": float(np.median(times[1:])),
+                "warm_seconds": times[1:],
+            }
     print(json.dumps(payload, indent=2))
 
 

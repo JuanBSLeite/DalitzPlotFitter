@@ -295,6 +295,60 @@ def test_hessian_cache_tracks_point_and_shares_compilation_across_modes():
     np.testing.assert_allclose(hessian(1.0), [[18.0]])
 
 
+@pytest.mark.parametrize("floating_dynamics", [False, True])
+@pytest.mark.parametrize("batch_size", [1, 2, 3, 10])
+def test_g2_computes_only_diagonal_and_reuses_curvature_caches(
+    floating_dynamics, batch_size, monkeypatch,
+):
+    import jax
+
+    factory = Parameter.dynamics if floating_dynamics else Parameter.coefficient
+    parameters = tuple(
+        factory(f"shape.{name}", value, owner="shape")
+        for name, value in (("z", 3.0), ("x", 1.0), ("y", 2.0))
+    ) + (Parameter("offset", 4.0, fixed=True),)
+
+    def objective(values):
+        x, y, z = (values[f"shape.{name}"] for name in ("x", "y", "z"))
+        return x**2 + x * y + y**3 + y * z + values["offset"] * z**4
+
+    minimizer = Minimizer(
+        objective, parameters, hessian="jax", hessian_batch_size=batch_size,
+    )
+    hessian = minimizer._backend()[4]
+    shared = Minimizer(
+        objective, parameters, hessian_batch_size=batch_size,
+    )._backend()[4]
+    assert hessian.diagonal is shared.diagonal
+
+    transfers = []
+    device_get = jax.device_get
+
+    def record_transfer(value):
+        transfers.append(value.shape)
+        return device_get(value)
+
+    monkeypatch.setattr(jax, "device_get", record_transfer)
+    diagonal = hessian.diagonal(3.0, 1.0, 2.0)
+    np.testing.assert_allclose(diagonal, [432.0, 2.0, 12.0], atol=1e-12)
+    assert transfers == [(3,)]  # One execution; no full matrix/column transfers.
+    assert hessian.diagonal(3.0, 1.0, 2.0) is diagonal
+    assert transfers == [(3,)]
+
+    np.testing.assert_allclose(hessian.diagonal(2.0, 1.0, 1.0), [192.0, 2.0, 6.0])
+    assert transfers == [(3,), (3,)]
+    # A diagonal-only cache must not masquerade as a full Hessian.
+    matrix = hessian(2.0, 1.0, 1.0)
+    np.testing.assert_allclose(
+        matrix, [[192.0, 0.0, 1.0], [0.0, 2.0, 1.0], [1.0, 1.0, 6.0]],
+    )
+    transfers.clear()
+    np.testing.assert_allclose(hessian.diagonal(2.0, 1.0, 1.0), np.diag(matrix))
+    assert not transfers  # Reuse an already-computed full Hessian.
+    np.testing.assert_allclose(hessian.diagonal(3.0, 1.0, 2.0), diagonal)
+    assert transfers == [(3,)]  # Independent point tracking after a full Hessian.
+
+
 def test_dynamic_hessian_dispatches_columns_as_separate_hvps(monkeypatch):
     """Floating dynamics must not put every Hessian column in one XLA program."""
     import jax
@@ -427,6 +481,11 @@ def test_jax_hessian_through_prepared_qmi_matches_gradient_differences(interpola
     free, _, _, grad, hessian = session.minimizer(hessian="jax")._backend()
     point = np.array([p.value for p in free])
     matrix = hessian(*point)
+    # Probe a different point so G2 must use its own program through the
+    # prepared QMI custom VJP rather than just read a cached full matrix.
+    shifted = point + 0.01
+    diagonal = hessian.diagonal(*shifted)
+    np.testing.assert_allclose(diagonal, np.diag(hessian(*shifted)), rtol=2e-10)
     step = 1e-5
     finite_difference = np.column_stack([
         (grad(*(point + step*row)) - grad(*(point - step*row))) / (2*step)
@@ -444,6 +503,7 @@ def test_jax_hessian_recovers_from_negative_curvature_start():
         objective, (Parameter('x', 0.1), Parameter('y', 1.0)), hessian='jax'
     ).fit()
     assert result.valid
+    assert result.ng2 > 0
     np.testing.assert_allclose(abs(result.values['x']), np.sqrt(0.5), atol=1e-6)
     np.testing.assert_allclose(result.fval, -0.25, atol=1e-10)
 

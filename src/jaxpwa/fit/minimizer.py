@@ -295,6 +295,40 @@ class Minimizer:
         # instance that happened to compile it.
         configured_hessian_batch_size = self.hessian_batch_size
 
+        @jax.jit
+        def diagonal_program(vector):
+            def diagonal_entry(index):
+                tangent = jax.nn.one_hot(index, len(names), dtype=vector.dtype)
+                product = jax.jvp(
+                    gradient_function, (vector,), (tangent,),
+                )[1]
+                return product[index]
+
+            # Keep the directional derivatives inside one execution and
+            # retain only H_ii. In particular, do not build a full Hessian
+            # or reuse a grid-wide linearization for floating dynamics.
+            indices = jnp.arange(len(names))
+            batch_size = min(configured_hessian_batch_size, len(names))
+            if batch_size == 1:
+                return jax.lax.map(diagonal_entry, indices)
+            return jax.lax.map(diagonal_entry, indices, batch_size=batch_size)
+
+        diagonal_point = None
+        diagonal_value = None
+
+        def diagonal(*values):
+            """Exact external-coordinate G2 without assembling a new full matrix."""
+            nonlocal diagonal_point, diagonal_value
+            point = np.asarray(values, dtype=float)
+            if hessian_point is not None and np.array_equal(point, hessian_point):
+                return np.diag(hessian_value)
+            if diagonal_point is None or not np.array_equal(point, diagonal_point):
+                diagonal_value = np.asarray(
+                    jax.device_get(diagonal_program(jnp.asarray(point))), dtype=float
+                )
+                diagonal_point = point.copy()
+            return diagonal_value
+
         def hessian(*values):
             nonlocal hessian_point, hessian_value
             point = np.asarray(values, dtype=float)
@@ -349,6 +383,9 @@ class Minimizer:
                 hessian_point = point.copy()
             return hessian_value
 
+        # Keep the existing private backend tuple intact while sharing the
+        # companion G2 callback and its cache with the Hessian executable.
+        hessian.diagonal = diagonal
         backend = (free, names, fcn, grad, hessian)
         self._backend_cache = backend
         if objective_ref is not None:
@@ -487,7 +524,10 @@ class Minimizer:
         free, names, _, _, hessian_callback = self._backend()
         supplied = self._validate_start_values(values)
         point = np.asarray(
-            [float(supplied.get(parameter.name, parameter.value)) for parameter in free],
+            [
+                float(supplied.get(parameter.name, parameter.value))
+                for parameter in free
+            ],
             dtype=float,
         )
         hessian = np.asarray(hessian_callback(*point), dtype=float)
@@ -543,12 +583,13 @@ class Minimizer:
         if self.hessian == "jax":
             derivatives = {
                 "hessian": hessian_callback,
-                "g2": lambda *values: np.diag(hessian_callback(*values)),
+                "g2": hessian_callback.diagonal,
             }
         # iminuit 2.32 normally derives G2 from the Hessian, but its negative-
         # curvature recovery can still call the separate G2 callback. Without
         # it, non-convex starting points raise "NoneType is not callable".
-        # Both callbacks reuse the same cached matrix; silence only the
+        # G2 reuses a cached Hessian at the same point, otherwise computes
+        # only its diagonal. Silence only the
         # misleading warning about supplying both, not numerical warnings.
         # iminuit issues that warning with stacklevel=2, so it is attributed
         # to *this* module (the Minuit(...) call site) rather than
