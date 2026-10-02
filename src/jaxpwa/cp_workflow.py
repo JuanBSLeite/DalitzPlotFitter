@@ -566,6 +566,82 @@ class CPFitSession:
         value is then the full 2x2 axes grid (row 0 the histograms, row 1 the
         pulls) instead of the usual length-2 list.
         """
+        return self._plot_projection(
+            result, variable, bins=bins, range=range,
+            show_components=show_components, show_pulls=show_pulls,
+            log_scale=log_scale, projection_size=projection_size,
+            projection_seed=projection_seed, folded=folded,
+            partner_variable=partner_variable, fold_side=fold_side,
+            selection=selection, axes=axes,
+        )
+
+    def prepare_projection_toy(
+        self, result, *, projection_size=250_000, projection_seed=20260901,
+        method="inverse-transform", **toy_options,
+    ):
+        """Generate reusable signal/background toys at the fitted parameters.
+
+        ``projection_size`` is the total toy count per nonzero charge, allocated
+        across signal/background categories. Their constant histogram weights
+        preserve fitted yields and the joint CP charge split (or the literal
+        per-charge yields of ``YieldAsymmetry``). Signal toys include efficiency
+        and veto; backgrounds respect their own ``apply_veto`` setting.
+
+        ``method`` accepts ``'inverse-transform'`` or ``'accept-reject'``.
+        ``toy_options`` accepts the corresponding resolution/envelope settings
+        from ``generate_toy`` and ``include_momenta`` (False by default).
+        Returns ``CPProjectionToy`` with host arrays, reusable for any binning,
+        folding or selection at these fitted values. It retains no fit session.
+        """
+        from jaxpwa.projection_toys import _prepare_cp_projection_toy
+
+        return _prepare_cp_projection_toy(
+            self, result, projection_size, projection_seed, method, toy_options,
+        )
+
+    def plot_projection_from_toy(
+        self, result, variable="s13", *, bins=60, range=None,
+        show_components=True, show_pulls=False, log_scale=False,
+        projection_size=250_000, projection_seed=20260901, folded=False,
+        partner_variable=None, fold_side="low", selection=None, axes=None,
+        method="inverse-transform", projection_toy=None,
+        include_toy_uncertainty=True, **toy_options,
+    ):
+        """Plot generated model toys with the same options as ``plot_projection``.
+
+        Pass a ``prepare_projection_toy`` result as ``projection_toy`` to avoid
+        regenerating events for each plot. Generation settings are used only
+        when it is omitted; the supplied toy must match this session and result.
+        ``show_components`` displays coherent signal and background categories,
+        just as in ``plot_projection`` (not incoherent resonance toys).
+
+        With ``include_toy_uncertainty=True``, show a one-sigma MC band and use
+        ``(data-model)/sqrt(model + MC_variance)`` for pulls. The MC variance is
+        the sum of squared histogram weights (Poisson approximation); it does
+        not include fit-parameter uncertainty. False gives the original pull
+        convention. Regional selections never renormalize the toy yields.
+        The axes/2x2 pull-grid return convention is unchanged.
+        """
+        return self._plot_projection(
+            result, variable, bins=bins, range=range,
+            show_components=show_components, show_pulls=show_pulls,
+            log_scale=log_scale, projection_size=projection_size,
+            projection_seed=projection_seed, folded=folded,
+            partner_variable=partner_variable, fold_side=fold_side,
+            selection=selection, axes=axes, use_toy=True,
+            projection_toy=projection_toy, method=method,
+            include_toy_uncertainty=include_toy_uncertainty,
+            toy_options=toy_options,
+        )
+
+    def _plot_projection(
+        self, result, variable="s13", *, bins=60, range=None,
+        show_components=True, show_pulls=False, log_scale=False,
+        projection_size=250_000, projection_seed=20260901, folded=False,
+        partner_variable=None, fold_side="low", selection=None, axes=None,
+        use_toy=False, projection_toy=None, method="inverse-transform",
+        include_toy_uncertainty=False, toy_options=None,
+    ):
         import matplotlib.pyplot as plt
         if folded and partner_variable is None:
             raise ValueError("folded=True requires partner_variable")
@@ -609,6 +685,26 @@ class CPFitSession:
             raise ValueError("provide range when both charge datasets are empty")
         hist_range = range if range is not None else (float(np.min(combined)), float(np.max(combined)))
         edges = np.histogram_bin_edges(combined, bins=bins, range=hist_range)
+        if use_toy:
+            if projection_toy is None:
+                projection_toy = self.prepare_projection_toy(
+                    result, projection_size=projection_size,
+                    projection_seed=projection_seed, method=method,
+                    **(toy_options or {}),
+                )
+            projection_toy._check(self, values)
+            plus_components = projection_toy.plus_components
+            minus_components = projection_toy.minus_components
+        else:
+            plus_sample = self.plus_model.generate_phase_space(
+                projection_size, seed=projection_seed,
+            )
+            minus_sample = self.minus_model.generate_phase_space(
+                projection_size, seed=projection_seed + 1,
+            )
+            plus_components, minus_components = self._projection_components_pair(
+                values, plus_sample, minus_sample,
+            )
         grid = None
         pulls_axes = (None, None)
         if axes is None:
@@ -628,9 +724,6 @@ class CPFitSession:
                 _, axes = plt.subplots(
                     1, 2, figsize=(base_w * 2, base_h), constrained_layout=True
                 )
-        plus_sample = self.plus_model.generate_phase_space(projection_size, seed=projection_seed)
-        minus_sample = self.minus_model.generate_phase_space(projection_size, seed=projection_seed + 1)
-        plus_components, minus_components = self._projection_components_pair(values, plus_sample, minus_sample)
         label = (
             rf"$s_{{\mathrm{{{fold_side}}}}}$" if folded else rf"${variable}$"
         )
@@ -645,7 +738,8 @@ class CPFitSession:
                 label=f"B{'+' if charge=='plus' else '-'} data",
                 unit=unit, log_scale=log_scale,
             )
-            total = np.zeros(bins)
+            total = np.zeros(len(edges) - 1)
+            mc_variance = np.zeros_like(total)
             for name, sample, weights in components:
                 mask = _selection_mask(sample)
                 cv = _folded_values(sample)[mask]
@@ -653,20 +747,37 @@ class CPFitSession:
                     cv, bins=edges, weights=np.asarray(weights)[mask]
                 )
                 total += counts
+                if use_toy and include_toy_uncertainty:
+                    mc_variance += np.histogram(
+                        cv, bins=edges, weights=np.asarray(weights)[mask]**2,
+                    )[0]
                 if show_components:
                     ax.stairs(counts, edges, label=name)
             ax.stairs(total, edges, label="total fit", linewidth=2.0)
+            if use_toy and include_toy_uncertainty:
+                error = np.sqrt(mc_variance)
+                lower = np.maximum(
+                    total - error, np.finfo(float).tiny if log_scale else 0.0,
+                )
+                ax.fill_between(
+                    edges, np.r_[lower, lower[-1]],
+                    np.r_[total + error, (total + error)[-1]],
+                    step="post", alpha=0.2, color="grey", label="toy MC uncertainty",
+                )
             axis_label = label + (" [GeV$^2$]" if unit else "")
             ax.legend()
             if ax_pulls is None:
                 ax.set_xlabel(axis_label)
                 continue
             occupied = total > 0
-            pulls = np.full(bins, np.nan)
+            pulls = np.full(total.shape, np.nan)
             pulls[occupied] = (
-                (observed[occupied] - total[occupied]) / np.sqrt(total[occupied])
+                (observed[occupied] - total[occupied])
+                / np.sqrt(total[occupied] + mc_variance[occupied])
             )
             _draw_pulls_1d(ax_pulls, edges, pulls)
+            if use_toy and include_toy_uncertainty:
+                ax_pulls.set_ylabel(r"pull $(o-e)/\sqrt{e+\sigma^2_{MC}}$")
             ax_pulls.set_xlabel(axis_label)
         return grid if show_pulls else axes
 

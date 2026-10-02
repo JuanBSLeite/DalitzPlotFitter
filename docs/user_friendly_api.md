@@ -242,6 +242,65 @@ not renormalize to the selected data count. This also preserves literal
 per-charge counts when using `YieldAsymmetry`. `range` controls the plotted
 variable's window and does not impose a cut on the other Dalitz coordinate.
 
+### CP projections from generated toys
+
+Use `CPFitSession.plot_projection_from_toy` to histogram events generated from
+the fitted density instead of weighting flat phase-space events. It accepts
+every plotting option of `CPFitSession.plot_projection`: `variable`, `bins`,
+`range`, `show_components`, `show_pulls`, `log_scale`, `projection_size`,
+`projection_seed`, `folded`, `partner_variable`, `fold_side`, `selection` and
+`axes`. The return value is still two axes, or a 2x2 axes array with pulls.
+
+```python
+projection_toy = session.prepare_projection_toy(
+    result, projection_size=500_000, projection_seed=123,
+    method="inverse-transform", inverse_resolution=1024,
+)
+# Alternatively: method="accept-reject", pool_size=100_000.
+session.plot_projection_from_toy(
+    result, "s13", projection_toy=projection_toy,
+    folded=True, partner_variable="s23", fold_side="low",
+    bins=80, show_pulls=True,
+)
+session.plot_projection_from_toy(
+    result, "s13", projection_toy=projection_toy,
+    folded=True, partner_variable="s23", fold_side="high",
+    selection=low_mass_region, bins=80, show_pulls=True,
+)
+del projection_toy  # release generated samples after the last plot
+```
+
+Omit `projection_toy` to generate it within one plotting call; pass `method`
+and the generation options directly to that call. Preparing once is faster for
+multiple plots: rebinning and region selection then use only host histograms,
+without reevaluating amplitudes or generating new events. Prepared toys reject
+reuse with a different session or different fitted values; generation options
+only apply when creating a toy. They do not hold the fit session alive.
+
+`projection_size` is the total number generated per nonzero charge. This budget
+is distributed across coherent signal and background categories; their constant
+projection weights preserve the fitted component yields despite integer count
+rounding. Signal generation includes efficiency and veto; background generation
+respects each category's `apply_veto`. Shared signal yields retain their
+accepted-integral charge split; `YieldAsymmetry` keeps its literal per-charge
+counts. Regional cuts never rescale the selected toy to match the selected data.
+`show_components` displays signal/background categories, exactly as in the
+original projection; interfering resonances are not generated independently.
+Precomputed background arrays require replacement with evaluable
+`CPBackgroundSpec` shapes. Moments are omitted by default; request
+`include_momenta=True` during preparation for selections requiring them.
+
+By default a one-sigma toy MC uncertainty band is shown, and pulls use
+`(observed-expected)/sqrt(expected + MC_variance)`. The MC variance is the sum
+of squared histogram weights, a Poisson approximation which omits the negative
+cross-bin correlations from fixed toy counts. It excludes fit-parameter and
+inverse-CDF discretization uncertainty. `include_toy_uncertainty=False` restores
+the original pull denominator and hides the band. Bins with zero predicted
+counts have undefined pulls. Increase toy statistics for sparsely populated
+regions. The [two samplers](toy_generation.md) remain independent: check narrow
+structures by increasing inverse-CDF resolution and comparing accept-reject.
+These toys are rendering samples, not normalization/integration samples.
+
 ## Plot helpers
 
 ```python

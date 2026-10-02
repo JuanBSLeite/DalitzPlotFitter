@@ -146,6 +146,7 @@ from .resolution import (
     SparseMigration,
     SquareDalitzSCFMap,
 )
+from .projection_toys import CPProjectionToy
 from .sampling import weighted_resample
 from .square_histograms import (
     SquareDalitzHistogramBackground,
@@ -188,7 +189,8 @@ __all__ = [
     "TimeDependentToy",
     "generate_time_dependent_toy",
     "AmplitudeComponent", "BackgroundCategory", "BackgroundSpec", "BinnedChi2Result", "BreitWigner1D", "CPBackgroundCategory", "kdtree_local_residuals",
-    "CPBackgroundSpec", "CPFitSession", "CPJointNLL", "CPToyBackground", "BaBarFlatte", "CPRealImag",
+    "CPBackgroundSpec", "CPFitSession", "CPProjectionToy", "CPJointNLL",
+    "CPToyBackground", "BaBarFlatte", "CPRealImag",
     "CoherentAmplitudeModel", "CompositeVeto", "ConstrainedNLL", "ConstantAmplitude",
     "ConvolvedPDF1D", "CovariantAngular", "CovariantKinematics", "CrystalBall1D", "DalitzAmplitude",
     "DecayChannel", "DecayModel", "Exponential1D", "FactorizedDensity", "FitSession",
