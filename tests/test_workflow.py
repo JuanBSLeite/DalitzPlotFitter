@@ -397,6 +397,37 @@ def test_invalid_weighted_fit_skips_postfit_covariance(monkeypatch, covariance):
     assert result.covariance is None
 
 
+@pytest.mark.parametrize("covariance", ["sandwich", "sumw2"])
+def test_weighted_fit_returning_nesterov_endpoint_skips_postfit_covariance(
+    monkeypatch, covariance
+):
+    from jaxpwa.fit import Minimizer
+    from jaxpwa.fit.nesterov import NesterovResult
+
+    # nesterov-minuit falls back to the Nesterov endpoint when the Minuit
+    # continuation worsens the NLL. That endpoint has no Minuit parameter
+    # list or covariance, so the session must warn instead of crashing.
+    endpoint = NesterovResult(
+        values={"NR.x": 0.9}, fval=1.0, valid=True, status="converged",
+        converged=True, history=(), nfcn=1, errors={"NR.x": float("nan")},
+    )
+    monkeypatch.setattr(Minimizer, "fit", lambda *args, **kwargs: endpoint)
+
+    def forbidden_hessian(*args, **kwargs):
+        pytest.fail("A Nesterov endpoint must not evaluate postfit Hessians")
+
+    monkeypatch.setattr(Minimizer, "jax_hessian", forbidden_hessian)
+    session = FitSession(_model(), _data())
+    with pytest.warns(RuntimeWarning, match="Nesterov endpoint"):
+        result = session.fit(
+            weights=jnp.asarray([1.0, -0.25]),
+            covariance=covariance,
+            method="nesterov-minuit",
+        )
+    assert result is endpoint
+    assert result.covariance is None
+
+
 def test_fit_session_weighted_fit_rejects_explicit_background_mixture():
     model = _model()
     session = FitSession(

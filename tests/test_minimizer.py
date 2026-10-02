@@ -63,6 +63,53 @@ def test_minimizer_can_run_nesterov_as_a_prefit_or_standalone():
     assert math.isclose(float(refined.values["y"]), -0.75, abs_tol=1e-6)
 
 
+def test_nesterov_minuit_keeps_an_invalid_but_improved_migrad_continuation():
+    from jaxpwa.fit.nesterov import NesterovResult
+
+    parameters = (
+        Parameter("x", -1.5, bounds=(-5.0, 5.0), step=0.1),
+        Parameter("y", 2.0, bounds=(-5.0, 5.0), step=0.1),
+    )
+
+    def rosenbrock(values):
+        return (1.0 - values["x"]) ** 2 + 100.0 * (values["y"] - values["x"] ** 2) ** 2
+
+    prefit = Minimizer(rosenbrock, parameters).fit(
+        method="nesterov", strategy=1, nesterov_max_iter=3,
+    )
+    # A tiny call budget stops MIGRAD at its call limit (invalid) after it has
+    # already lowered the NLL below the unconverged Nesterov endpoint.
+    result = Minimizer(rosenbrock, parameters).fit(
+        method="nesterov-minuit", strategy=1, hesse=False,
+        nesterov_max_iter=3, ncall=15,
+    )
+    assert not isinstance(result, NesterovResult)
+    assert not result.valid
+    assert float(result.fval) < float(prefit.fval)
+
+
+def test_nesterov_stops_when_stalled_at_a_log_singularity():
+    import jax.numpy as jnp
+
+    from jaxpwa.fit.nesterov import STALL_ITERATIONS, minimize
+
+    # Unbounded below at x=0.2, like a signed-weight NLL whose density goes to
+    # zero at a negative-weight event: the gradient diverges, backtracking
+    # drives the step to floating-point resolution, and the NLL freezes.
+    parameters = (Parameter("x", 1.0, step=0.1), Parameter("y", 0.3, step=0.1))
+
+    def objective(values):
+        return jnp.log((values["x"] - 0.2) ** 2 + 1e-30) + (values["y"] - 0.5) ** 2
+
+    result = minimize(objective, parameters, max_iter=300)
+    assert result.status == "stalled"
+    assert not result.valid
+    iterations = len(result.history) - 1
+    assert iterations < 300
+    frozen = [entry["nll"] for entry in result.history[-STALL_ITERATIONS - 1:]]
+    assert len(set(frozen)) == 1
+
+
 @pytest.mark.parametrize("strategy", [-1, 3, True, 1.5])
 def test_minimizer_rejects_invalid_strategy(strategy):
     parameter = Parameter("x", 0.0)

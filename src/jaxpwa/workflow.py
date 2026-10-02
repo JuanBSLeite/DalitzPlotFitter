@@ -21,6 +21,7 @@ from jaxpwa.background import BackgroundCategory
 from jaxpwa.constraints import ConstrainedNLL
 from jaxpwa.efficiency import UnityEfficiency
 from jaxpwa.fit import Minimizer, Parameter
+from jaxpwa.fit.nesterov import NesterovResult
 from jaxpwa.goodness_of_fit import (
     BinnedChi2Result,
     PointToPointResult,
@@ -675,7 +676,16 @@ class FitSession:
             nesterov_gtol=nesterov_gtol,
         )
 
-        if corrected_weight_covariance and (
+        if corrected_weight_covariance and isinstance(result, NesterovResult):
+            warnings.warn(
+                "The Minuit continuation of the Nesterov prefit was rejected "
+                "(non-finite or higher NLL), so the Nesterov endpoint is returned; "
+                "skipping corrected covariance. It has no EDM or covariance check; "
+                "do not report uncertainties from it.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        elif corrected_weight_covariance and (
             not bool(result.valid) or not np.isfinite(float(result.fval))
         ):
             warnings.warn(

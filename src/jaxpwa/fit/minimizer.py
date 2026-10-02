@@ -628,7 +628,9 @@ class Minimizer:
         approximate limit while completing an iteration. ``method="nesterov"``
         returns the fast Nesterov endpoint; ``method="nesterov-minuit"`` uses
         it as the starting point for the ordinary strategy-1/2 Minuit fit.
-        Invalid or worsened Minuit continuations are rejected.
+        Non-finite or worsened Minuit continuations are rejected in favor of
+        the Nesterov endpoint; an invalid continuation that does not worsen
+        the NLL is returned with its invalid status.
         """
         ncall = self._validate_ncall(ncall)
         strategy = self._validate_strategy(strategy)
@@ -669,11 +671,19 @@ class Minimizer:
             ncall=ncall,
         )
         if (prefit is not None and
-                (not bool(result.valid) or not np.isfinite(float(result.fval)) or
+                (not np.isfinite(float(result.fval)) or
                  float(result.fval) > float(prefit.fval))):
-            self._log("MIGRAD produced an invalid or worsened continuation; "
+            self._log("MIGRAD produced a non-finite or worsened continuation; "
                       "returning the Nesterov endpoint")
             return prefit
+        if prefit is not None and not bool(result.valid):
+            # An invalid MIGRAD (call limit, EDM above target, failed error
+            # matrix) that still lowered the NLL is a better point than the
+            # Nesterov endpoint, which carries no EDM or covariance check of
+            # its own. Return it with its invalid status, as method="minuit"
+            # does, instead of discarding the improvement.
+            self._log("MIGRAD continuation is invalid but did not worsen the "
+                      "Nesterov NLL; returning it with its invalid status")
         self._log(f"single fit finished: {self._summary(result)}")
         return result
 

@@ -34,12 +34,30 @@ bounds, backtracking, and restart after a failed extrapolation. It is a
 nonconvex heuristic here: the convex (O(1/k^2)) guarantee does not apply to
 the amplitude likelihood, and the result is not a global-minimum guarantee.
 
-The Minuit continuation is checked against the Nesterov endpoint. An invalid,
-non-finite, or higher-NLL continuation is rejected and the Nesterov result is
-returned. Within Minuit, the best finite stage is restored if a later MIGRAD
+The Nesterov stage stops with `status="stalled"` after five consecutive
+accepted iterations without any NLL decrease. This happens when backtracking
+has shrunk the step to floating-point resolution, typically near a point where
+the objective is unbounded below and its gradient diverges. The classic case
+is an event-weighted NLL with negative weights, where `-w_i log p_i` goes to
+`-inf` as the density at a negative-weight event goes to zero. A stalled
+endpoint is not a minimum, and a rising projected gradient in the progress
+output is the signature of this case.
+
+The Minuit continuation is checked against the Nesterov endpoint. A
+non-finite or higher-NLL continuation is rejected and the Nesterov result is
+returned. An invalid continuation (call limit reached, EDM above target, or a
+failed error matrix) that does not raise the NLL is returned with its invalid
+status, exactly as `method="minuit"` would return it: it is at least as good a
+point as the Nesterov endpoint, which has no EDM or covariance check of its
+own. Within Minuit, the best finite stage is restored if a later MIGRAD
 stage worsens the NLL. This prevents an unstable continuation from becoming
 the reported fit, but it does not turn a non-converged Nesterov endpoint into
 a valid statistical minimum; inspect `result.valid`, NLL, EDM, and covariance.
+
+In an event-weighted `FitSession.fit(weights=..., covariance="sandwich"|"sumw2")`,
+a returned Nesterov endpoint has no covariance to correct: the session warns
+and skips the corrected covariance, as it already does for an invalid Minuit
+result.
 
 ## NLL and Minuit convention
 

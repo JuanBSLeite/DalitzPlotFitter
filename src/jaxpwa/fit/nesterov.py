@@ -11,6 +11,11 @@ import jax.numpy as jnp
 import numpy as np
 
 
+# Consecutive accepted iterations without any NLL decrease before the run is
+# reported as ``status="stalled"``.
+STALL_ITERATIONS = 5
+
+
 @dataclass(frozen=True)
 class NesterovResult:
     """Minuit-compatible result returned by a Nesterov-only fit."""
@@ -73,6 +78,7 @@ def minimize(objective: Callable, parameters: Sequence, *,
 
     f, g = evaluate(x)
     y, t, step = x.copy(), 1.0, 1.0
+    stalled_iterations = 0
     history = [{"iteration": 0, "nll": f, "projected_gradient": residual(x, g)}]
     status = "max_iter"
     for iteration in range(1, max_iter + 1):
@@ -100,6 +106,11 @@ def minimize(objective: Callable, parameters: Sequence, *,
         if not accepted:
             status = "line_search_failed"
             break
+        # The acceptance test allows fc == f, so once backtracking has driven
+        # the step to floating-point resolution (e.g. near a log singularity
+        # of a signed-weight NLL, where the gradient diverges) every iteration
+        # is "accepted" without moving. Stop instead of spinning to max_iter.
+        stalled_iterations = stalled_iterations + 1 if fc >= f else 0
         old_x, x, f, g, step = x, candidate, fc, gc, trial
         t_next = (1.0 + np.sqrt(1.0 + 4.0 * t * t)) / 2.0
         y = np.clip(x + (t - 1.0) / t_next * (x - old_x), lower, upper)
@@ -110,6 +121,9 @@ def minimize(objective: Callable, parameters: Sequence, *,
         if report_every is not None and iteration % report_every == 0:
             print(f"[Nesterov] {iteration}: NLL={f:.9f}, "
                   f"projected gradient={residual(x, g):.4g}", flush=True)
+        if stalled_iterations >= STALL_ITERATIONS:
+            status = "stalled"
+            break
     if residual(x, g) <= gtol:
         status = "converged"
     physical = origin + scales * x
