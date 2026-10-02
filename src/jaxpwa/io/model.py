@@ -133,8 +133,6 @@ _DECAY_MODEL_SCALAR_KWARGS = (
     "normalization_narrow_width",
     "normalization_narrow_window",
     "normalization_binning_factor",
-    "normalization_chunk_size",
-    "dynamics_microbatch_size",
 )
 
 
@@ -305,16 +303,10 @@ def model_from_spec(
         final_state=tuple(spec["channel"]["final_state"]),
     )
     components = [_decode(component, registry) for component in spec["components"]]
-    # This performance-only option was added without changing the physics
-    # specification version. Older files therefore retain its constructor
-    # default, while all pre-existing required fields stay strict.
-    kwargs = {
-        name: spec[name]
-        for name in _DECAY_MODEL_SCALAR_KWARGS
-        if name != "dynamics_microbatch_size"
-    }
-    if "dynamics_microbatch_size" in spec:
-        kwargs["dynamics_microbatch_size"] = spec["dynamics_microbatch_size"]
+    # Files written before the normalization-chunk/microbatch tuning options
+    # were removed still carry ``normalization_chunk_size`` and
+    # ``dynamics_microbatch_size``; they are simply ignored here.
+    kwargs = {name: spec[name] for name in _DECAY_MODEL_SCALAR_KWARGS}
     kwargs["normalization_pair"] = tuple(spec["normalization_pair"])
     return DecayModel(channel, components, **kwargs)
 

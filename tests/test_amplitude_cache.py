@@ -205,9 +205,7 @@ def test_compact_efficiency_weighted_matrix_matches_direct_recomputation():
     )
 
 
-def test_chunked_compact_normalization_matches_direct_partial_tail():
-    # Use an event-local mock. Physics amplitudes are functions of event
-    # coordinates, so their values must not depend on how the batch is chunked.
+def test_compact_normalization_matches_direct_computation():
     f1 = EventAmplitude([1.0 + 0.0j, 2.0 - 0.2j, 0.3 + 0.4j])
     f2 = EventAmplitude([0.2 + 0.1j, 0.4 - 0.2j, -0.7 + 0.3j])
     c1 = _coefficient("a", 1.0, 0.0, fixed=True)
@@ -226,7 +224,6 @@ def test_chunked_compact_normalization_matches_direct_partial_tail():
         normalization_weights=weights,
         efficiency_normalization=efficiency,
         parameters=(*c1.parameters, *c2.parameters),
-        normalization_chunk_size=7,
     )
 
     raw_norm = jnp.stack(

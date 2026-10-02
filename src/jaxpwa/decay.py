@@ -15,11 +15,6 @@ from jaxpwa.amplitude import (
     ConstantAmplitude,
     PreparedAmplitudeCache,
 )
-from jaxpwa.amplitude.cache import (
-    DEFAULT_DYNAMICS_MICROBATCH_PARALLELISM,
-    DEFAULT_DYNAMICS_MICROBATCH_SIZE,
-    DEFAULT_NORMALIZATION_CHUNK_SIZE,
-)
 from jaxpwa.amplitude.components import coefficient_value
 from jaxpwa.dynamics import (
     CovariantAngular,
@@ -405,25 +400,6 @@ class DecayModel:
         Use sample.with_importance_weights(q) for a known proposal density q.
         A common weight scale changes the density measure; use consistent
         conventions across components and charge samples.
-    normalization_chunk_size:
-        Maximum number of normalization points in one prepared macro-chunk.
-        The effective static width is balanced automatically below this limit
-        to minimize padding. Smaller values reduce preparation memory at the
-        cost of more chunk executions. Floating-dynamics evaluation may
-        subdivide these blocks further to bound automatic-differentiation
-        memory. Default: 100000.
-    dynamics_microbatch_size:
-        Maximum number of normalization points differentiated together inside
-        each floating-dynamics macro-chunk. The effective static width is
-        balanced automatically below this limit to minimize padding. Larger
-        values can improve throughput on GPUs with more VRAM; smaller values
-        lower peak AD memory. QMI is prepared directly under this limit because
-        its cached order is block-local. Default: 20000.
-    dynamics_microbatch_parallelism:
-        Number of ordinary floating-dynamics microbatches evaluated concurrently
-        with ``vmap`` inside each macro-chunk. Larger values can improve GPU
-        throughput at the cost of peak AD memory. QMI keeps this at one because
-        its prepared order is block-local. Default: 1.
 
     Notes
     -----
@@ -443,9 +419,6 @@ class DecayModel:
     normalization_narrow_width: float
     normalization_narrow_window: float
     normalization_binning_factor: float
-    normalization_chunk_size: int
-    dynamics_microbatch_size: int
-    dynamics_microbatch_parallelism: int
     _normalization_sample: PhaseSpaceSample | None
     _amplitude_model: CoherentAmplitudeModel | None
     _compact_prepare_kernels: dict[tuple[bool, bool], object]
@@ -470,9 +443,6 @@ class DecayModel:
         normalization_narrow_window: float = 5.0,
         normalization_binning_factor: float = 20.0, 
         normalization_sample: PhaseSpaceSample | None = None,
-        normalization_chunk_size: int = DEFAULT_NORMALIZATION_CHUNK_SIZE,
-        dynamics_microbatch_size: int = DEFAULT_DYNAMICS_MICROBATCH_SIZE,
-        dynamics_microbatch_parallelism: int = DEFAULT_DYNAMICS_MICROBATCH_PARALLELISM,
     ) -> None:
         if normalization_resolution < 2:
             raise ValueError("normalization_resolution must be at least 2")
@@ -507,22 +477,6 @@ class DecayModel:
             raise ValueError("normalization_narrow_window must be positive")
         if normalization_binning_factor <= 0.0:
             raise ValueError("normalization_binning_factor must be positive")
-        if normalization_chunk_size < 1:
-            raise ValueError("normalization_chunk_size must be positive")
-        if (
-            isinstance(dynamics_microbatch_size, bool)
-            or not isinstance(dynamics_microbatch_size, int)
-            or dynamics_microbatch_size < 1
-        ):
-            raise ValueError("dynamics_microbatch_size must be a positive integer")
-        if (
-            isinstance(dynamics_microbatch_parallelism, bool)
-            or not isinstance(dynamics_microbatch_parallelism, int)
-            or dynamics_microbatch_parallelism < 1
-        ):
-            raise ValueError(
-                "dynamics_microbatch_parallelism must be a positive integer"
-            )
         object.__setattr__(self, "channel", channel)
         object.__setattr__(self, "components", tuple(components))
         object.__setattr__(self, "normalize_components", bool(normalize_components))
@@ -540,13 +494,6 @@ class DecayModel:
         )
         object.__setattr__(
             self, "normalization_binning_factor", float(normalization_binning_factor)
-        )
-        object.__setattr__(self, "normalization_chunk_size", int(normalization_chunk_size))
-        object.__setattr__(self, "dynamics_microbatch_size", dynamics_microbatch_size)
-        object.__setattr__(
-            self,
-            "dynamics_microbatch_parallelism",
-            dynamics_microbatch_parallelism,
         )
         object.__setattr__(self, "_normalization_sample", normalization_sample)
         object.__setattr__(self, "_amplitude_model", None)
@@ -683,7 +630,6 @@ class DecayModel:
                 "adaptive": False,
                 "sample_size": sample.size,
                 "weighted": bool(jnp.any(jnp.asarray(sample.weights) != 1.0)),
-                "chunk_size": self.normalization_chunk_size,
             }
 
         narrow = self._adaptive_narrow_resonances()
@@ -800,9 +746,6 @@ class DecayModel:
             normalization_narrow_window=self.normalization_narrow_window,
             normalization_binning_factor=self.normalization_binning_factor,
             normalization_sample=normalization_sample,
-            normalization_chunk_size=self.normalization_chunk_size,
-            dynamics_microbatch_size=self.dynamics_microbatch_size,
-            dynamics_microbatch_parallelism=self.dynamics_microbatch_parallelism,
         )
 
     @property
@@ -1004,7 +947,6 @@ class DecayModel:
                 self.amplitude_model.components,
                 normalize_components=normalize_components,
                 has_efficiency=has_efficiency,
-                normalization_chunk_size=self.normalization_chunk_size,
             )
             self._compact_prepare_kernels[key] = kernel
         return kernel
@@ -1171,9 +1113,6 @@ class DecayModel:
             efficiency_normalization=efficiency_normalization,
             normalize_components=normalize,
             compact_prepare_kernel=compact_kernel,
-            normalization_chunk_size=self.normalization_chunk_size,
-            dynamics_microbatch_size=self.dynamics_microbatch_size,
-            dynamics_microbatch_parallelism=self.dynamics_microbatch_parallelism,
         )
         if can_reuse_normalization:
             self._fixed_normalization_templates[template_key] = (

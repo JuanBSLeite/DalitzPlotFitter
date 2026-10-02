@@ -1,5 +1,11 @@
 # Dynamics microbatching and bounded-memory Hessian review — 2026-09-19
 
+> **Superseded (2026-10-02).** The mechanism reviewed here — `normalization_chunk_size`,
+> `dynamics_microbatch_size`, `dynamics_microbatch_parallelism` and `hessian_batch_size` — was
+> removed from the package, and the XLA program now covers the whole normalization sample. This
+> write-up is kept as the historical record of the removed code; its test names and
+> `benchmark_dynamics_chunking_sweep.py` no longer exist.
+
 Adversarial review of commit `a77f130` ("improve chucks for free dynamics"), which added the
 `dynamics_microbatch_size` AD microbatching path in `PreparedAmplitudeCache` (see "AD
 microbatching for floating-dynamics normalization on constrained GPUs" and "Bounded-memory

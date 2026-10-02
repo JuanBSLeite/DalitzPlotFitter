@@ -97,7 +97,7 @@ def main():
         times.append(perf_counter() - tick)
     curvature = np.asarray(hessian(*point)) if args.hessian else None
     report("hessian" if args.hessian else "warm_gradient")
-    leaves = jax.tree_util.tree_leaves((cache.data, cache.normalization_chunks))
+    leaves = jax.tree_util.tree_leaves(cache.data)
     payload = dict(
         device=device.device_kind,
         backend=device.platform,

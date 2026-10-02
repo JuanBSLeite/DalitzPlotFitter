@@ -426,7 +426,6 @@ With iminuit >= 2.32, automatic second derivatives can be selected explicitly:
 result = session.fit(
     strategy=1,
     hessian="jax",
-    hessian_batch_size=1,
     hesse=True,
     verbose=1,
 )
@@ -436,7 +435,6 @@ minimizer = Minimizer(
     nll,
     parameters,
     hessian="jax",
-    hessian_batch_size=1,
     verbose=1,
 )
 ```
@@ -446,9 +444,8 @@ Hessian during MIGRAD; Minuit still handles bounds, covariance inversion and the
 `errordef` scaling. The exception is `FitSession.fit(..., covariance="sweight")`,
 where `"jax"` is reserved for the postfit squared-weight covariance as described
 above. It requires an objective differentiable twice. For floating
-dynamics, `hessian_batch_size=1` evaluates Hessian-vector products sequentially
-and minimizes peak memory. Larger values evaluate several columns together and
-can improve throughput on GPUs with more VRAM. This supports QMI's custom VJPs
+dynamics, Hessian-vector products are evaluated sequentially, which minimizes
+peak memory. This supports QMI's custom VJPs
 without requiring the full event-by-parameter batch. This reduces repeated
 likelihood probes but does not guarantee a faster fit: second-order JIT
 compilation and retained intermediate arrays can be expensive. Compilation is

@@ -558,7 +558,6 @@ class FitSession:
         tolerance: float = 1e-4,
         verbose: int = 0,
         hessian: str = "numerical",
-        hessian_batch_size: int = 1,
     ) -> Minimizer:
         """Build a `Minimizer` over `self.objective` and `self.parameters`."""
         return Minimizer(
@@ -567,7 +566,6 @@ class FitSession:
             tolerance=tolerance,
             verbose=verbose,
             hessian=hessian,
-            hessian_batch_size=hessian_batch_size,
         )
 
     def fit(
@@ -583,7 +581,6 @@ class FitSession:
         tolerance: float = 1e-4,
         verbose: int = 0,
         hessian: str = "numerical",
-        hessian_batch_size: int = 1,
         method: str = "minuit",
         nesterov_max_iter: int = 1000,
         nesterov_gtol: float = 1e-4,
@@ -639,7 +636,6 @@ class FitSession:
                 tolerance=tolerance,
                 verbose=verbose,
                 hessian=hessian,
-                hessian_batch_size=hessian_batch_size,
             )
         else:
             weighted_objective = self._weighted_objective(weights)
@@ -666,7 +662,6 @@ class FitSession:
                 tolerance=tolerance,
                 verbose=verbose,
                 hessian=minimization_hessian,
-                hessian_batch_size=hessian_batch_size,
             )
 
         result = minimizer.fit(
@@ -705,7 +700,6 @@ class FitSession:
                     tolerance=tolerance,
                     verbose=verbose,
                     hessian="jax",
-                    hessian_batch_size=hessian_batch_size,
                 )
                 second_names, variability = squared_minimizer.jax_hessian(fitted)
                 if second_names != names:
@@ -723,7 +717,6 @@ class FitSession:
                     tolerance=tolerance,
                     verbose=verbose,
                     hessian="jax",
-                    hessian_batch_size=hessian_batch_size,
                 )
                 second_names, variability = score_outer_minimizer.jax_hessian(fitted)
                 if second_names != names:
@@ -753,14 +746,12 @@ class FitSession:
         tolerance: float = 1e-4,
         verbose: int = 0,
         hessian: str = "numerical",
-        hessian_batch_size: int = 1,
     ):
         """Fit from `n_starts` randomized initial values, keeping the best result."""
         return self.minimizer(
             tolerance=tolerance,
             verbose=verbose,
             hessian=hessian,
-            hessian_batch_size=hessian_batch_size,
         ).fit_multistart(
             n_starts=n_starts,
             seed=seed,
