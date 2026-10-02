@@ -23,16 +23,18 @@ Efficiency and veto values on the data and normalization sample are also evaluat
 
 ## Compact coefficient-only cache
 
-If no dynamical parameter is floating, `PreparedAmplitudeCache` uses a dedicated compact preparation path. Fixed component evaluations, component normalization and construction of the normalization matrix are compiled with JAX as one program over the complete normalization sample, and XLA decides how to schedule its memory. There are no user-visible chunk, microbatch or batch-size options.
+If no dynamical parameter is floating, `PreparedAmplitudeCache` uses a dedicated compact preparation path. Fixed component evaluations, component normalization and construction of the normalization matrix are compiled with JAX, while the large normalization sample is processed in fixed-size chunks.
 
-The matrix is the full-sample quadrature sum,
+For these fits the chunk size is 100,000 points (`normalization_chunk_size="auto"` resolves to it; an integer overrides it). Their chunks only amortize XLA compilation: for a one-million-point Square-Dalitz grid, ten chunks reuse the same XLA executable instead of compiling one very large graph specialized to one million points. There is no automatic differentiation through the grid here, so memory is not the constraint.
+
+The matrix is accumulated as sums over chunks,
 
 \[
-M_{ij}=\frac{1}{N}\sum_{n=1}^{N}
+M_{ij}=\frac{1}{N}\sum_k\sum_{n\in k}
  w_n F_i^*(x_n)F_j(x_n),
 \]
 
-compiled for the exact normalization-sample shape. The price of one program over a large grid is XLA compilation time, which grows with the static array shape: on one CUDA run with one million normalization points, a full-grid normalization graph spent about 15.2 s in compilation while the execution itself took about 0.25 s. This cold-start cost is paid once per sample shape and process; `benchmarks/benchmark_cache_stages.py` reports it separately from execution.
+so chunking changes only the execution schedule, not the quadrature convention. A partial final chunk is padded with a valid physical event and zero integration weights, so padded entries do not contribute.
 
 When no efficiency map is present, the bare component matrix is needed to normalize individual components. After obtaining scales
 
@@ -59,8 +61,8 @@ For multiple floating dynamical components, all affected normalization-matrix ro
 ### Hermitian dynamic normalization blocks
 
 For every amplitude type, real integration/acceptance weights imply
-`M_ji = conj(M_ij)`. The dynamic cache
-integrates only the diagonal and upper triangle of the dynamic-dynamic block,
+`M_ji = conj(M_ij)`. Both the chunked and unchunked dynamic-cache paths
+integrate only the diagonal and upper triangle of the dynamic-dynamic block,
 then fill the lower triangle by conjugation. With `d` floating components,
 this evaluates `d * (d + 1) / 2` unique component-pair integrals instead of
 `d**2`. The dynamic-fixed rectangular block is also integrated once and
@@ -87,7 +89,7 @@ JVP implements the exact identity
 The cross product `F^H W dF` is generally not Hermitian, so that derivative
 uses a full matrix product. This preserves efficient JAX gradients and
 forward-over-reverse Hessians while avoiding duplicated primal integrals.
-Global component scales use the
+Global component scales are applied after summing all chunks, with the
 original `mean(weights * f)` convention and sample-size denominator.
 
 Fewer pair integrals do not guarantee a shorter fit: dense matrix products
@@ -107,19 +109,19 @@ within floating-point rounding, and retained 67,232,256 cache bytes.
 This checks evaluation cost and equivalence at phase-space starting points,
 not fit convergence or a GPU speedup.
 
-For floating dynamics the cache keeps the prepared normalization events and the
-fixed normalization amplitudes for the whole sample, and reevaluates only the
-floating components at each step. There is no user-controlled partitioning of
-the normalization grid: forward and reverse passes are compiled over the full
-sample and XLA schedules their temporary memory. Peak memory of the reverse-AD
-pass therefore scales with the number of normalization points times the number
-of floating lineshapes, which can matter on a small GPU. If a fit exhausts
-device memory, reduce `normalization_resolution` only after a normalization-
-convergence check, since the grid resolution controls quadrature accuracy.
+For floating dynamics, `normalization_chunk_size` also sets the size of the
+prepared normalization blocks. Each block is accumulated with `jax.lax.scan` and
+checkpointed, so gradients and Hessian-vector products retain the forward
+residuals of one block, not of the whole grid. Every block is prepared on its
+own, which is what QMI needs because its cached sort indices are valid only for
+the block they were computed on. The effective block width is balanced below
+the requested size to minimize tail padding. The grid resolution still controls
+quadrature accuracy and should not be reduced without a normalization-
+convergence check; the chunk size changes only the schedule.
 
 ### `compact_prepared_data` must be defined for every floating component type
 
-`PreparedAmplitudeCache.prepare` retains, for a floating-dynamics model, only the
+`PreparedAmplitudeCache._prepare_chunked_dynamics` retains, per normalization chunk, only the
 union of what each *floating* (`ParameterKind.DYNAMICS`-owned) component's
 `compact_prepared_data(data)` reports it needs (`_compact_prepared_component_data` in
 `amplitude/cache.py`). This union is computed by iterating the floating components and returning
@@ -179,8 +181,8 @@ Measure the device process as well when assessing a laptop's VRAM budget.
 
 On the RTX 3050 Ti (4 GiB), the 2026-09-19 end-to-end check used the notebook's
 95,074 accepted events, 41 free parameters, and one million normalization
-points per charge. With the former dynamic microbatching and sequential Hessian-vector
-products (the microbatching options no longer exist), the full toy-0 MIGRAD+HESSE fit completed with `hessian="jax"`,
+points per charge. With dynamic microbatching (a since-removed option) and sequential Hessian-vector
+products, the full toy-0 MIGRAD+HESSE fit completed with `hessian="jax"`,
 `valid=True`, accurate covariance, EDM `9.433e-8`, and NLL
 `-494077.2905459427`. The complete diagnostic, including explicit pre-fit
 value/gradient and Hessian evaluations, took 219.4 s; the already-compiled fit
@@ -366,28 +368,72 @@ cache's compact evaluation path. Call `cache.check_parameters(parameters)` befor
 constructing `Minimizer` whenever the two parameter lists are not obviously the
 same object.
 
-### Memory of floating-dynamics normalization is left to XLA
+### Memory-aware normalization chunks (`normalization_chunk_size="auto"`)
 
-Earlier versions split the floating-dynamics normalization into macro-chunks
-(`normalization_chunk_size`) and re-split each into checkpointed microbatches
-(`dynamics_microbatch_size`, `dynamics_microbatch_parallelism`), and exposed
-`hessian_batch_size` for the automatic Hessian. These options were removed to
-simplify the cache: the normalization is now one program over the whole sample,
-and XLA schedules its memory. See
-[the 2026-09-19 review](reviews/20260919_dynamics_chunking_and_hessian_review.md)
-for the history of the removed mechanism.
+`normalization_chunk_size` is a positive integer or `"auto"`, which is the
+default of `DecayModel`, `FourBodyDecayModel` and `PreparedAmplitudeCache.prepare`.
+It is the only memory option. Earlier versions also had
+`dynamics_microbatch_size`, `dynamics_microbatch_parallelism` and
+`hessian_batch_size`; they were removed (see
+[the 2026-09-19 review](reviews/20260919_dynamics_chunking_and_hessian_review.md)).
 
-The motivation for the removed options was a real constraint, and it can
-return: on a 4 GB GPU (RTX 3050 Ti), differentiating one million-point
-normalization grid through several floating parametric lineshapes with
-barrier and angular factors (a `B -> 3pi` CP model with 41 free parameters, 4
-floating-mass/width resonances, `normalization_resolution=1000`) exhausted
-memory with a 1.4 GiB allocation on the first MIGRAD gradient call, before
-any microbatching existed. Whether XLA's own scheduling and rematerialization
-now avoid this for a given model and GPU has not been re-measured after the
-removal. If a floating-dynamics fit runs out of device memory, the remaining
-levers are a smaller `normalization_resolution` (after a normalization-
-convergence check), fewer floating dynamical parameters, or a larger device.
+The reverse-mode AD pass through floating lineshapes needs memory proportional
+to the number of normalization points in one chunk. On a 4 GB GPU, one
+unchunked million-point grid through several floating lineshapes
+(a `B -> 3pi` CP model with 41 free parameters, 4 floating mass/width
+resonances) once exhausted memory with a 1.4 GiB allocation on the first
+MIGRAD gradient call. `"auto"` therefore sizes the chunk from the device:
+
+1. **Budget.** `MEMORY_FRACTION = 0.5` of the free memory,
+   `bytes_limit - bytes_in_use` from `device.memory_stats()`. The remainder is
+   headroom for the allocator pool, the CUDA context, autotuning scratch space
+   and what is allocated after preparation. The fraction is an internal
+   constant in `amplitude/memory.py`, not a public option.
+2. **Cost per point, measured.** The forward-over-reverse Hessian-vector product
+   of the normalization is compiled, not run, on the first 20,000 points, and
+   `compiled.memory_analysis().temp_size_in_bytes / points` gives bytes per
+   point. This is the heaviest program a fit needs, so value, gradient and
+   Hessian all fit. The scaling is linear (5,000 to 40,000 points: about 533 B
+   per point for the gradient and 1,156 B for the Hessian-vector product, a
+   stable ratio of 2.17), so one probe suffices.
+3. **Resident blocks.** The prepared blocks stay on the device for the whole fit
+   whatever the chunk size; their measured size is subtracted from the budget.
+4. **Chunk.** `(budget - resident) / bytes_per_point`, between 2,048 points and
+   the sample size, then balanced to minimize padding. If the whole sample fits
+   there is a single block and no scan.
+
+Without device memory statistics (the CPU backend, or
+`XLA_PYTHON_CLIENT_ALLOCATOR=platform`) the previous fixed 100,000 is used and no
+probe is compiled; samples of at most 20,000 points are one block. The result
+is memoized per model, so a toy loop compiles the probe once. Low-level callers
+of `PreparedAmplitudeCache.prepare` can pass `chunk_size_memo` to share it. An
+`INFO Jax-PWA normalization: automatic chunk size ...` line reports the choice.
+
+Measured on the RTX 3050 Ti (4 GiB) with a two-floating-component model
+(Gounaris-Sakurai rho plus a Hermite QMI S-wave) and a one-million-point grid,
+for one value+gradient plus one Hessian-vector product:
+
+| chunk | peak live JAX | process VRAM | first call | warm value+grad |
+|---|---:|---:|---:|---:|
+| whole grid (what `"auto"` chose, 1185 B/point) | 852 MiB | 2926 MiB | 37.4 s | 49 ms |
+| 100,000 | 271 MiB | 1024 MiB | 11.0 s | 74 ms |
+
+NLL, gradient norm and Hessian-vector-product norm were identical to six
+decimals. A smaller chunk lowers memory and the first-call compilation time and
+costs about 50% in warm time, because of the scan. With
+`XLA_PYTHON_CLIENT_MEM_FRACTION=0.3`, `"auto"` chose 379,553 points (three
+blocks of 333,334); with `0.15`, 129,145 points (eight blocks of 125,000), with
+unchanged results. If cold-start time matters more than warm time, pass an
+integer such as `100_000`.
+
+Limits of the estimate. It covers the normalization side only: the data-side
+amplitudes of floating components are evaluated on all events at once and are not
+bounded by the chunk size. The budget counts the program's temporary buffers and
+the resident blocks, not what other programs (the Hessian-vector product of the
+full NLL, data amplitudes, other processes sharing the GPU) allocate later; the
+`0.5` margin is a heuristic validated on the model above, not on the
+137-parameter analysis fits. `peak_bytes_in_use` also includes the preparation
+phase, so it is not a clean measure of the AD pass.
 
 ### Bounded-memory `hessian="jax"` for floating dynamics
 
@@ -521,7 +567,7 @@ python benchmarks/benchmark_cache_stages.py \
 
 For the realistic five-component B+ -> K+ pi+ pi- model, one CUDA benchmark with one million normalization points showed the original full-grid normalization graph spending about 15.2 s in XLA compilation while the actual one-million-point execution took only about 0.25 s. This identified compilation, not arithmetic throughput, as the dominant cold-start cost.
 
-With the former 100,000-point normalization chunks (removed since; the figures below are historical and the benchmark now measures the single-pass kernel instead), the same device measured approximately:
+With 100,000-point normalization chunks, the same device measured approximately:
 
 - 3.18 s to compile the normalization chunk kernel;
 - 0.034 s for the first 100,000-point chunk execution;
@@ -558,7 +604,7 @@ The JSON output reports:
 - whether the amplitude cache is compact;
 - minimum and maximum normalization-matrix diagonal values as a quick component-normalization sanity check.
 
-On the same representative CUDA setup with 100,000 data events and one million normalization points, the coefficient-only cache preparation improved from an initial baseline of about 28.95 s to about 7.24 s after compact-cache fusion, elimination of the redundant matrix reduction, model-level normalization reuse and (at that time) chunked normalization compilation; with chunking removed, expect the cold normalization compile to return toward the full-grid figure above. The steady-state value+gradient time remained about 4.8 ms, and the normalized matrix diagonal stayed at unity to floating-point precision.
+On the same representative CUDA setup with 100,000 data events and one million normalization points, the coefficient-only cache preparation improved from an initial baseline of about 28.95 s to about 7.24 s after compact-cache fusion, elimination of the redundant matrix reduction, model-level normalization reuse and chunked normalization compilation. The steady-state value+gradient time remained about 4.8 ms, and the normalized matrix diagonal stayed at unity to floating-point precision.
 
 The first compiled call should not be confused with steady-state fit throughput. GPU/XLA compilation can be significant, while subsequent iterations are much faster.
 

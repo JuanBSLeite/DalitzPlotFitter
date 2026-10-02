@@ -130,6 +130,7 @@ class FourBodyDecayModel:
         normalization_sample,
         normalize_components=True,
         symmetrize=True,
+        normalization_chunk_size="auto",
     ):
         if not isinstance(channel, NBodyDecayChannel) or channel.nbody != 4:
             raise ValueError(
@@ -146,6 +147,8 @@ class FourBodyDecayModel:
             raise ValueError("component names must be nonempty and unique")
         self.normalize_components = bool(normalize_components)
         self.symmetrize = bool(symmetrize)
+        self.normalization_chunk_size = normalization_chunk_size
+        self._auto_chunk_memo = {}
         self._validate_sample(normalization_sample, integration=True)
         self.normalization_sample = normalization_sample
         self._fixed_normalization_templates = {}
@@ -209,6 +212,7 @@ class FourBodyDecayModel:
             normalization_sample=self.normalization_sample,
             normalize_components=self.normalize_components,
             symmetrize=self.symmetrize,
+            normalization_chunk_size=self.normalization_chunk_size,
         )
 
     @cached_property
@@ -318,6 +322,8 @@ class FourBodyDecayModel:
             parameters=self.parameters,
             efficiency_normalization=efficiency_normalization,
             normalize_components=normalize,
+            normalization_chunk_size=self.normalization_chunk_size,
+            chunk_size_memo=self._auto_chunk_memo,
         )
         if reusable:
             self._fixed_normalization_templates[normalize] = (

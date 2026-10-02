@@ -135,6 +135,10 @@ _DECAY_MODEL_SCALAR_KWARGS = (
     "normalization_binning_factor",
 )
 
+# Optional keys: written by current versions, absent from specs saved while the
+# option did not exist. Dropped memory-tuning options of older files are ignored.
+_DECAY_MODEL_OPTIONAL_KWARGS = ("normalization_chunk_size",)
+
 
 def _encode_parameter(value: Parameter) -> dict:
     result = asdict(value)
@@ -277,7 +281,7 @@ def model_to_spec(model: DecayModel) -> dict:
         "components": [_encode(component) for component in model.components],
         "normalization_pair": list(model.normalization_pair),
     }
-    for name in _DECAY_MODEL_SCALAR_KWARGS:
+    for name in _DECAY_MODEL_SCALAR_KWARGS + _DECAY_MODEL_OPTIONAL_KWARGS:
         spec[name] = getattr(model, name)
     return spec
 
@@ -303,10 +307,11 @@ def model_from_spec(
         final_state=tuple(spec["channel"]["final_state"]),
     )
     components = [_decode(component, registry) for component in spec["components"]]
-    # Files written before the normalization-chunk/microbatch tuning options
-    # were removed still carry ``normalization_chunk_size`` and
-    # ``dynamics_microbatch_size``; they are simply ignored here.
+    # ``dynamics_microbatch_size`` (removed option) in old files is ignored.
     kwargs = {name: spec[name] for name in _DECAY_MODEL_SCALAR_KWARGS}
+    kwargs.update(
+        {name: spec[name] for name in _DECAY_MODEL_OPTIONAL_KWARGS if name in spec}
+    )
     kwargs["normalization_pair"] = tuple(spec["normalization_pair"])
     return DecayModel(channel, components, **kwargs)
 

@@ -133,6 +133,7 @@ def make_model(
     all_dynamic=False,
     normalize=True,
     charge=1,
+    chunk_size="auto",
 ):
     mass = Parameter.dynamics("rho.mass", 0.775, owner="rho")
     width = Parameter.dynamics("rho.width", 0.149, owner="rho")
@@ -187,6 +188,7 @@ def make_model(
         normalization_method="square-dalitz",
         normalization_resolution=9,
         normalization_pair=(0, 1),
+        normalization_chunk_size=chunk_size,
         normalize_components=normalize,
     )
 
@@ -198,10 +200,15 @@ def prepare_cache(
     normalize=True,
     efficiency=True,
     charge=1,
+    chunk_size="auto",
 ):
     """Return ``(model, cache, data, sample, acceptance)`` for a floating model."""
     model = make_model(
-        qmi=qmi, all_dynamic=all_dynamic, normalize=normalize, charge=charge
+        qmi=qmi,
+        all_dynamic=all_dynamic,
+        normalize=normalize,
+        charge=charge,
+        chunk_size=chunk_size,
     )
     data = model.generate_phase_space(19, seed=381)
     sample = model.normalization_sample
@@ -328,3 +335,245 @@ def test_floating_cp_joint_normalization_gradient_matches_finite_differences():
         ]
     )
     np.testing.assert_allclose(gradient, finite, rtol=1e-6, atol=1e-6)
+
+
+# -- chunked normalization ----------------------------------------------------
+
+CHUNK = 17  # far below the ~81-point test grid, so several blocks are scanned
+
+
+def _assert_matches_dense(model, cache, data, sample, acceptance, *, hessian_rtol):
+    for point in ([0.775, 0.149, 0.6, 0.8], [0.79, 0.16, 0.62, 0.75]):
+        x = jnp.asarray(point)
+        expected_fn = lambda x: dense_nll(model, data, sample, acceptance, x)  # noqa: E731
+        actual_fn = lambda x: nll(cache, x)  # noqa: E731
+        for expected, actual in zip(
+            jax.jit(jax.value_and_grad(expected_fn))(x),
+            jax.jit(jax.value_and_grad(actual_fn))(x),
+            strict=True,
+        ):
+            np.testing.assert_allclose(actual, expected, rtol=2e-11, atol=1e-10)
+        np.testing.assert_allclose(
+            jax.jit(jax.jacfwd(jax.grad(actual_fn)))(x),
+            jax.jit(jax.jacfwd(jax.grad(expected_fn)))(x),
+            rtol=hessian_rtol,
+            atol=1e-8,
+        )
+
+
+@pytest.mark.parametrize(
+    "all_dynamic,normalize,efficiency",
+    [
+        (False, True, True),
+        (False, False, False),
+        (True, True, True),
+    ],
+)
+def test_chunked_values_gradients_and_hessian_match_dense_reference(
+    all_dynamic, normalize, efficiency
+):
+    model, cache, data, sample, acceptance = prepare_cache(
+        all_dynamic=all_dynamic,
+        normalize=normalize,
+        efficiency=efficiency,
+        chunk_size=CHUNK,
+    )
+    assert cache.normalization_chunks is not None  # DecayModel threads the option
+    assert cache.normalization_chunk_size == CHUNK
+    _assert_matches_dense(
+        model, cache, data, sample, acceptance, hessian_rtol=2e-10
+    )
+
+
+@pytest.mark.parametrize("interpolation", ["linear", "cubic", "hermite", "natural"])
+def test_chunked_qmi_second_derivatives_match_dense_reference(interpolation):
+    # QMI's prepared order/starts/ends are valid only for their exact block, so
+    # each chunk must be prepared on its own rather than sliced afterwards.
+    model, cache, data, sample, acceptance = prepare_cache(
+        qmi=interpolation, chunk_size=CHUNK
+    )
+    assert cache.normalization_chunks is not None
+    _assert_matches_dense(
+        model, cache, data, sample, acceptance, hessian_rtol=2e-9
+    )
+    x = jnp.asarray([0.79, 0.16, 0.62, 0.75])
+    values = mapping(x)
+    kernel = cache._build_fraction_jacobian_kernel(tuple(values))
+    actual = kernel(values, cache._fraction_jacobian_arrays())
+    expected = jax.jacrev(lambda v: cache.fit_fractions(mapping(v)))(x)
+    np.testing.assert_allclose(actual, expected, rtol=2e-10, atol=1e-10)
+
+
+def test_chunked_cp_joint_gradient_matches_finite_differences():
+    plus = prepare_cache(charge=1, chunk_size=CHUNK)[1]
+    minus = prepare_cache(charge=-1, chunk_size=CHUNK)[1]
+    joint = CPJointNLL(plus, minus)
+    x = np.asarray([0.79, 0.16, 0.62, 0.75])
+    fn = lambda v: joint(mapping(v))  # noqa: E731
+    gradient = np.asarray(jax.jit(jax.grad(fn))(jnp.asarray(x)))
+    step = 1e-6
+    finite = np.asarray(
+        [
+            (float(fn(jnp.asarray(x + e))) - float(fn(jnp.asarray(x - e)))) / (2 * step)
+            for e in step * np.eye(len(x))
+        ]
+    )
+    np.testing.assert_allclose(gradient, finite, rtol=1e-6, atol=1e-6)
+
+
+def test_chunk_size_is_balanced_to_minimize_padding():
+    _, cache, _, sample, _ = prepare_cache(chunk_size=41)
+    n = sample.size
+    blocks = -(-n // 41)
+    balanced = -(-n // blocks)
+    assert cache.normalization_chunk_size == 41
+    assert cache.effective_normalization_chunk_size == balanced
+    assert cache.normalization_chunks[1].shape[:2] == (blocks, balanced)
+    assert cache.normalization_padding_points == blocks * balanced - n
+    assert cache.normalization_padding_points < blocks
+    assert cache.normalization_padding_fraction == pytest.approx(
+        cache.normalization_padding_points / n
+    )
+
+
+def test_explicit_chunk_size_must_be_positive_integer_or_auto():
+    from jaxpwa.amplitude import PreparedAmplitudeCache
+
+    for invalid in (0, -3, True, 1.5, "big"):
+        with pytest.raises(ValueError, match="normalization_chunk_size"):
+            PreparedAmplitudeCache.prepare(
+                (), data={}, normalization_data={}, normalization_weights=jnp.ones(3),
+                normalization_chunk_size=invalid,
+            )
+
+
+# -- memory-aware ("auto") chunk size -----------------------------------------
+
+
+@pytest.fixture
+def small_probe(monkeypatch):
+    """Let the 81-point test grid take the auto path with tiny probes."""
+    from jaxpwa.amplitude import memory
+
+    monkeypatch.setattr(memory, "SINGLE_BLOCK_POINTS", 10)
+    monkeypatch.setattr(memory, "PROBE_POINTS", 32)
+    monkeypatch.setattr(memory, "MIN_CHUNK_POINTS", 8)
+    return memory
+
+
+def test_device_memory_budget_uses_free_memory(monkeypatch):
+    from jaxpwa.amplitude import memory
+
+    class Device:
+        def __init__(self, stats):
+            self._stats = stats
+
+        def memory_stats(self):
+            return self._stats
+
+    monkeypatch.setattr(
+        memory.jax, "devices",
+        lambda: [Device({"bytes_limit": 1000, "bytes_in_use": 200})],
+    )
+    assert memory.device_memory_budget() == int(memory.MEMORY_FRACTION * 800)
+    for stats in (None, {}, {"bytes_in_use": 5}):
+        monkeypatch.setattr(memory.jax, "devices", lambda stats=stats: [Device(stats)])
+        assert memory.device_memory_budget() is None
+
+
+def test_chunk_points_from_budget_is_clipped():
+    from jaxpwa.amplitude import memory
+
+    assert memory.chunk_points_from_budget(10**7, 100.0, 1_000_000) == 100_000
+    assert memory.chunk_points_from_budget(10**12, 100.0, 5_000) == 5_000
+    assert memory.chunk_points_from_budget(0, 100.0, 5_000) == memory.MIN_CHUNK_POINTS
+    assert memory.chunk_points_from_budget(1, 0.0, 5_000) == 5_000
+
+
+def test_auto_chunk_size_follows_measured_bytes_per_point(small_probe, monkeypatch):
+    monkeypatch.setattr(small_probe, "device_memory_budget", lambda: 500)
+    monkeypatch.setattr(small_probe, "tree_nbytes", lambda tree: 0)
+    # Pretend the probe needs 50 B/point -> a 500-byte budget allows 10 points.
+    monkeypatch.setattr(
+        small_probe, "compiled_temp_bytes",
+        lambda function, *arguments: 50 * small_probe.PROBE_POINTS,
+    )
+    model, cache, data, sample, acceptance = prepare_cache(chunk_size="auto")
+    assert cache.normalization_chunks is not None
+    assert cache.normalization_chunk_size == 10
+    assert cache.effective_normalization_chunk_size <= 10
+    _assert_matches_dense(
+        model, cache, data, sample, acceptance, hessian_rtol=2e-10
+    )
+
+
+def test_auto_chunk_size_uses_one_block_when_memory_is_plentiful(
+    small_probe, monkeypatch
+):
+    monkeypatch.setattr(small_probe, "device_memory_budget", lambda: 10**12)
+    _, cache, _, _, _ = prepare_cache(chunk_size="auto")
+    assert cache.normalization_chunks is None  # whole grid in one block
+
+
+def test_auto_chunk_size_probes_real_program_and_stays_exact(small_probe, monkeypatch):
+    # No faked measurement: compile the real Hessian-vector-product probe and
+    # give it a budget (20 kB) far below what the 81-point grid needs (about
+    # 1 kB per point), so several blocks are forced.
+    monkeypatch.setattr(small_probe, "device_memory_budget", lambda: 20_000)
+    model, cache, data, sample, acceptance = prepare_cache(chunk_size="auto")
+    assert cache.normalization_chunks is not None
+    assert small_probe.MIN_CHUNK_POINTS <= cache.normalization_chunk_size < sample.size
+    _assert_matches_dense(
+        model, cache, data, sample, acceptance, hessian_rtol=2e-10
+    )
+
+
+def test_auto_chunk_size_falls_back_without_memory_statistics(small_probe, monkeypatch):
+    monkeypatch.setattr(small_probe, "device_memory_budget", lambda: None)
+    calls = []
+    monkeypatch.setattr(
+        small_probe, "compiled_temp_bytes",
+        lambda *args: calls.append(args) or 1,
+    )
+    _, cache, _, _, _ = prepare_cache(chunk_size="auto")
+    assert not calls  # no probe is compiled without a budget
+    assert cache.normalization_chunks is None  # 81 points < the 100000 default
+
+
+def test_auto_chunk_size_probe_runs_once_per_model(small_probe, monkeypatch):
+    monkeypatch.setattr(small_probe, "device_memory_budget", lambda: 500)
+    monkeypatch.setattr(small_probe, "tree_nbytes", lambda tree: 0)
+    calls = []
+
+    def fake(function, *arguments):
+        calls.append(1)
+        return 50 * small_probe.PROBE_POINTS
+
+    monkeypatch.setattr(small_probe, "compiled_temp_bytes", fake)
+    model = make_model(chunk_size="auto")
+    data = model.generate_phase_space(19, seed=381)
+    sample = model.normalization_sample
+    first = model.prepare_cache(data, sample)
+    second = model.prepare_cache(data, sample)
+    assert len(calls) == 1
+    assert first.normalization_chunk_size == second.normalization_chunk_size
+
+
+def test_auto_chunk_size_reserves_the_resident_prepared_blocks(small_probe, monkeypatch):
+    monkeypatch.setattr(small_probe, "device_memory_budget", lambda: 10_000)
+    monkeypatch.setattr(
+        small_probe, "compiled_temp_bytes",
+        lambda function, *arguments: 50 * small_probe.PROBE_POINTS,
+    )
+    # 10 000 B budget, 50 B/point temporaries: no residents -> 200 points (the
+    # whole 81-point grid); residents of 9 900 B leave 100 B -> 2 points, which
+    # the minimum raises to 8.
+    monkeypatch.setattr(small_probe, "tree_nbytes", lambda tree: 0)
+    assert prepare_cache(chunk_size="auto")[1].normalization_chunks is None
+    n = prepare_cache(chunk_size=10**6)[3].size
+    monkeypatch.setattr(
+        small_probe, "tree_nbytes",
+        lambda tree: int(9_900 * small_probe.PROBE_POINTS / n),
+    )
+    cache = prepare_cache(chunk_size="auto")[1]
+    assert cache.normalization_chunk_size == small_probe.MIN_CHUNK_POINTS

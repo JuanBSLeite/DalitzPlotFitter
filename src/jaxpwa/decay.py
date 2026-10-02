@@ -15,6 +15,7 @@ from jaxpwa.amplitude import (
     ConstantAmplitude,
     PreparedAmplitudeCache,
 )
+from jaxpwa.amplitude.cache import DEFAULT_NORMALIZATION_CHUNK_SIZE
 from jaxpwa.amplitude.components import coefficient_value
 from jaxpwa.dynamics import (
     CovariantAngular,
@@ -400,6 +401,18 @@ class DecayModel:
         Use sample.with_importance_weights(q) for a known proposal density q.
         A common weight scale changes the density measure; use consistent
         conventions across components and charge samples.
+    normalization_chunk_size:
+        ``"auto"`` (default) or a positive integer. With floating dynamics the
+        normalization is accumulated in blocks of at most this many points, so
+        the memory of the reverse-AD pass does not grow with the grid size.
+        ``"auto"`` measures that cost on the first normalization points
+        (compile-time memory of the Hessian-vector product) and picks the
+        largest block that fits half of the free device memory; without device
+        memory statistics (CPU) it uses 100000. An integer overrides this.
+        Coefficient-only fits use blocks of 100000 points, which only amortize
+        XLA compilation. The effective block width is balanced below the limit
+        to minimize padding. The chunk size changes the evaluation schedule,
+        not the normalization integral.
 
     Notes
     -----
@@ -419,6 +432,8 @@ class DecayModel:
     normalization_narrow_width: float
     normalization_narrow_window: float
     normalization_binning_factor: float
+    normalization_chunk_size: int | str
+    _auto_chunk_memo: dict[tuple, int]
     _normalization_sample: PhaseSpaceSample | None
     _amplitude_model: CoherentAmplitudeModel | None
     _compact_prepare_kernels: dict[tuple[bool, bool], object]
@@ -443,6 +458,7 @@ class DecayModel:
         normalization_narrow_window: float = 5.0,
         normalization_binning_factor: float = 20.0, 
         normalization_sample: PhaseSpaceSample | None = None,
+        normalization_chunk_size: int | str = "auto",
     ) -> None:
         if normalization_resolution < 2:
             raise ValueError("normalization_resolution must be at least 2")
@@ -477,6 +493,14 @@ class DecayModel:
             raise ValueError("normalization_narrow_window must be positive")
         if normalization_binning_factor <= 0.0:
             raise ValueError("normalization_binning_factor must be positive")
+        if normalization_chunk_size != "auto" and (
+            isinstance(normalization_chunk_size, bool)
+            or not isinstance(normalization_chunk_size, int)
+            or normalization_chunk_size < 1
+        ):
+            raise ValueError(
+                "normalization_chunk_size must be a positive integer or 'auto'"
+            )
         object.__setattr__(self, "channel", channel)
         object.__setattr__(self, "components", tuple(components))
         object.__setattr__(self, "normalize_components", bool(normalize_components))
@@ -495,6 +519,8 @@ class DecayModel:
         object.__setattr__(
             self, "normalization_binning_factor", float(normalization_binning_factor)
         )
+        object.__setattr__(self, "normalization_chunk_size", normalization_chunk_size)
+        object.__setattr__(self, "_auto_chunk_memo", {})
         object.__setattr__(self, "_normalization_sample", normalization_sample)
         object.__setattr__(self, "_amplitude_model", None)
         object.__setattr__(self, "_compact_prepare_kernels", {})
@@ -630,6 +656,7 @@ class DecayModel:
                 "adaptive": False,
                 "sample_size": sample.size,
                 "weighted": bool(jnp.any(jnp.asarray(sample.weights) != 1.0)),
+                "chunk_size": self.normalization_chunk_size,
             }
 
         narrow = self._adaptive_narrow_resonances()
@@ -746,6 +773,7 @@ class DecayModel:
             normalization_narrow_window=self.normalization_narrow_window,
             normalization_binning_factor=self.normalization_binning_factor,
             normalization_sample=normalization_sample,
+            normalization_chunk_size=self.normalization_chunk_size,
         )
 
     @property
@@ -947,6 +975,11 @@ class DecayModel:
                 self.amplitude_model.components,
                 normalize_components=normalize_components,
                 has_efficiency=has_efficiency,
+                normalization_chunk_size=(
+                    DEFAULT_NORMALIZATION_CHUNK_SIZE
+                    if self.normalization_chunk_size == "auto"
+                    else self.normalization_chunk_size
+                ),
             )
             self._compact_prepare_kernels[key] = kernel
         return kernel
@@ -1113,6 +1146,8 @@ class DecayModel:
             efficiency_normalization=efficiency_normalization,
             normalize_components=normalize,
             compact_prepare_kernel=compact_kernel,
+            normalization_chunk_size=self.normalization_chunk_size,
+            chunk_size_memo=self._auto_chunk_memo,
         )
         if can_reuse_normalization:
             self._fixed_normalization_templates[template_key] = (

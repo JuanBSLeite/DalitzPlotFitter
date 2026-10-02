@@ -33,7 +33,7 @@ class Shape:
         return 1 + slope * z + 1j * z * z
 
 
-def make_nll(times, tags, z=None, dynamic=False, **kwargs):
+def make_nll(times, tags, z=None, dynamic=False, chunk=None, **kwargs):
     if z is None:
         z = np.linspace(0.1, 0.9, len(times))
     zn, wn = quadrature(35, 0, 1)
@@ -48,6 +48,7 @@ def make_nll(times, tags, z=None, dynamic=False, **kwargs):
         normalization_weights=jnp.asarray(wn * len(wn)),
         parameters=params,
         normalize_components=False,
+        normalization_chunk_size=chunk or 100_000,
     )
     mixing = kwargs.pop("mixing", NeutralMesonMixing(0.0056, 0.003, 0.4103, 0.9, -0.1))
     return TimeDependentDalitzNLL(cache, 1, times, tags, mixing, **kwargs)
@@ -302,11 +303,13 @@ def test_dalitz_density_at_time_rejects_event_wise_wrong_tag():
         nll.dalitz_density_at_time(np.ones(3), np.ones(3), 0.5, {})
 
 
-def test_dynamic_group_cache_and_gradient():
+@pytest.mark.parametrize("chunk", [None, 11])
+def test_dynamic_group_cache_and_gradient(chunk):
     nll = make_nll(
         np.array([0.1, 0.5, 1.0]),
         np.array([1, -1, 1]),
         dynamic=True,
+        chunk=chunk,
         mixing=NeutralMesonMixing(Parameter("x", 0.02), Parameter("y", 0.03)),
     )
     values = {"slope": 0.9, "x": 0.02, "y": 0.03}

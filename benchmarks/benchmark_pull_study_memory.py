@@ -49,6 +49,11 @@ def main():
     parser.add_argument("--fit-ncall", type=int, default=0)
     parser.add_argument("--entry-stop", type=int, default=200_000)
     parser.add_argument("--normalization-resolution", type=int)
+    parser.add_argument(
+        "--normalization-chunk-size",
+        default="auto",
+        help="positive integer or 'auto' (memory-aware, the default)",
+    )
     parser.add_argument("--check-hessian", action="store_true")
     args = parser.parse_args()
     if args.fit_ncall < 0 or args.entry_stop < 1:
@@ -103,6 +108,10 @@ def main():
     if args.normalization_resolution is not None:
         scope["NORMALIZATION_CONFIG"]["normalization_resolution"] = (
             args.normalization_resolution
+        )
+    if args.normalization_chunk_size != "auto":
+        scope["NORMALIZATION_CONFIG"]["normalization_chunk_size"] = int(
+            args.normalization_chunk_size
         )
     execute(6, "PLUS_CHANNEL =")
     with uproot.open(scope["TOY_FILE"]) as root_file:

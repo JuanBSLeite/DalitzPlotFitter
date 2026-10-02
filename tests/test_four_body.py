@@ -309,6 +309,7 @@ def _model(sample, *, dynamic=False, normalize=True):
         components,
         normalization_sample=sample,
         normalize_components=normalize,
+        normalization_chunk_size=601,
     )
 
 
@@ -329,6 +330,7 @@ def test_four_body_model_with_fixed_parameters_is_uniform(sample):
     assert updated.normalization_sample is sample
     assert updated.normalize_components == model.normalize_components
     assert updated.symmetrize == model.symmetrize
+    assert updated.normalization_chunk_size == model.normalization_chunk_size
 
     with pytest.raises(ValueError, match="unknown parameter"):
         model.with_fixed_parameters("does.not.exist")
